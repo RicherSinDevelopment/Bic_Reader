@@ -1,5 +1,15 @@
+import { Lato_400Regular, Lato_700Bold, useFonts } from "@expo-google-fonts/lato";
 import { Stack } from "expo-router";
 import './global.css';
 export default function RootLayout() {
-  return <Stack />;
+  const [fontsLoaded] = useFonts({
+    Lato_400Regular,
+    Lato_700Bold,
+  });
+
+  if (!fontsLoaded) {
+    return null;
+  }
+  
+  return <Stack screenOptions={{ headerShown: false }} />;
 }

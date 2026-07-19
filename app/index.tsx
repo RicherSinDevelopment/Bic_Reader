@@ -1,20 +1,12 @@
-import { Text, View } from "react-native";
- 
+import { Link } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
 export default function Index() {
   return (
-    <View className="flex-1 items-center justify-center bg-white">
-      <Text className="text-xl font-bold text-green-400">
-        Welcome to Nativewind!
-      </Text>
-       <Text className="text-l font-bold text-green-400">
-        Welcome to Nativewind!
-      </Text>
-       <Text className="font-lato-sans text-xl text-green-400">
-        Regular Lato (font-sans)
-      </Text>
-      <Text className="font-lato-bold text-xl text-green-400">
-        Bold Lato (font-lato-bold)
-      </Text>
-    </View>
+    <SafeAreaView className="flex-1 bg-gray-25">
+     <Link href="/homescreen" className="mt-10 rounded bg-purple-600 text-white p-4"> Go to homescreen </Link> 
+     <Link href="/(auth)/sign-in" className="mt-10 rounded bg-purple-600 text-white p-4"> signin </Link> 
+     <Link href="/(auth)/sing-up" className="mt-10 rounded bg-purple-600 text-white p-4"> singup </Link> 
+
+    </SafeAreaView>
   );
 }

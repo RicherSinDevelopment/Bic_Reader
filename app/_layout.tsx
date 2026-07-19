@@ -1,5 +1,6 @@
 import { Lato_400Regular, Lato_700Bold, useFonts } from "@expo-google-fonts/lato";
 import { Stack } from "expo-router";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import './global.css';
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -11,5 +12,10 @@ export default function RootLayout() {
     return null;
   }
   
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <Stack screenOptions={{ headerShown: false }} />;
+    </GestureHandlerRootView>
+  );
+   
 }

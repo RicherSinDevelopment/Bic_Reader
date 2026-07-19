@@ -1,0 +1,8 @@
+git status          # See what's changed
+git add .           # Stage changes
+git commit -m "..." # Save a snapshot
+git push            # Upload to GitHub
+git pull            # Download latest changes
+git branch          # List branches
+git checkout -b feature/name  # Create a new branch
+git checkout main   # Switch back to main

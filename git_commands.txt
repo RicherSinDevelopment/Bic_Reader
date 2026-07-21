@@ -6,3 +6,13 @@ git pull            # Download latest changes
 git branch          # List branches
 git checkout -b feature/name  # Create a new branch
 git checkout main   # Switch back to main
+git merge feature/settings #merge
+git branch -d feature/settings #delete branch 
+git restore App.tsx # restore a file
+git restore . #restore everything
+
+when you are done you can do this 
+git switch main
+git pull
+git merge feature/dark-mode
+git push

@@ -6,6 +6,7 @@ export default function Index() {
      <Link href="/homescreen" className="mt-10 rounded bg-purple-600 text-white p-4"> Go to homescreen </Link> 
      <Link href="/(auth)/sign-in" className="mt-10 rounded bg-purple-600 text-white p-4"> signin </Link> 
      <Link href="/(auth)/sing-up" className="mt-10 rounded bg-purple-600 text-white p-4"> singup </Link> 
+     <Link href="/tabs_test" className="mt-10 rounded bg-purple-600 text-white p-4"> tabs_test </Link> 
 
     </SafeAreaView>
   );

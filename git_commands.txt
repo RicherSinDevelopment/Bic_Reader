@@ -1,7 +1,7 @@
 git status          # See what's changed
 git add .           # Stage changes
 git commit -m "..." # Save a snapshot
-git push            # Upload to GitHub
+git push            # Upload to GitHub but also if i am using another branch then the first time i push i have to write -u origin and then the name of the branch 
 git pull            # Download latest changes
 git branch          # List branches
 git checkout -b feature/name  # Create a new branch

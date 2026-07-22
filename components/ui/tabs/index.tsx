@@ -1,21 +1,21 @@
 'use client';
-import React, { useEffect, useRef, useMemo } from 'react';
-import { createTabs, TabsContext } from '@gluestack-ui/core/tabs/creator';
 import { UIIcon } from '@gluestack-ui/core/icon/creator';
+import { createTabs, TabsContext } from '@gluestack-ui/core/tabs/creator';
 import {
   tva,
-  withStyleContext,
   useStyleContext,
+  withStyleContext,
   type VariantProps,
 } from '@gluestack-ui/utils/nativewind-utils';
 import { styled } from 'nativewind';
-import { Pressable, Text, View, FlatList, Platform } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { FlatList, Platform, Pressable, Text, View } from 'react-native';
 import Animated, {
+  runOnJS,
+  useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
-  useAnimatedScrollHandler,
-  runOnJS,
 } from 'react-native-reanimated';
 import { TabsAnimatedIndicator } from './TabsAnimatedIndicator';
 
@@ -251,32 +251,42 @@ const TabsList = React.forwardRef<
         {indicator}
 
         <AnimatedFlatList
-          ref={flatListRef}
-          horizontal
-          data={triggers}
-          renderItem={({ item }) => item as any}
-          keyExtractor={(item: any, index) =>
-            item?.props?.value ?? `tab-${index}`
-          }
-          showsHorizontalScrollIndicator={false}
-          scrollEventThrottle={16}
-          style={{ zIndex: 100 }}
-          onScroll={
-            Platform.OS === 'web' ? handleWebScroll : nativeScrollHandler
-          }
-          onScrollToIndexFailed={(info) => {
-            setTimeout(() => {
-              try {
-                flatListRef.current?.scrollToIndex({
-                  index: info.index,
-                  animated: false,
-                  viewPosition: 0.5,
-                });
-              } catch {}
-            }, 500);
-          }}
-          {...props}
-        />
+  ref={flatListRef}
+  horizontal
+  data={triggers}
+  renderItem={({ item }) => item as any}
+  keyExtractor={(item: any, index) =>
+    item?.props?.value ?? `tab-${index}`
+  }
+  showsHorizontalScrollIndicator={false}
+  scrollEventThrottle={16}
+  style={{
+    alignSelf: 'center',
+    flexGrow: 0,
+    zIndex: 100,
+  }}
+  contentContainerStyle={{
+    alignItems: 'center',
+    justifyContent: 'center',
+  }}
+  onScroll={
+    Platform.OS === 'web'
+      ? handleWebScroll
+      : nativeScrollHandler
+  }
+  onScrollToIndexFailed={(info) => {
+    setTimeout(() => {
+      try {
+        flatListRef.current?.scrollToIndex({
+          index: info.index,
+          animated: false,
+          viewPosition: 0.5,
+        });
+      } catch {}
+    }, 500);
+  }}
+  {...props}
+/>
       </View>
     );
   }
@@ -464,12 +474,8 @@ TabsTriggerIcon.displayName = 'TabsTriggerIcon';
 TabsIndicator.displayName = 'TabsIndicator'
 
 export {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-  TabsContentWrapper,
-  TabsTriggerText,
-  TabsTriggerIcon,
-  TabsIndicator,
+  Tabs, TabsContent,
+  TabsContentWrapper, TabsIndicator, TabsList,
+  TabsTrigger, TabsTriggerIcon, TabsTriggerText
 };
+

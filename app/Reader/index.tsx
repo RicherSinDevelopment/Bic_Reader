@@ -19,9 +19,9 @@ export default function ReaderScreen() {
       <Tabs
         defaultValue="reader"
         variant="filled"
-        className="flex-1"
+        className="flex-1 w-full"
       >
-
+        <Box className="w-full items-center">
         <TabsList>
 
           <TabsTrigger value="reader">
@@ -40,6 +40,7 @@ export default function ReaderScreen() {
           <TabsIndicator />
 
         </TabsList>
+        </Box>
 
         <TabsContentWrapper className="flex-1">
 

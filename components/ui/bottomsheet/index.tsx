@@ -1,7 +1,7 @@
 'use client';
+import { Overlay } from '@gluestack-ui/core/overlay/creator';
 import { FocusScope } from '@gluestack-ui/utils/aria';
 import { tva } from '@gluestack-ui/utils/nativewind-utils';
-import { Overlay } from '@gluestack-ui/core/overlay/creator';
 import GorhomBottomSheet, {
   BottomSheetBackdrop as GorhomBottomSheetBackdrop,
   BottomSheetFlatList as GorhomBottomSheetFlatList,
@@ -25,8 +25,7 @@ import React, {
   useState,
 } from 'react';
 import type { PressableProps, TextInputProps, TextProps } from 'react-native';
-import { Keyboard, Platform, Text, View } from 'react-native';
-import { Pressable as RNPressable } from 'react-native';
+import { Keyboard, Platform, Pressable as RNPressable, Text, View } from 'react-native';
 import { Pressable as GGHPressable } from 'react-native-gesture-handler';
 
 const bottomSheetBackdropStyle = tva({
@@ -101,19 +100,25 @@ export const BottomSheet = forwardRef<BottomSheetRef, IBottomSheetRootProps>(
     const [currentIndex, setCurrentIndex] = useState(-1);
 
     const handleOpen = useCallback(
-      (index?: number) => {
-        const targetIndex = index ?? defaultSnapIndex;
-        setCurrentIndex(targetIndex);
-        setIsVisible(true);
-        onOpen?.();
-      },
-      [defaultSnapIndex, onOpen]
-    );
+  (index?: number) => {
+    const targetIndex = index ?? defaultSnapIndex;
 
-    const handleClose = useCallback(() => {
-      Keyboard.dismiss();
-      setCurrentIndex(-1);
-    }, []);
+    setIsVisible(true);
+    setCurrentIndex(targetIndex);
+
+    requestAnimationFrame(() => {
+      bottomSheetRef.current?.snapToIndex(targetIndex);
+    });
+
+    onOpen?.();
+  },
+  [defaultSnapIndex, onOpen]
+);
+
+   const handleClose = useCallback(() => {
+  Keyboard.dismiss();
+  bottomSheetRef.current?.close();
+  }, []);
 
     const handleSheetChanges = useCallback(
       (index: number) => {
@@ -228,6 +233,7 @@ export const BottomSheetPortal = ({
         ref={bottomSheetRef}
         snapPoints={memoizedSnapPoints}
         index={validIndex}
+        handleComponent={() => null}
         enableDynamicSizing={enableDynamicSizing}
         onChange={(idx) => {
           handleSheetChanges(idx);

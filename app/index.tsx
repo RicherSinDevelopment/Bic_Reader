@@ -32,6 +32,12 @@ export default function Index() {
       >
         <Text className="text-white">Open Reader</Text>
       </Pressable>
+      <Pressable
+        onPress={() => router.push("/HomePage")}
+        className="mt-4 rounded-xl bg-purple-600 px-4 py-3"
+      >
+        <Text className="text-white">Homepage</Text>
+      </Pressable>
      
     </View>
   );

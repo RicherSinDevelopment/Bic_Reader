@@ -1,0 +1,8 @@
+1. work on the rust side of things like pdfium
+2. work on the homepage ui like design the bottom button and the left sort by button and the right select view options TabsContent
+3. work on the pdf card its self 
+4. work on the naviagtion bar itself in the reader mode option also work 
+5. setup webview and make sure it displays text that can be changed through the navbar
+6. setup sqllite and zustland 
+7. setup the options for the user to highlight and select and translate and other things
+8. setup on boarding and other things 

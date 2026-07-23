@@ -1,3 +1,4 @@
+
 import ReaderToolbar, {
   ReaderBottomNavItem,
 } from "@/components/Readertoolbar";
@@ -32,22 +33,23 @@ const ReaderView = () => {
     useState<ReaderBottomNavItem>("font");
 
   // Bottom Sheet reference
-  const bottomSheetRef = useRef<BottomSheetRef>(null);
-
-  // Track Bottom Sheet state
-  const [bottomSheetIndex, setBottomSheetIndex] =
-    useState(-1);
+  const bottomSheetRef =
+    useRef<BottomSheetRef>(null);
 
   // Toolbar animation
-  const toolbarTranslateY = useRef(
-    new Animated.Value(0)
-  ).current;
+  const toolbarTranslateY =
+    useRef(new Animated.Value(0)).current;
 
   // Previous scroll position
   const lastScrollY = useRef(0);
 
   // Track toolbar visibility
-  const toolbarHidden = useRef(false);
+  const toolbarHidden =
+    useRef(false);
+
+  // -----------------------------
+  // SCROLL / TOOLBAR ANIMATION
+  // -----------------------------
 
   const handleScroll = (
     event: NativeSyntheticEvent<NativeScrollEvent>
@@ -56,7 +58,8 @@ const ReaderView = () => {
       event.nativeEvent.contentOffset.y;
 
     const difference =
-      currentScrollY - lastScrollY.current;
+      currentScrollY -
+      lastScrollY.current;
 
     // Ignore tiny movements
     if (Math.abs(difference) < 5) {
@@ -102,24 +105,25 @@ const ReaderView = () => {
       currentScrollY;
   };
 
-  // Toolbar button pressed
+  // -----------------------------
+  // TOOLBAR BUTTON
+  // -----------------------------
+
   const handleToolbarPress = (
     item: ReaderBottomNavItem
   ) => {
-    // Change which content is displayed
+    // First change the active icon
     setActiveItem(item);
 
-    // If Bottom Sheet is already open,
-    // just change the content.
-    if (bottomSheetIndex >= 0) {
-      return;
-    }
-
-    // Otherwise open the Bottom Sheet
-    requestAnimationFrame(() => {
-      bottomSheetRef.current?.open(0);
-    });
+    // Then open the Bottom Sheet
+    // If it is already open, this simply
+    // keeps it open and changes the content.
+    bottomSheetRef.current?.open(0);
   };
+
+  // -----------------------------
+  // BOTTOM SHEET CONTENT
+  // -----------------------------
 
   const renderBottomSheetContent = () => {
     switch (activeItem) {
@@ -147,11 +151,13 @@ const ReaderView = () => {
     <BottomSheet
       ref={bottomSheetRef}
       defaultSnapIndex={0}
-      onChange={setBottomSheetIndex}
     >
       <View className="flex-1">
 
-        {/* Book Content */}
+        {/* ========================= */}
+        {/* BOOK CONTENT */}
+        {/* ========================= */}
+
         <ScrollView
           className="flex-1 rounded-xl bg-slate-50"
           showsVerticalScrollIndicator={true}
@@ -165,6 +171,7 @@ const ReaderView = () => {
           }}
         >
           <Text
+            selectable={true}
             style={{
               fontFamily: "Arial",
               fontSize: 18,
@@ -187,28 +194,35 @@ const ReaderView = () => {
             Excepteur sint occaecat cupidatat non proident, sunt in
             culpa qui officia deserunt mollit anim id est laborum.
 
+            {"\n\n"}
 
             Lorem ipsum dolor sit amet, consectetur adipiscing elit.
             Integer nec odio. Praesent libero. Sed cursus ante dapibus
             diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet.
 
-            Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-            Sed do eiusmod tempor incididunt ut labore et dolore magna
-             Excepteur sint occaecat cupidatat non proident, sunt in
-            culpa qui officia deserunt mollit anim id est laborum.
-
-
-            Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-            Integer nec odio. Praesent libero. Sed cursus ante dapibus
-            diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet.
+            {"\n\n"}
 
             Lorem ipsum dolor sit amet, consectetur adipiscing elit.
             Sed do eiusmod tempor incididunt ut labore et dolore magna
             aliqua.
+
+            {"\n\n"}
+
+            Excepteur sint occaecat cupidatat non proident, sunt in
+            culpa qui officia deserunt mollit anim id est laborum.
+
+            {"\n\n"}
+
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+            Integer nec odio. Praesent libero. Sed cursus ante dapibus
+            diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet.
           </Text>
         </ScrollView>
 
-        {/* Animated Reader Toolbar */}
+        {/* ========================= */}
+        {/* ANIMATED READER TOOLBAR */}
+        {/* ========================= */}
+
         <Animated.View
           style={{
             transform: [
@@ -227,7 +241,10 @@ const ReaderView = () => {
           />
         </Animated.View>
 
-        {/* Bottom Sheet */}
+        {/* ========================= */}
+        {/* BOTTOM SHEET */}
+        {/* ========================= */}
+
         <BottomSheetPortal
           snapPoints={[
             "40%",
@@ -250,3 +267,4 @@ const ReaderView = () => {
 };
 
 export default ReaderView;
+

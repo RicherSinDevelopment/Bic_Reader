@@ -40,7 +40,6 @@ export default function ReaderToolbar({
   activeItem,
   onSelectItem,
 }: Props) {
-
   const primaryColor = "#0891b2";
   const greyColor = "#737373";
 
@@ -48,7 +47,6 @@ export default function ReaderToolbar({
     item: ReaderBottomNavItem,
     isFocused: boolean
   ) => {
-
     const color = isFocused
       ? primaryColor
       : greyColor;
@@ -60,7 +58,6 @@ export default function ReaderToolbar({
     };
 
     switch (item) {
-
       case "font":
         return <CaseSensitive {...iconProps} />;
 
@@ -83,44 +80,37 @@ export default function ReaderToolbar({
 
   return (
     <View style={styles.tabbar}>
-
       {toolbarItems.map((item) => {
-
-        const isFocused =
-          activeItem === item.id;
+        const isFocused = activeItem === item.id;
 
         return (
           <Pressable
             key={item.id}
-            onPress={() => {
-              onSelectItem(item.id);
+            onPress={() => onSelectItem(item.id)}
+            style={({ pressed }) => [
+              styles.tabbarItem,
+              pressed && styles.pressedItem,
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{
+              selected: isFocused,
             }}
-            style={styles.tabbarItem}
           >
-
             {/* Active indicator */}
             {isFocused && (
-              <View
-                style={styles.activeIndicator}
-              />
+              <View style={styles.activeIndicator} />
             )}
 
             {/* Icon */}
-            {renderIcon(
-              item.id,
-              isFocused
-            )}
-
+            {renderIcon(item.id, isFocused)}
           </Pressable>
         );
       })}
-
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-
   tabbar: {
     position: "absolute",
 
@@ -129,7 +119,6 @@ const styles = StyleSheet.create({
     right: 20,
 
     flexDirection: "row",
-
     justifyContent: "space-between",
     alignItems: "center",
 
@@ -141,14 +130,11 @@ const styles = StyleSheet.create({
     borderRadius: 25,
 
     shadowColor: "black",
-
     shadowOffset: {
       width: 0,
       height: 10,
     },
-
     shadowRadius: 10,
-
     shadowOpacity: 0.1,
 
     elevation: 8,
@@ -162,7 +148,12 @@ const styles = StyleSheet.create({
 
     position: "relative",
 
-    paddingVertical: 5,
+    paddingVertical: 8,
+    minHeight: 36,
+  },
+
+  pressedItem: {
+    opacity: 0.7,
   },
 
   activeIndicator: {
@@ -177,5 +168,5 @@ const styles = StyleSheet.create({
 
     backgroundColor: "#0891b2",
   },
-
 });
+

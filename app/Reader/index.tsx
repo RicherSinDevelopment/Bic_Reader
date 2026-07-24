@@ -1,5 +1,7 @@
+import BackButton from "@/components/Backbutton";
 import OriginalPDF from "@/components/OriginalPDF";
 import ReaderView from "@/components/ReaderView";
+import ThreeLinesButton from "@/components/threelinesbutton";
 import { Box } from "@/components/ui/box";
 import {
   Tabs,
@@ -8,18 +10,19 @@ import {
   TabsTrigger,
   TabsTriggerText,
 } from "@/components/ui/tabs";
+import * as Haptics from 'expo-haptics';
 import React, { useRef, useState } from "react";
 import { View } from "react-native";
 import PagerView from "react-native-pager-view";
-
 export default function ReaderScreen() {
   const pagerRef = useRef<PagerView>(null);
-
+  
   const [activeTab, setActiveTab] = useState("reader");
 
   // Reader = page 0
   // Original = page 1
   const handleTabChange = (value: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setActiveTab(value);
 
     if (value === "reader") {
@@ -43,7 +46,6 @@ export default function ReaderScreen() {
 
   return (
     <Box className="flex-1 pt-12">
-
       {/* Tabs */}
       <Tabs
         value={activeTab}
@@ -51,10 +53,16 @@ export default function ReaderScreen() {
         variant="filled"
         className="w-full"
       >
-
+    
         {/* Center the tab buttons */}
-        <Box className="w-full items-center">
+        <Box className="relative w-full items-center">
 
+          <Box className="absolute left-2 top-1/2 -translate-y-1/2">
+          <BackButton />
+          </Box>
+          <Box className="absolute right-2 top-1/2 -translate-y-1/2">
+          <ThreeLinesButton></ThreeLinesButton>
+          </Box>
           <TabsList className="p-2 rounded-xl">
 
             <TabsTrigger value="reader" className="px-6 py-3">

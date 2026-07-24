@@ -1,3 +1,4 @@
+import ThreeLinesButton from '@/components/threelinesbutton';
 import {
   BottomSheet,
   BottomSheetBackdrop,
@@ -32,15 +33,17 @@ import {
   TabsTriggerText
 } from '@/components/ui/tabs';
 import { Text } from '@/components/ui/text';
+import * as Haptics from 'expo-haptics';
+import { useRouter } from "expo-router";
 import React from 'react';
 import { View } from 'react-native';
-
+const router = useRouter();
 const homescreen = () => {
   return (
     <View className="flex-1 bg-gray-300 px-6 py-8">
       <Text className="mb-4 text-lg text-gray-900">homescreen</Text>
 
-      <Button variant="destructive" size="default">
+      <Button variant="destructive" size="default" onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}>
         <ButtonText>Button</ButtonText>
       </Button>
 
@@ -110,7 +113,7 @@ const homescreen = () => {
         </TabsContent>
       </TabsContentWrapper>
     </Tabs>
-
+    <ThreeLinesButton/>
     </View>
   );
 };

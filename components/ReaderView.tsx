@@ -17,14 +17,14 @@ import {
   type BottomSheetRef,
 } from "@/components/ui/bottomsheet";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
   View,
 } from "react-native";
 
+import { useReaderSettingsStore } from '@/stores/readerSettingsStore';
 import { WebView } from "react-native-webview";
-
 const ReaderView = () => {
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
@@ -34,9 +34,20 @@ const ReaderView = () => {
     useRef<BottomSheetRef>(null);
 
   // WebView reference
-  const webViewRef =
-    useRef<WebView>(null);
+  const webViewRef = useRef<WebView>(null);
 
+  const fontSize = useReaderSettingsStore(
+  (state) => state.fontSize
+  );
+
+  useEffect(() => {
+  webViewRef.current?.postMessage(
+    JSON.stringify({
+      type: 'setFontSize',
+      size: fontSize,
+    })
+  );
+}, [fontSize]);
   // Toolbar animation
   const toolbarTranslateY =
     useRef(new Animated.Value(0)).current;
@@ -207,7 +218,27 @@ const ReaderView = () => {
           Excepteur sint occaecat cupidatat non proident, sunt in
           culpa qui officia deserunt mollit anim id est laborum.
         </p>
+        <script>
+  function setFontSize(size) {
+    document.body.style.fontSize = size + 'px';
+  }
 
+  function handleMessage(event) {
+    try {
+      const message = JSON.parse(event.data);
+
+      if (message.type === 'setFontSize') {
+        setFontSize(message.size);
+      }
+    } catch (error) {
+      console.error('Error processing message:', error);
+    }
+  }
+
+  document.addEventListener('message', handleMessage);
+
+  window.addEventListener('message', handleMessage);
+</script>
       </body>
 
     </html>

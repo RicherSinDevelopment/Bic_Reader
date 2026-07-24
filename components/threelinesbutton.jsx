@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button';
-import { ArrowLeftIcon, Icon } from '@/components/ui/icon';
+import { Icon, MenuIcon } from '@/components/ui/icon';
 import { useRouter } from "expo-router";
-export default function BackButton() {
+export default function ThreeLinesButton() {
   const router = useRouter();
   return (
     <Button
@@ -10,7 +10,7 @@ export default function BackButton() {
       className="h-12 w-12 rounded-xl p-3"
       onPress={() => router.back()}
     >
-      <Icon as={ArrowLeftIcon} size="md" />
+      <Icon as={MenuIcon} size="md" />
     </Button>
   );
 }

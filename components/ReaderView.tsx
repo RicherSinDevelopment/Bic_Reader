@@ -7,7 +7,6 @@ import BackgroundSettings from "@/components/readernavbar/BackgroundSettings";
 import FontSettings from "@/components/readernavbar/FontSettings";
 import Settings from "@/components/readernavbar/Settings";
 import TTS from "@/components/readernavbar/TTS";
-
 import {
   BottomSheet,
   BottomSheetBackdrop,
@@ -16,6 +15,7 @@ import {
   BottomSheetPortal,
   type BottomSheetRef,
 } from "@/components/ui/bottomsheet";
+import * as ScreenOrientation from "expo-screen-orientation";
 
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -29,6 +29,8 @@ const ReaderView = () => {
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
 
+  const [isLandscape, setIsLandscape] =
+  useState(false);
   // Bottom Sheet reference
   const bottomSheetRef =
     useRef<BottomSheetRef>(null);
@@ -39,15 +41,34 @@ const ReaderView = () => {
   const fontSize = useReaderSettingsStore(
   (state) => state.fontSize
   );
+  const lineHeight = useReaderSettingsStore(
+  (state) => state.lineHeight
+  );
+  const letterSpacing = useReaderSettingsStore(
+  (state) => state.letterSpacing
+);
+
+const wordSpacing = useReaderSettingsStore(
+  (state) => state.wordSpacing
+);
+
+const bold = useReaderSettingsStore(
+  (state) => state.bold
+);
+
 
   useEffect(() => {
   webViewRef.current?.postMessage(
     JSON.stringify({
-      type: 'setFontSize',
-      size: fontSize,
+      type: 'readerSettings',
+      fontSize: fontSize,
+      lineHeight: lineHeight,
+      letterSpacing: letterSpacing,
+      wordSpacing: wordSpacing,
+      bold: bold,
     })
   );
-}, [fontSize]);
+}, [fontSize, lineHeight, letterSpacing, wordSpacing, bold]);
   // Toolbar animation
   const toolbarTranslateY =
     useRef(new Animated.Value(0)).current;
@@ -64,6 +85,54 @@ const ReaderView = () => {
   const toolbarAnimation =
     useRef<Animated.CompositeAnimation | null>(null);
 
+    useEffect(() => {
+  // Allow the app to rotate freely
+  ScreenOrientation.unlockAsync();
+
+  const checkOrientation = async () => {
+    const orientation =
+      await ScreenOrientation.getOrientationAsync();
+
+    const landscape =
+      orientation ===
+        ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+      orientation ===
+        ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
+
+    setIsLandscape(landscape);
+  };
+
+  // Check orientation when the component first loads
+  checkOrientation();
+
+  // Listen for orientation changes
+  const subscription =
+    ScreenOrientation.addOrientationChangeListener(
+      (event) => {
+        const orientation =
+          event.orientationInfo.orientation;
+
+        const landscape =
+          orientation ===
+            ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+          orientation ===
+            ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
+
+        setIsLandscape(landscape);
+
+        // Close the bottom sheet when entering landscape
+        if (landscape) {
+          bottomSheetRef.current?.close();
+        }
+      }
+    );
+
+  return () => {
+    ScreenOrientation.removeOrientationChangeListener(
+      subscription
+    );
+  };
+}, []);
   // --------------------------------
   // HTML READER
   // --------------------------------
@@ -219,17 +288,28 @@ const ReaderView = () => {
           culpa qui officia deserunt mollit anim id est laborum.
         </p>
         <script>
-  function setFontSize(size) {
-    document.body.style.fontSize = size + 'px';
-  }
-
   function handleMessage(event) {
     try {
       const message = JSON.parse(event.data);
 
-      if (message.type === 'setFontSize') {
-        setFontSize(message.size);
+      if (message.type === 'readerSettings') {
+
+        document.body.style.fontSize =
+          message.fontSize + 'px';
+
+        document.body.style.lineHeight =
+          message.lineHeight;
+
+        document.body.style.letterSpacing =
+          message.letterSpacing + 'px';
+
+        document.body.style.wordSpacing =
+          message.wordSpacing + 'px';
+
+        document.body.style.fontWeight =
+          message.bold ? 'bold' : 'normal';
       }
+
     } catch (error) {
       console.error('Error processing message:', error);
     }
@@ -612,28 +692,23 @@ const ReaderView = () => {
         {/* ANIMATED READER TOOLBAR */}
         {/* ========================= */}
 
-        <Animated.View
-          style={{
-            transform: [
-              {
-                translateY:
-                  toolbarTranslateY,
-              },
-            ],
-          }}
-        >
-
-          <ReaderToolbar
-            activeItem={
-              activeItem
-            }
-            onSelectItem={
-              handleToolbarPress
-            }
-          />
-
-        </Animated.View>
-
+        {!isLandscape && (
+  <Animated.View
+    style={{
+      transform: [
+        {
+          translateY:
+            toolbarTranslateY,
+        },
+      ],
+    }}
+  >
+    <ReaderToolbar
+      activeItem={activeItem}
+      onSelectItem={handleToolbarPress}
+    />
+  </Animated.View>
+)}
         {/* ========================= */}
         {/* BOTTOM SHEET */}
         {/* ========================= */}

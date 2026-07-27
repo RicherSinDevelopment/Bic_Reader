@@ -38,6 +38,13 @@ export default function Index() {
       >
         <Text className="text-white">Homepage</Text>
       </Pressable>
+
+      <Pressable
+        onPress={() => router.push("/pdfcard")}
+        className="mt-4 rounded-xl bg-purple-600 px-4 py-3"
+      >
+        <Text className="text-white">PdfCard</Text>
+      </Pressable>
      
     </View>
   );

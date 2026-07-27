@@ -7,6 +7,9 @@ type ReaderSettingsState = {
   wordSpacing: number;
   bold: boolean;
 
+  backgroundColor: string;
+  textColor: string;
+
   increaseFontSize: () => void;
   decreaseFontSize: () => void;
 
@@ -20,57 +23,95 @@ type ReaderSettingsState = {
   decreaseWordSpacing: () => void;
 
   toggleBold: () => void;
+
+  setBackgroundColor: (color: string) => void;
+  setTextColor: (color: string) => void;
 };
 
-export const useReaderSettingsStore = create<ReaderSettingsState>((set) => ({
-  fontSize: 18,
-  lineHeight: 1.72,
-  letterSpacing: 0,
-  wordSpacing: 0,
-  bold: false,
+export const useReaderSettingsStore =
+  create<ReaderSettingsState>((set) => ({
+    fontSize: 18,
+    lineHeight: 1.72,
+    letterSpacing: 0,
+    wordSpacing: 0,
+    bold: false,
 
-  increaseFontSize: () =>
-    set((state) => ({
-      fontSize: Math.min(state.fontSize + 2, 40),
-    })),
+    // Default colors
+    backgroundColor: '#f8fafc',
+    textColor: '#1e293b',
 
-  decreaseFontSize: () =>
-    set((state) => ({
-      fontSize: Math.max(state.fontSize - 2, 10),
-    })),
+    increaseFontSize: () =>
+      set((state) => ({
+        fontSize: Math.min(state.fontSize + 2, 40),
+      })),
 
-  increaseLineHeight: () =>
-    set((state) => ({
-      lineHeight: Math.min(state.lineHeight + 0.1, 3),
-    })),
+    decreaseFontSize: () =>
+      set((state) => ({
+        fontSize: Math.max(state.fontSize - 2, 10),
+      })),
 
-  decreaseLineHeight: () =>
-    set((state) => ({
-      lineHeight: Math.max(state.lineHeight - 0.1, 1),
-    })),
+    increaseLineHeight: () =>
+      set((state) => ({
+        lineHeight: Math.min(
+          state.lineHeight + 0.1,
+          3
+        ),
+      })),
 
-  increaseLetterSpacing: () =>
-    set((state) => ({
-      letterSpacing: Math.min(state.letterSpacing + 0.5, 5),
-    })),
+    decreaseLineHeight: () =>
+      set((state) => ({
+        lineHeight: Math.max(
+          state.lineHeight - 0.1,
+          1
+        ),
+      })),
 
-  decreaseLetterSpacing: () =>
-    set((state) => ({
-      letterSpacing: Math.max(state.letterSpacing - 0.5, 0),
-    })),
+    increaseLetterSpacing: () =>
+      set((state) => ({
+        letterSpacing: Math.min(
+          state.letterSpacing + 0.5,
+          5
+        ),
+      })),
 
-  increaseWordSpacing: () =>
-    set((state) => ({
-      wordSpacing: Math.min(state.wordSpacing + 1, 10),
-    })),
+    decreaseLetterSpacing: () =>
+      set((state) => ({
+        letterSpacing: Math.max(
+          state.letterSpacing - 0.5,
+          0
+        ),
+      })),
 
-  decreaseWordSpacing: () =>
-    set((state) => ({
-      wordSpacing: Math.max(state.wordSpacing - 1, 0),
-    })),
+    increaseWordSpacing: () =>
+      set((state) => ({
+        wordSpacing: Math.min(
+          state.wordSpacing + 1,
+          10
+        ),
+      })),
 
-  toggleBold: () =>
-    set((state) => ({
-      bold: !state.bold,
-    })),
-}));
+    decreaseWordSpacing: () =>
+      set((state) => ({
+        wordSpacing: Math.max(
+          state.wordSpacing - 1,
+          0
+        ),
+      })),
+
+    toggleBold: () =>
+      set((state) => ({
+        bold: !state.bold,
+      })),
+
+    // Change background
+    setBackgroundColor: (color) =>
+      set({
+        backgroundColor: color,
+      }),
+
+    // Change text color
+    setTextColor: (color) =>
+      set({
+        textColor: color,
+      }),
+  }));

@@ -56,6 +56,15 @@ const bold = useReaderSettingsStore(
   (state) => state.bold
 );
 
+const backgroundColor = useReaderSettingsStore(
+  (state) => state.backgroundColor
+);
+
+const textColor =
+  useReaderSettingsStore(
+    (state) => state.textColor
+  );
+
 
   useEffect(() => {
   webViewRef.current?.postMessage(
@@ -66,9 +75,11 @@ const bold = useReaderSettingsStore(
       letterSpacing: letterSpacing,
       wordSpacing: wordSpacing,
       bold: bold,
+      backgroundColor: backgroundColor,
+      textColor: textColor,
     })
   );
-}, [fontSize, lineHeight, letterSpacing, wordSpacing, bold]);
+}, [fontSize, lineHeight, letterSpacing, wordSpacing, bold, backgroundColor, textColor]);
   // Toolbar animation
   const toolbarTranslateY =
     useRef(new Animated.Value(0)).current;
@@ -308,16 +319,34 @@ const bold = useReaderSettingsStore(
 
         document.body.style.fontWeight =
           message.bold ? 'bold' : 'normal';
+
+        document.body.style.backgroundColor =
+          message.backgroundColor;
+
+        document.documentElement.style.backgroundColor =
+          message.backgroundColor;
+        
+        document.body.style.color =
+          message.textColor;
       }
 
     } catch (error) {
-      console.error('Error processing message:', error);
+      console.error(
+        'Error processing message:',
+        error
+      );
     }
   }
 
-  document.addEventListener('message', handleMessage);
+  document.addEventListener(
+    'message',
+    handleMessage
+  );
 
-  window.addEventListener('message', handleMessage);
+  window.addEventListener(
+    'message',
+    handleMessage
+  );
 </script>
       </body>
 

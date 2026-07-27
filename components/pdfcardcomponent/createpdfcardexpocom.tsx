@@ -191,7 +191,7 @@ export default function PdfCoverCard({
         </Text>
         <View className="flex-row items-center justify-between mt-0.5">
           <Text className="text-gray-400 text-xs uppercase">
-            {clampedPercent}% completed
+            {clampedPercent}%
           </Text>
           <Text className="text-gray-400 text-xs">
             {formatDateOpened(dateOpened)}

@@ -19,6 +19,8 @@ interface PdfCoverCardProps {
   width?: number;
   onDelete?: () => void;
   onRename?: (name: string) => void;
+  /** Render a horizontal result row for compact lists such as search. */
+  compact?: boolean;
 }
 
 function deriveFileName(path: string) {
@@ -98,6 +100,7 @@ export default function PdfCoverCard({
   width = 220,
   onDelete,
   onRename,
+  compact = false,
 }: PdfCoverCardProps) {
   const [thumbnailUri, setThumbnailUri] = useState<string | null>(null);
   const [error, setError] = useState(false);
@@ -130,6 +133,71 @@ export default function PdfCoverCard({
   const displayName = fileName ?? deriveFileName(pdfPath);
   const clampedPercent = Math.max(0, Math.min(100, completionPercentage));
 
+  const coverPreview = (
+    <>
+      {thumbnailUri ? (
+        <Image
+          source={{ uri: thumbnailUri }}
+          style={{ width: "100%", height: "100%" }}
+          resizeMode="cover"
+        />
+      ) : (
+        <View className="flex-1 items-center justify-center bg-black">
+          {!error ? (
+            <ActivityIndicator color="#8fb996" />
+          ) : (
+            <Text className="text-xs text-white/40">Preview unavailable</Text>
+          )}
+        </View>
+      )}
+
+      {html && !thumbnailUri && !error && (
+        <View style={{ width: 0, height: 0, opacity: 0 }}>
+          <WebView
+            originWhitelist={["*"]}
+            source={{ html }}
+            javaScriptEnabled
+            onMessage={(event) => {
+              if (hasRendered.current) return;
+              try {
+                const data = JSON.parse(event.nativeEvent.data);
+                if (data.type === "success") {
+                  hasRendered.current = true;
+                  setThumbnailUri(data.dataUrl);
+                } else {
+                  console.log("pdf.js render error:", data.message);
+                  setError(true);
+                }
+              } catch (e) {
+                console.log("Failed to parse WebView message:", e);
+                setError(true);
+              }
+            }}
+          />
+        </View>
+      )}
+    </>
+  );
+
+  if (compact) {
+    return (
+      <View className="h-28 flex-row items-center rounded-2xl border border-black/5 bg-white p-3 shadow-sm">
+        <View className="min-w-0 flex-1 px-1 pr-5">
+          <Text numberOfLines={2} className="font-lato-bold text-base text-black">
+            {displayName}
+          </Text>
+          <Text className="mt-2 text-sm text-gray-400">
+            Added {formatDateOpened(dateOpened)}
+          </Text>
+        </View>
+
+        <View className="h-20 w-14 overflow-hidden rounded-lg bg-black">
+          {coverPreview}
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={{ width }}>
       {/* Cover card */}
@@ -137,48 +205,7 @@ export default function PdfCoverCard({
         style={{ width, height }}
         className="rounded-2xl overflow-hidden bg-black shadow-lg"
       >
-        {thumbnailUri ? (
-          <Image
-            source={{ uri: thumbnailUri }}
-            style={{ width: "100%", height: "100%" }}
-            resizeMode="cover"
-          />
-        ) : (
-          <View className="flex-1 items-center justify-center bg-black">
-            {!error ? (
-              <ActivityIndicator color="#8fb996" />
-            ) : (
-              <Text className="text-white/40 text-xs">Preview unavailable</Text>
-            )}
-          </View>
-        )}
-
-        {/* Hidden renderer: does the work, renders nothing visible itself */}
-        {html && !thumbnailUri && !error && (
-          <View style={{ width: 0, height: 0, opacity: 0 }}>
-            <WebView
-              originWhitelist={["*"]}
-              source={{ html }}
-              javaScriptEnabled
-              onMessage={(event) => {
-                if (hasRendered.current) return;
-                try {
-                  const data = JSON.parse(event.nativeEvent.data);
-                  if (data.type === "success") {
-                    hasRendered.current = true;
-                    setThumbnailUri(data.dataUrl);
-                  } else {
-                    console.log("pdf.js render error:", data.message);
-                    setError(true);
-                  }
-                } catch (e) {
-                  console.log("Failed to parse WebView message:", e);
-                  setError(true);
-                }
-              }}
-            />
-          </View>
-        )}
+        {coverPreview}
 
         {/* Progress bar glued to the bottom edge of the cover */}
         <Progress

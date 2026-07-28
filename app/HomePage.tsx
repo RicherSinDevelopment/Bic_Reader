@@ -95,7 +95,7 @@ const HomePage = () => {
 
       {/* Search + Settings */}
       <View className="flex-row items-center gap-3">
-        <SearchButton />
+        <SearchButton pdfs={sortedPdfs} />
         <SettingsButton />
       </View>
 

@@ -8,12 +8,23 @@ import PdfLayoutTabs from "@/components/HomePageui/ViewStyletab";
 import PdfLibrary, { type PdfLibraryItem } from "@/hooks/displaypdfs";
 import type { PickedPdf } from "@/hooks/useDocumentPicker";
 import React, { useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Modal, Pressable, Text, View } from "react-native";
+
+function normalizePdfName(name: string) {
+  const normalizedName = name
+    .replace(/\.pdf$/i, "")
+    .replace(/\s*(?:\(\d+\)|-?\s*copy)$/i, "")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
+
+  return normalizedName || name.toLocaleLowerCase().trim();
+}
 
 const HomePage = () => {
   const [numColumns, setNumColumns] = useState<1 | 2 | 3>(1);
   const [pdfs, setPdfs] = useState<PdfLibraryItem[]>([]);
   const [sortOption, setSortOption] = useState<PdfSortOption>("newest");
+  const [duplicatePdfName, setDuplicatePdfName] = useState<string | null>(null);
 
   const sortedPdfs = useMemo(() => {
     return [...pdfs].sort((firstPdf, secondPdf) => {
@@ -32,6 +43,16 @@ const HomePage = () => {
   }, [pdfs, sortOption]);
 
   const handlePdfPicked = (pdf: PickedPdf) => {
+    const normalizedName = normalizePdfName(pdf.name);
+    const duplicate = pdfs.some(
+      (existingPdf) => normalizePdfName(existingPdf.name) === normalizedName
+    );
+
+    if (duplicate) {
+      setDuplicatePdfName(pdf.name);
+      return;
+    }
+
     const addedAt = new Date().toISOString();
 
     setPdfs((currentPdfs) => [
@@ -122,6 +143,42 @@ const HomePage = () => {
   <View className="absolute bottom-8 left-6 right-6">
     <AddButton onPdfPicked={handlePdfPicked} />
   </View>
+
+  <Modal
+    animationType="fade"
+    transparent
+    visible={duplicatePdfName !== null}
+    onRequestClose={() => setDuplicatePdfName(null)}
+  >
+    <View className="flex-1 items-center justify-center px-6">
+      <Pressable
+        accessibilityLabel="Close duplicate PDF message"
+        className="absolute inset-0 bg-black/40"
+        onPress={() => setDuplicatePdfName(null)}
+      />
+
+      <View className="w-full max-w-sm rounded-lg bg-white p-5 shadow-lg">
+        <Text className="font-lato-bold text-lg text-black">
+          PDF already added
+        </Text>
+        <Text className="mt-2 text-sm leading-5 text-black/60">
+          {duplicatePdfName
+            ? `\"${duplicatePdfName}\" matches a PDF already in your library.`
+            : "This PDF is already in your library."}
+        </Text>
+
+        <View className="mt-5 items-end">
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setDuplicatePdfName(null)}
+            className="h-10 justify-center rounded-md bg-green-400 px-5 active:opacity-80"
+          >
+            <Text className="font-lato-bold text-black">Close</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  </Modal>
 
 </View>
 

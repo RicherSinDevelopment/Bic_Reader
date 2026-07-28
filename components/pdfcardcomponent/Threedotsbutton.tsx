@@ -19,6 +19,11 @@ type ThreeDotsButtonProps = {
   onRename: (name: string) => void;
 };
 
+const MENU_WIDTH = 176;
+const MENU_HEIGHT = 98;
+const MENU_GAP = 4;
+const SCREEN_PADDING = 12;
+
 export default function ThreeDotsButton({
   fileName,
   onDelete,
@@ -28,13 +33,24 @@ export default function ThreeDotsButton({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isRenameOpen, setIsRenameOpen] = useState(false);
   const [draftName, setDraftName] = useState(fileName);
-  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 12 });
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: SCREEN_PADDING });
 
   const openMenu = () => {
     buttonRef.current?.measureInWindow((x, y, width, height) => {
+      const { width: screenWidth, height: screenHeight } =
+        Dimensions.get("window");
+      const belowButton = y + height + MENU_GAP;
+      const hasRoomBelow =
+        belowButton + MENU_HEIGHT <= screenHeight - SCREEN_PADDING;
+
       setMenuPosition({
-        top: y + height + 4,
-        right: Math.max(12, Dimensions.get("window").width - x - width),
+        top: hasRoomBelow
+          ? belowButton
+          : Math.max(SCREEN_PADDING, y - MENU_HEIGHT - MENU_GAP),
+        left: Math.min(
+          Math.max(SCREEN_PADDING, x + width - MENU_WIDTH),
+          screenWidth - MENU_WIDTH - SCREEN_PADDING
+        ),
       });
       setIsMenuOpen(true);
     });
@@ -95,8 +111,12 @@ export default function ThreeDotsButton({
         />
 
         <View
-          style={{ top: menuPosition.top, right: menuPosition.right }}
-          className="absolute min-w-44 rounded-md border border-black/10 bg-white p-1 shadow-lg"
+          style={{
+            top: menuPosition.top,
+            left: menuPosition.left,
+            width: MENU_WIDTH,
+          }}
+          className="absolute rounded-md border border-black/10 bg-white p-1 shadow-lg"
         >
           <Pressable
             accessibilityRole="menuitem"

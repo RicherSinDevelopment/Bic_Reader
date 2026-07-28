@@ -1,42 +1,79 @@
-import {
-  Tabs,
-  TabsIndicator,
-  TabsList,
-  TabsTrigger,
-  TabsTriggerText,
-} from "@/components/ui/tabs";
+import React, { useRef, useState } from "react";
+import { Animated, Pressable, Text, View } from "react-native";
 
 interface PdfLayoutTabsProps {
   onColumnsChange: (columns: 1 | 2 | 3) => void;
 }
 
+const SEGMENT_WIDTH = 44;
+const SEGMENT_HEIGHT = 40;
+const CONTAINER_PADDING = 4;
+
 export default function PdfLayoutTabs({
   onColumnsChange,
 }: PdfLayoutTabsProps) {
+  const [selectedColumns, setSelectedColumns] = useState<1 | 2 | 3>(1);
+  const indicatorX = useRef(new Animated.Value(0)).current;
+
+  const selectColumns = (columns: 1 | 2 | 3) => {
+    setSelectedColumns(columns);
+    onColumnsChange(columns);
+
+    Animated.timing(indicatorX, {
+      toValue: (columns - 1) * SEGMENT_WIDTH,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  };
+
   return (
-    <Tabs
-      defaultValue="1"
-      onValueChange={(value: string) => {
-        const columns = Number(value) as 1 | 2 | 3;
-
-        onColumnsChange(columns);
+    <View
+      style={{
+        width: SEGMENT_WIDTH * 3 + CONTAINER_PADDING * 2,
+        height: SEGMENT_HEIGHT + CONTAINER_PADDING * 2,
       }}
+      className="relative overflow-hidden rounded-md border border-black/20 bg-white"
     >
-      <TabsList>
-        <TabsTrigger value="1">
-          <TabsTriggerText>1</TabsTriggerText>
-        </TabsTrigger>
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          left: CONTAINER_PADDING,
+          top: CONTAINER_PADDING,
+          bottom: CONTAINER_PADDING,
+          width: SEGMENT_WIDTH,
+          borderRadius: 4,
+          borderWidth: 1,
+          borderColor: "#7eaa87",
+          backgroundColor: "#b9d8bf",
+          transform: [{ translateX: indicatorX }],
+        }}
+      />
 
-        <TabsTrigger value="2">
-          <TabsTriggerText>2</TabsTriggerText>
-        </TabsTrigger>
-
-        <TabsTrigger value="3">
-          <TabsTriggerText>3</TabsTriggerText>
-        </TabsTrigger>
-
-        <TabsIndicator />
-      </TabsList>
-    </Tabs>
+      <View
+        style={{
+          position: "absolute",
+          left: CONTAINER_PADDING,
+          right: CONTAINER_PADDING,
+          top: CONTAINER_PADDING,
+          bottom: CONTAINER_PADDING,
+          flexDirection: "row",
+        }}
+      >
+        {([1, 2, 3] as const).map((columns) => (
+          <Pressable
+            key={columns}
+            accessibilityLabel={`Show PDFs in ${columns} column${columns === 1 ? "" : "s"}`}
+            accessibilityRole="button"
+            accessibilityState={{ selected: selectedColumns === columns }}
+            onPress={() => selectColumns(columns)}
+            style={{ width: SEGMENT_WIDTH, height: "100%" }}
+            className="items-center justify-center"
+          >
+            <Text className="font-lato-bold text-sm text-black">{columns}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
   );
 }

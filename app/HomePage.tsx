@@ -1,16 +1,35 @@
 import AddButton from "@/components/HomePageui/AddFilebutton";
 import SearchButton from "@/components/HomePageui/SearchButton";
 import SettingsButton from "@/components/HomePageui/settingsbutton";
-import SortButton from "@/components/HomePageui/SortBybutton";
+import SortButton, {
+  type PdfSortOption,
+} from "@/components/HomePageui/SortBybutton";
 import PdfLayoutTabs from "@/components/HomePageui/ViewStyletab";
 import PdfLibrary, { type PdfLibraryItem } from "@/hooks/displaypdfs";
 import type { PickedPdf } from "@/hooks/useDocumentPicker";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Text, View } from "react-native";
 
 const HomePage = () => {
   const [numColumns, setNumColumns] = useState<1 | 2 | 3>(1);
   const [pdfs, setPdfs] = useState<PdfLibraryItem[]>([]);
+  const [sortOption, setSortOption] = useState<PdfSortOption>("newest");
+
+  const sortedPdfs = useMemo(() => {
+    return [...pdfs].sort((firstPdf, secondPdf) => {
+      switch (sortOption) {
+        case "oldest":
+          return Date.parse(firstPdf.dateOpened) - Date.parse(secondPdf.dateOpened);
+        case "closest":
+          return secondPdf.completionPercentage - firstPdf.completionPercentage;
+        case "furthest":
+          return firstPdf.completionPercentage - secondPdf.completionPercentage;
+        case "newest":
+        default:
+          return Date.parse(secondPdf.dateOpened) - Date.parse(firstPdf.dateOpened);
+      }
+    });
+  }, [pdfs, sortOption]);
 
   const handlePdfPicked = (pdf: PickedPdf) => {
     const addedAt = new Date().toISOString();
@@ -24,6 +43,16 @@ const HomePage = () => {
       },
       ...currentPdfs,
     ]);
+  };
+
+  const handleDeletePdf = (id: string) => {
+    setPdfs((currentPdfs) => currentPdfs.filter((pdf) => pdf.id !== id));
+  };
+
+  const handleRenamePdf = (id: string, name: string) => {
+    setPdfs((currentPdfs) =>
+      currentPdfs.map((pdf) => (pdf.id === id ? { ...pdf, name } : pdf))
+    );
   };
 
   return (
@@ -56,18 +85,18 @@ const HomePage = () => {
     {/* SORT + VIEW CONTROLS */}
     {/* ========================= */}
 
-    <View className="flex-row w-full items-center justify-between mt-6 gap-40">
+    <View className="mt-6 w-full flex-row items-center justify-between gap-3">
 
       {/* Sort Button */}
-      <View className="flex-1 items-start">
-        < SortButton />
+      <View className="min-w-0 flex-1 items-start">
+        <SortButton value={sortOption} onValueChange={setSortOption} />
       </View>
 
       {/* Column Layout Tabs */}
-      <View className="flex-1 items-end">
-      <PdfLayoutTabs
-        onColumnsChange={setNumColumns}
-      />
+      <View className="shrink-0 items-end">
+        <PdfLayoutTabs
+          onColumnsChange={setNumColumns}
+        />
       </View>
     </View>
 
@@ -80,7 +109,9 @@ const HomePage = () => {
 
   <PdfLibrary
     numColumns={numColumns}
-    pdfs={pdfs}
+    pdfs={sortedPdfs}
+    onDeletePdf={handleDeletePdf}
+    onRenamePdf={handleRenamePdf}
   />
 
 

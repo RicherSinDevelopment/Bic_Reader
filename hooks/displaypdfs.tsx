@@ -23,6 +23,8 @@ export interface PdfLibraryItem {
 interface PdfLibraryProps {
   numColumns: 1 | 2 | 3;
   pdfs: PdfLibraryItem[];
+  onDeletePdf: (id: string) => void;
+  onRenamePdf: (id: string, name: string) => void;
 }
 
 // ========================================
@@ -32,6 +34,8 @@ interface PdfLibraryProps {
 export default function PdfLibrary({
   numColumns,
   pdfs,
+  onDeletePdf,
+  onRenamePdf,
 }: PdfLibraryProps) {
   // ========================================
   // CUSTOMIZE SPACING
@@ -113,6 +117,8 @@ export default function PdfLibrary({
               width={cardWidth}
               dateOpened={item.dateOpened}
               completionPercentage={item.completionPercentage}
+              onDelete={() => onDeletePdf(item.id)}
+              onRename={(name) => onRenamePdf(item.id, name)}
             />
           </View>
         )}

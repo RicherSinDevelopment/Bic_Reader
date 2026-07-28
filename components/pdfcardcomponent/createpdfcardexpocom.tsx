@@ -1,5 +1,6 @@
 import { Progress, ProgressFilledTrack } from "@/components/ui/progress";
 import { Text } from "@/components/ui/text";
+import ThreeDotsButton from "@/components/pdfcardcomponent/Threedotsbutton";
 import * as FileSystem from "expo-file-system/legacy";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, View } from "react-native";
@@ -16,6 +17,8 @@ interface PdfCoverCardProps {
   completionPercentage: number;
   /** Card width — height is derived to keep a page-like aspect ratio */
   width?: number;
+  onDelete?: () => void;
+  onRename?: (name: string) => void;
 }
 
 function deriveFileName(path: string) {
@@ -93,6 +96,8 @@ export default function PdfCoverCard({
   dateOpened,
   completionPercentage,
   width = 220,
+  onDelete,
+  onRename,
 }: PdfCoverCardProps) {
   const [thumbnailUri, setThumbnailUri] = useState<string | null>(null);
   const [error, setError] = useState(false);
@@ -185,18 +190,28 @@ export default function PdfCoverCard({
       </View>
 
       {/* Meta row: name, completion %, date opened */}
-      <View className="mt-2">
-        <Text numberOfLines={1} className="font-lato-bold text-black text-sm">
-          {displayName}
-        </Text>
-        <View className="flex-row items-center justify-between mt-0.5">
-          <Text className="text-gray-400 text-xs uppercase">
-            {clampedPercent}%
+      <View className="mt-2 flex-row items-start">
+        <View className="min-w-0 flex-1">
+          <Text numberOfLines={1} className="font-lato-bold text-black text-sm">
+            {displayName}
           </Text>
-          <Text className="text-gray-400 text-xs">
-            {formatDateOpened(dateOpened)}
-          </Text>
+          <View className="mt-0.5 flex-row items-center justify-between">
+            <Text className="text-gray-400 text-xs uppercase">
+              {clampedPercent}%
+            </Text>
+            <Text numberOfLines={1} className="text-gray-400 text-xs">
+              {formatDateOpened(dateOpened)}
+            </Text>
+          </View>
         </View>
+
+        {onDelete && onRename && (
+          <ThreeDotsButton
+            fileName={displayName}
+            onDelete={onDelete}
+            onRename={onRename}
+          />
+        )}
       </View>
     </View>
   );

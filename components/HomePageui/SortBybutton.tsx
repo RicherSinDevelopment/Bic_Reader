@@ -1,39 +1,97 @@
-import { ChevronDownIcon } from '@/components/ui/icon';
-import {
-  Select,
-  SelectBackdrop,
-  SelectContent,
-  SelectDragIndicator,
-  SelectDragIndicatorWrapper,
-  SelectIcon,
-  SelectInput,
-  SelectItem,
-  SelectPortal,
-  SelectTrigger,
-} from '@/components/ui/select';
+import { ChevronDownIcon, Icon } from "@/components/ui/icon";
+import { Check } from "lucide-react-native";
+import React, { useRef, useState } from "react";
+import { Dimensions, Modal, Pressable, Text, View } from "react-native";
 
-export default function SortButton() {
+export type PdfSortOption = "newest" | "oldest" | "closest" | "furthest";
+
+type SortButtonProps = {
+  value: PdfSortOption;
+  onValueChange: (value: PdfSortOption) => void;
+};
+
+const sortOptions: { label: string; value: PdfSortOption }[] = [
+  { label: "Newest", value: "newest" },
+  { label: "Oldest", value: "oldest" },
+  { label: "Closest to finishing", value: "closest" },
+  { label: "Furthest from finishing", value: "furthest" },
+];
+
+export default function SortButton({ value, onValueChange }: SortButtonProps) {
+  const buttonRef = useRef<React.ElementRef<typeof Pressable>>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 20 });
+
+  const selectedLabel =
+    sortOptions.find((option) => option.value === value)?.label ?? "Newest";
+
+  const openMenu = () => {
+    buttonRef.current?.measureInWindow((x, y, width, height) => {
+      const screenWidth = Dimensions.get("window").width;
+      const menuWidth = 220;
+
+      setMenuPosition({
+        top: y + height + 4,
+        left: Math.min(Math.max(12, x), screenWidth - menuWidth - 12),
+      });
+      setIsOpen(true);
+    });
+  };
+
   return (
-    <Select>
-      <SelectTrigger variant="outline" size="md">
-        <SelectInput placeholder="Select option" />
-        <SelectIcon className="mr-3" as={ChevronDownIcon} />
-      </SelectTrigger>
-      <SelectPortal>
-        <SelectBackdrop />
-        <SelectContent>
-          <SelectDragIndicatorWrapper>
-            <SelectDragIndicator />
-          </SelectDragIndicatorWrapper>
-          <SelectItem label="Date added (newest)" value="ux" />
-          <SelectItem label="Date added (oldest)" value="web" />
-          <SelectItem
-            label="closest to finishing"
-            value="Cross Platform Development Process"
-          />
-          <SelectItem label="Furthest to finishing" value="ui" />
-        </SelectContent>
-      </SelectPortal>
-    </Select>
+    <>
+      <Pressable
+        ref={buttonRef}
+        accessibilityLabel={`Sort PDFs by ${selectedLabel}`}
+        accessibilityRole="button"
+        onPress={openMenu}
+        className="h-10 max-w-full flex-row items-center gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5"
+      >
+        <Text
+          numberOfLines={1}
+          className="shrink font-lato-bold text-sm text-black"
+        >
+          Sort by: {selectedLabel}
+        </Text>
+        <Icon as={ChevronDownIcon} size="xs" className="text-black/60" />
+      </Pressable>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={isOpen}
+        onRequestClose={() => setIsOpen(false)}
+      >
+        <Pressable
+          accessibilityLabel="Close sort menu"
+          className="absolute inset-0"
+          onPress={() => setIsOpen(false)}
+        />
+
+        <View
+          style={{ top: menuPosition.top, left: menuPosition.left, width: 220 }}
+          className="absolute rounded-md border border-black/10 bg-white p-1 shadow-lg"
+        >
+          {sortOptions.map((option) => {
+            const isSelected = option.value === value;
+
+            return (
+              <Pressable
+                key={option.value}
+                accessibilityRole="menuitem"
+                onPress={() => {
+                  onValueChange(option.value);
+                  setIsOpen(false);
+                }}
+                className="h-11 flex-row items-center justify-between rounded px-3 active:bg-black/5"
+              >
+                <Text className="text-base text-black">{option.label}</Text>
+                {isSelected && <Check size={16} color="#000000" />}
+              </Pressable>
+            );
+          })}
+        </View>
+      </Modal>
+    </>
   );
 }

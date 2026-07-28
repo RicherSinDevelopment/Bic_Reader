@@ -1,9 +1,7 @@
 import PdfCoverCard from "@/components/pdfcardcomponent/createpdfcardexpocom";
-import { Asset } from "expo-asset";
-import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
+  Text,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -12,8 +10,19 @@ import {
 // PROPS
 // ========================================
 
+export interface PdfLibraryItem {
+  id: string;
+  name: string;
+  uri: string;
+  size?: number;
+  mimeType?: string;
+  dateOpened: string;
+  completionPercentage: number;
+}
+
 interface PdfLibraryProps {
   numColumns: 1 | 2 | 3;
+  pdfs: PdfLibraryItem[];
 }
 
 // ========================================
@@ -22,6 +31,7 @@ interface PdfLibraryProps {
 
 export default function PdfLibrary({
   numColumns,
+  pdfs,
 }: PdfLibraryProps) {
   // ========================================
   // CUSTOMIZE SPACING
@@ -33,34 +43,7 @@ export default function PdfLibrary({
   // Space between screen edges and cards
   const horizontalPadding = 20;
 
-  // Number of duplicate cards for testing
-  const numberOfCards = 6;
-
-  // ========================================
-
   const { width: screenWidth } = useWindowDimensions();
-
-  const [pdfUri, setPdfUri] = useState<string | null>(null);
-
-  // ========================================
-  // LOAD PDF
-  // ========================================
-
-  useEffect(() => {
-    const loadPdf = async () => {
-      try {
-        const asset = await Asset.fromModule(
-          require("@/components/pdfcardcomponent/1984.pdf")
-        ).downloadAsync();
-
-        setPdfUri(asset.localUri ?? asset.uri);
-      } catch (error) {
-        console.error("Failed to load PDF:", error);
-      }
-    };
-
-    loadPdf();
-  }, []);
 
   // ========================================
   // CALCULATE CARD WIDTH
@@ -74,38 +57,13 @@ export default function PdfLibrary({
   const cardWidth = availableWidth / numColumns;
 
   // ========================================
-  // CREATE TEST PDF DATA
-  // ========================================
-
-  // These IDs are only temporary IDs for FlatList.
-  // They are NOT your actual PDF IDs.
-  const pdfCards = Array.from(
-    { length: numberOfCards },
-    (_, index) => ({
-      id: `test-pdf-${index}`,
-    })
-  );
-
-  // ========================================
-  // LOADING STATE
-  // ========================================
-
-  if (!pdfUri) {
-    return (
-      <View className="flex-1 items-center justify-center bg-[#F7F5EC]">
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
-
-  // ========================================
   // RENDER
   // ========================================
 
   return (
     <View className="flex-1 bg-[#F7F5EC]">
       <FlatList
-        data={pdfCards}
+        data={pdfs}
         keyExtractor={(item) => item.id}
 
         // Number of columns comes from HomePage
@@ -119,7 +77,8 @@ export default function PdfLibrary({
         contentContainerStyle={{
           paddingHorizontal: horizontalPadding,
           paddingTop: 20,
-          paddingBottom: 40,
+          paddingBottom: 100,
+          flexGrow: 1,
         }}
 
         // Spacing between columns and rows
@@ -132,18 +91,28 @@ export default function PdfLibrary({
             : undefined
         }
 
+        ListEmptyComponent={
+          <View className="flex-1 items-center justify-center pb-20">
+            <Text className="font-lato-bold text-base text-black/50">
+              No PDFs yet
+            </Text>
+          </View>
+        }
+
         // Render each PDF
-        renderItem={() => (
+        renderItem={({ item }) => (
           <View
             style={{
               width: cardWidth,
+              marginBottom: numColumns === 1 ? gap : 0,
             }}
           >
             <PdfCoverCard
-              pdfPath={pdfUri}
+              pdfPath={item.uri}
+              fileName={item.name}
               width={cardWidth}
-              dateOpened={new Date()}
-              completionPercentage={20}
+              dateOpened={item.dateOpened}
+              completionPercentage={item.completionPercentage}
             />
           </View>
         )}

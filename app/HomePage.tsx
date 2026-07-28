@@ -3,12 +3,28 @@ import SearchButton from "@/components/HomePageui/SearchButton";
 import SettingsButton from "@/components/HomePageui/settingsbutton";
 import SortButton from "@/components/HomePageui/SortBybutton";
 import PdfLayoutTabs from "@/components/HomePageui/ViewStyletab";
-import PdfLibrary from "@/hooks/displaypdfs";
+import PdfLibrary, { type PdfLibraryItem } from "@/hooks/displaypdfs";
+import type { PickedPdf } from "@/hooks/useDocumentPicker";
 import React, { useState } from "react";
 import { Text, View } from "react-native";
 
 const HomePage = () => {
   const [numColumns, setNumColumns] = useState<1 | 2 | 3>(1);
+  const [pdfs, setPdfs] = useState<PdfLibraryItem[]>([]);
+
+  const handlePdfPicked = (pdf: PickedPdf) => {
+    const addedAt = new Date().toISOString();
+
+    setPdfs((currentPdfs) => [
+      {
+        ...pdf,
+        id: `${Date.now()}-${pdf.name}`,
+        dateOpened: addedAt,
+        completionPercentage: 0,
+      },
+      ...currentPdfs,
+    ]);
+  };
 
   return (
 <View className="flex-1 bg-[#F7F5EC]">
@@ -64,6 +80,7 @@ const HomePage = () => {
 
   <PdfLibrary
     numColumns={numColumns}
+    pdfs={pdfs}
   />
 
 
@@ -71,8 +88,8 @@ const HomePage = () => {
   {/* ADD PDF BUTTON */}
   {/* ========================= */}
 
-  <View className="absolute bottom-8 left-6 right-6"> 
-    <AddButton /> 
+  <View className="absolute bottom-8 left-6 right-6">
+    <AddButton onPdfPicked={handlePdfPicked} />
   </View>
 
 </View>

@@ -1,8 +1,15 @@
 import * as DocumentPicker from "expo-document-picker";
 
+export type PickedPdf = {
+  name: string;
+  uri: string;
+  size?: number;
+  mimeType?: string;
+};
+
 export function useDocumentPicker() {
 
-  const pickPdf = async () => {
+  const pickPdf = async (): Promise<PickedPdf | null> => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: "application/pdf",

@@ -1,26 +1,41 @@
-import React from "react";
+import React, { useState } from "react";
 import { View } from "react-native";
 
-import { Button, ButtonText } from "@/components/ui/button";
+import { Button, ButtonSpinner, ButtonText } from "@/components/ui/button";
 import { AddIcon, Icon } from "@/components/ui/icon";
 
-import { useDocumentPicker } from "@/hooks/useDocumentPicker";
+import {
+  type PickedPdf,
+  useDocumentPicker,
+} from "@/hooks/useDocumentPicker";
 
-export default function SignIn() {
+type AddButtonProps = {
+  onPdfPicked: (pdf: PickedPdf) => void | Promise<void>;
+};
+
+export default function AddButton({ onPdfPicked }: AddButtonProps) {
   const { pickPdf } = useDocumentPicker();
+  const [isPicking, setIsPicking] = useState(false);
 
   const handlePickPdf = async () => {
+    if (isPicking) {
+      return;
+    }
+
+    setIsPicking(true);
+
     try {
       const pdf = await pickPdf();
 
       if (!pdf) {
-        console.log("User cancelled");
         return;
       }
 
-      console.log("Selected PDF:", pdf);
+      await onPdfPicked(pdf);
     } catch (error) {
       console.error("Failed to pick PDF:", error);
+    } finally {
+      setIsPicking(false);
     }
   };
 
@@ -31,13 +46,18 @@ export default function SignIn() {
         variant="default"
         size="lg"
         onPress={handlePickPdf}
+        isDisabled={isPicking}
         className="h-14 px-5 rounded-xl flex-row items-center justify-center bg-green-400"
       >
-        <Icon
-          as={AddIcon}
-          size="md"
-          className="mr-2"
-        />
+        {isPicking ? (
+          <ButtonSpinner color="#000000" />
+        ) : (
+          <Icon
+            as={AddIcon}
+            size="md"
+            className="mr-2"
+          />
+        )}
 
         <ButtonText
           className="font-lato-bold"
@@ -45,7 +65,7 @@ export default function SignIn() {
             fontFamily: "Lato_700Bold",
           }}
         >
-          ADD
+          {isPicking ? "ADDING" : "ADD"}
         </ButtonText>
       </Button>
     </View>

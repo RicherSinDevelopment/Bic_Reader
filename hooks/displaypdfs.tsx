@@ -1,4 +1,3 @@
-
 import PdfCoverCard from "@/components/pdfcardcomponent/createpdfcardexpocom";
 import { Asset } from "expo-asset";
 import { useEffect, useState } from "react";
@@ -9,21 +8,29 @@ import {
   useWindowDimensions,
 } from "react-native";
 
-export default function PdfLibrary() {
-  // ========================================
-  // CUSTOMIZE YOUR PDF GRID HERE
-  // ========================================
+// ========================================
+// PROPS
+// ========================================
 
-  // Number of columns
-  // 1 = list
-  // 2 = two-column grid
-  // 3 = three-column grid
-  const numColumns = 1;
+interface PdfLibraryProps {
+  numColumns: 1 | 2 | 3;
+}
+
+// ========================================
+// PDF LIBRARY
+// ========================================
+
+export default function PdfLibrary({
+  numColumns,
+}: PdfLibraryProps) {
+  // ========================================
+  // CUSTOMIZE SPACING
+  // ========================================
 
   // Space between PDF cards
   const gap = 16;
 
-  // Space between the screen edges and the cards
+  // Space between screen edges and cards
   const horizontalPadding = 20;
 
   // Number of duplicate cards for testing
@@ -35,7 +42,10 @@ export default function PdfLibrary() {
 
   const [pdfUri, setPdfUri] = useState<string | null>(null);
 
-  // Load your PDF
+  // ========================================
+  // LOAD PDF
+  // ========================================
+
   useEffect(() => {
     const loadPdf = async () => {
       try {
@@ -67,7 +77,7 @@ export default function PdfLibrary() {
   // CREATE TEST PDF DATA
   // ========================================
 
-  // These IDs are only for FlatList.
+  // These IDs are only temporary IDs for FlatList.
   // They are NOT your actual PDF IDs.
   const pdfCards = Array.from(
     { length: numberOfCards },
@@ -97,10 +107,12 @@ export default function PdfLibrary() {
       <FlatList
         data={pdfCards}
         keyExtractor={(item) => item.id}
+
+        // Number of columns comes from HomePage
         numColumns={numColumns}
 
-        // This forces FlatList to properly rebuild
-        // when switching between 1, 2, or 3 columns.
+        // Forces FlatList to rebuild when switching
+        // between 1, 2, and 3 columns
         key={`columns-${numColumns}`}
 
         // Overall spacing around the grid
@@ -110,7 +122,7 @@ export default function PdfLibrary() {
           paddingBottom: 40,
         }}
 
-        // Controls spacing between columns and rows
+        // Spacing between columns and rows
         columnWrapperStyle={
           numColumns > 1
             ? {
@@ -139,3 +151,4 @@ export default function PdfLibrary() {
     </View>
   );
 }
+

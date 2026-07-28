@@ -17,7 +17,9 @@ export default function PdfLayoutTabs({
     <Tabs
       defaultValue="1"
       onValueChange={(value: string) => {
-        onColumnsChange(Number(value) as 1 | 2 | 3);
+        const columns = Number(value) as 1 | 2 | 3;
+
+        onColumnsChange(columns);
       }}
     >
       <TabsList>

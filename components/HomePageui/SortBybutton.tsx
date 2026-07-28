@@ -1,18 +1,18 @@
 import { ChevronDownIcon } from '@/components/ui/icon';
 import {
-    Select,
-    SelectBackdrop,
-    SelectContent,
-    SelectDragIndicator,
-    SelectDragIndicatorWrapper,
-    SelectIcon,
-    SelectInput,
-    SelectItem,
-    SelectPortal,
-    SelectTrigger,
+  Select,
+  SelectBackdrop,
+  SelectContent,
+  SelectDragIndicator,
+  SelectDragIndicatorWrapper,
+  SelectIcon,
+  SelectInput,
+  SelectItem,
+  SelectPortal,
+  SelectTrigger,
 } from '@/components/ui/select';
 
-function Example() {
+export default function SortButton() {
   return (
     <Select>
       <SelectTrigger variant="outline" size="md">

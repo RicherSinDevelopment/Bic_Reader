@@ -16,7 +16,7 @@ import {
   type BottomSheetRef,
 } from "@/components/ui/bottomsheet";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   View,
@@ -49,6 +49,9 @@ const ReaderView = ({ isLandscape }: ReaderViewProps) => {
   const fontSize = useReaderSettingsStore(
   (state) => state.fontSize
   );
+  const fontFamily = useReaderSettingsStore(
+    (state) => state.fontFamily
+  );
   const lineHeight = useReaderSettingsStore(
   (state) => state.lineHeight
   );
@@ -74,10 +77,11 @@ const textColor =
   );
 
 
-  useEffect(() => {
-  webViewRef.current?.postMessage(
+  const sendReaderSettings = useCallback(() => {
+    webViewRef.current?.postMessage(
     JSON.stringify({
       type: 'readerSettings',
+      fontFamily: fontFamily,
       fontSize: fontSize,
       lineHeight: lineHeight,
       letterSpacing: letterSpacing,
@@ -86,8 +90,12 @@ const textColor =
       backgroundColor: backgroundColor,
       textColor: textColor,
     })
-  );
-}, [fontSize, lineHeight, letterSpacing, wordSpacing, bold, backgroundColor, textColor]);
+    );
+  }, [fontFamily, fontSize, lineHeight, letterSpacing, wordSpacing, bold, backgroundColor, textColor]);
+
+  useEffect(() => {
+    sendReaderSettings();
+  }, [sendReaderSettings]);
   // Toolbar animation
   const toolbarTranslateY =
     useRef(new Animated.Value(0)).current;
@@ -264,6 +272,9 @@ const textColor =
       const message = JSON.parse(event.data);
 
       if (message.type === 'readerSettings') {
+
+        document.body.style.fontFamily =
+          message.fontFamily;
 
         document.body.style.fontSize =
           message.fontSize + 'px';
@@ -520,8 +531,10 @@ const textColor =
 
           style={{
             flex: 1,
-            backgroundColor: "#f8fafc",
+            backgroundColor,
           }}
+
+          onLoadEnd={sendReaderSettings}
 
           /*
            * Native scrolling.

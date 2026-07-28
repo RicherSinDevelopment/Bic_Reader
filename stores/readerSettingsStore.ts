@@ -1,11 +1,14 @@
 import { create } from 'zustand';
 
 type ReaderSettingsState = {
+  fontFamily: string;
   fontSize: number;
   lineHeight: number;
   letterSpacing: number;
   wordSpacing: number;
   bold: boolean;
+
+  setFontFamily: (fontFamily: string) => void;
 
   backgroundColor: string;
   textColor: string;
@@ -30,11 +33,14 @@ type ReaderSettingsState = {
 
 export const useReaderSettingsStore =
   create<ReaderSettingsState>((set) => ({
+    fontFamily: 'Arial, sans-serif',
     fontSize: 18,
     lineHeight: 1.72,
     letterSpacing: 0,
     wordSpacing: 0,
     bold: false,
+
+    setFontFamily: (fontFamily) => set({ fontFamily }),
 
     // Default colors
     backgroundColor: '#f8fafc',

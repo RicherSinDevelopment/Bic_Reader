@@ -42,4 +42,4 @@ app-example
 /ios
 /android
 
-components/pdfcardcomponent/AmericanGovernment3e-WEB.pdf
+*.pdf

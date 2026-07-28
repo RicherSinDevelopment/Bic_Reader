@@ -15,7 +15,6 @@ import {
   BottomSheetPortal,
   type BottomSheetRef,
 } from "@/components/ui/bottomsheet";
-import * as ScreenOrientation from "expo-screen-orientation";
 
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -24,17 +23,26 @@ import {
 } from "react-native";
 
 import { useReaderSettingsStore } from '@/stores/readerSettingsStore';
+import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
-const ReaderView = () => {
+
+type ReaderViewProps = {
+  isLandscape: boolean;
+};
+
+const ReaderView = ({ isLandscape }: ReaderViewProps) => {
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
 
-  const [isLandscape, setIsLandscape] =
-  useState(false);
   // Bottom Sheet reference
   const bottomSheetRef =
     useRef<BottomSheetRef>(null);
 
+  useEffect(() => {
+    if (isLandscape) {
+      bottomSheetRef.current?.close();
+    }
+  }, [isLandscape]);
   // WebView reference
   const webViewRef = useRef<WebView>(null);
 
@@ -96,54 +104,6 @@ const textColor =
   const toolbarAnimation =
     useRef<Animated.CompositeAnimation | null>(null);
 
-    useEffect(() => {
-  // Allow the app to rotate freely
-  ScreenOrientation.unlockAsync();
-
-  const checkOrientation = async () => {
-    const orientation =
-      await ScreenOrientation.getOrientationAsync();
-
-    const landscape =
-      orientation ===
-        ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
-      orientation ===
-        ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
-
-    setIsLandscape(landscape);
-  };
-
-  // Check orientation when the component first loads
-  checkOrientation();
-
-  // Listen for orientation changes
-  const subscription =
-    ScreenOrientation.addOrientationChangeListener(
-      (event) => {
-        const orientation =
-          event.orientationInfo.orientation;
-
-        const landscape =
-          orientation ===
-            ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
-          orientation ===
-            ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
-
-        setIsLandscape(landscape);
-
-        // Close the bottom sheet when entering landscape
-        if (landscape) {
-          bottomSheetRef.current?.close();
-        }
-      }
-    );
-
-  return () => {
-    ScreenOrientation.removeOrientationChangeListener(
-      subscription
-    );
-  };
-}, []);
   // --------------------------------
   // HTML READER
   // --------------------------------
@@ -547,8 +507,12 @@ const textColor =
         {/* HTML READER */}
         {/* ========================= */}
 
-        <WebView
-          ref={webViewRef}
+        <SafeAreaView
+          edges={isLandscape ? ["left", "right"] : []}
+          style={{ flex: 1, backgroundColor }}
+        >
+          <WebView
+            ref={webViewRef}
 
           source={{
             html: htmlContent,
@@ -715,7 +679,8 @@ const textColor =
             true;
           `}
 
-        />
+          />
+        </SafeAreaView>
 
         {/* ========================= */}
         {/* ANIMATED READER TOOLBAR */}

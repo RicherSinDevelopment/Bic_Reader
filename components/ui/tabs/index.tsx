@@ -172,17 +172,12 @@ const TabsList = React.forwardRef<
   /**
    * Auto scroll to selected tab
    */
+  const selectedIndex = React.Children.toArray(children)
+    .filter((child: any) => child?.type?.displayName !== 'TabsIndicator')
+    .findIndex((child: any) => child?.props?.value === selectedKey);
+
   useEffect(() => {
-    if (orientation !== 'horizontal' || !selectedKey) return;
-
-    const childArray = React.Children.toArray(children);
-    const triggers = childArray.filter(
-      (child: any) => child?.type?.displayName !== 'TabsIndicator'
-    );
-
-    const selectedIndex = triggers.findIndex(
-      (child: any) => child?.props?.value === selectedKey
-    );
+    if (orientation !== 'horizontal') return;
 
     if (selectedIndex >= 0 && flatListRef.current) {
       const timer = setTimeout(() => {
@@ -197,7 +192,7 @@ const TabsList = React.forwardRef<
 
       return () => clearTimeout(timer);
     }
-  }, [selectedKey, orientation, children]);
+  }, [selectedIndex, orientation]);
 
   /**
    * Native animated scroll handler (ONLY for iOS / Android)

@@ -1,4 +1,3 @@
-
 import { Button } from '@/components/ui/button';
 import { Icon, SearchIcon } from '@/components/ui/icon';
 import { useRouter } from 'expo-router';

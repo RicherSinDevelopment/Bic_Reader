@@ -9,8 +9,6 @@
 
 
 for today 
-1. work on haptics (done)
-2. work on the homescreen ui
-3. work on the pdf card
-4. work on the customization of the text using the bottomsheets
-5. and if i got the time then maybe some rust stuff
+1. work on the rotation thing make sure it fits properly 
+2. work on the workflow like let the user upload a pdf and it goes throught the workflow
+3. work on the change font style thing

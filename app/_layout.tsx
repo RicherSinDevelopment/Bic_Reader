@@ -2,6 +2,7 @@ import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { Lato_400Regular, Lato_700Bold, useFonts } from "@expo-google-fonts/lato";
 import { Stack } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import './global.css';
 
 export default function RootLayout() {
@@ -16,9 +17,11 @@ export default function RootLayout() {
   
  return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <GluestackUIProvider>
-        <Stack screenOptions={{ headerShown: false }} />
-      </GluestackUIProvider>
+      <SafeAreaProvider>
+        <GluestackUIProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+        </GluestackUIProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
    

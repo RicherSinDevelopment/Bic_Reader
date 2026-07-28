@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -43,6 +43,7 @@ export const TabsAnimatedIndicator = React.forwardRef<
     const animatedWidth = useSharedValue(0);
     const animatedHeight = useSharedValue(0);
     const [hasLayout, setHasLayout] = useState(false);
+    const previousSelectedKey = useRef(selectedKey);
     // Create a shared value for scroll offset to use in worklet
     const scrollOffsetShared = useSharedValue(scrollOffset);
 
@@ -59,10 +60,12 @@ export const TabsAnimatedIndicator = React.forwardRef<
 
         if (layout && layout.width > 0) {
           // Determine if this is the first time we're setting values
-          const isFirstRender = !hasLayout;
-          const duration = isFirstRender
-            ? 0
-            : tabsAnimationConfig.indicatorDuration;
+          const selectionChanged = previousSelectedKey.current !== selectedKey;
+          const duration = hasLayout && selectionChanged
+            ? tabsAnimationConfig.indicatorDuration
+            : 0;
+
+          previousSelectedKey.current = selectedKey;
 
           // Store the absolute x position (not adjusted for scroll)
           animatedX.value = withDelay(

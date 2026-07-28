@@ -10,14 +10,32 @@ import {
   TabsTrigger,
   TabsTriggerText,
 } from "@/components/ui/tabs";
+import { useScreenRotation } from "@/hooks/screenRotation";
 import * as Haptics from 'expo-haptics';
-import React, { useRef, useState } from "react";
-import { View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, View } from "react-native";
 import PagerView from "react-native-pager-view";
 export default function ReaderScreen() {
   const pagerRef = useRef<PagerView>(null);
+  const headerVisibility = useRef(new Animated.Value(1)).current;
   
   const [activeTab, setActiveTab] = useState("reader");
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [isLandscape, setIsLandscape] = useState(false);
+
+  useScreenRotation(setIsLandscape);
+
+  useEffect(() => {
+    const animation = Animated.timing(headerVisibility, {
+      toValue: isLandscape ? 0 : 1,
+      duration: 250,
+      useNativeDriver: false,
+    });
+
+    animation.start();
+
+    return () => animation.stop();
+  }, [headerVisibility, isLandscape]);
 
   // Reader = page 0
   // Original = page 1
@@ -45,49 +63,82 @@ export default function ReaderScreen() {
   };
 
   return (
-    <Box className="flex-1 pt-12">
-      {/* Tabs */}
-      <Tabs
-        value={activeTab}
-        onValueChange={handleTabChange}
-        variant="filled"
-        className="w-full"
+    <Box className="flex-1">
+      <Animated.View
+        pointerEvents={isLandscape ? "none" : "auto"}
+        accessibilityElementsHidden={isLandscape}
+        importantForAccessibility={isLandscape ? "no-hide-descendants" : "auto"}
+        style={{
+          height: headerHeight
+            ? headerVisibility.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, headerHeight],
+              })
+            : undefined,
+          overflow: "hidden",
+          transform: [
+            {
+              translateY: headerVisibility.interpolate({
+                inputRange: [0, 1],
+                outputRange: [-Math.max(headerHeight, 120), 0],
+              }),
+            },
+          ],
+        }}
       >
-    
-        {/* Center the tab buttons */}
-        <Box className="relative w-full items-center">
+        <View
+          className="pt-12 pb-4"
+          onLayout={(event) => {
+            const measuredHeight = event.nativeEvent.layout.height;
+            if (measuredHeight > headerHeight) {
+              setHeaderHeight(measuredHeight);
+            }
+          }}
+        >
+          {/* Tabs */}
+          <Tabs
+            value={activeTab}
+            onValueChange={handleTabChange}
+            variant="filled"
+            className="w-full"
+          >
 
-          <Box className="absolute left-2 top-1/2 -translate-y-1/2">
-          <BackButton />
-          </Box>
-          <Box className="absolute right-2 top-1/2 -translate-y-1/2">
-          <ThreeLinesButton></ThreeLinesButton>
-          </Box>
-          <TabsList className="p-2 rounded-xl">
+            {/* Center the tab buttons */}
+            <Box className="relative w-full items-center">
 
-            <TabsTrigger value="reader" className="px-6 py-3">
-              <TabsTriggerText >
-                Reader
-              </TabsTriggerText>
-            </TabsTrigger>
+              <Box className="absolute left-2 top-1/2 -translate-y-1/2">
+              <BackButton />
+              </Box>
+              <Box className="absolute right-2 top-1/2 -translate-y-1/2">
+              <ThreeLinesButton></ThreeLinesButton>
+              </Box>
+              <TabsList className="p-2 rounded-xl">
 
-            <TabsTrigger value="original" className="px-6 py-3">
-              <TabsTriggerText>
-                Original
-              </TabsTriggerText>
-            </TabsTrigger>
+                <TabsTrigger value="reader" className="px-6 py-3">
+                  <TabsTriggerText >
+                    Reader
+                  </TabsTriggerText>
+                </TabsTrigger>
 
-            <TabsIndicator />
+                <TabsTrigger value="original" className="px-6 py-3">
+                  <TabsTriggerText>
+                    Original
+                  </TabsTriggerText>
+                </TabsTrigger>
 
-          </TabsList>
+                <TabsIndicator />
 
-        </Box>
+              </TabsList>
 
-      </Tabs>
+            </Box>
+
+          </Tabs>
+        </View>
+      </Animated.View>
 
 
       {/* Sliding pages */}
-      <View className="flex-1 mt-4">
+      <View className="flex-1">
 
         <PagerView
           ref={pagerRef}
@@ -107,7 +158,7 @@ export default function ReaderScreen() {
             key="reader"
             className="flex-1"
           >
-            <ReaderView />
+            <ReaderView isLandscape={isLandscape} />
           </View>
 
 

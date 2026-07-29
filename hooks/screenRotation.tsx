@@ -1,62 +1,59 @@
+import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useEffect } from "react";
 
 export function useScreenRotation(
   setIsLandscape: (value: boolean) => void
 ) {
+  const disableRotation = useReaderSettingsStore(
+    (state) => state.disableRotation
+  );
+
   useEffect(() => {
-    let subscription:
-      | ScreenOrientation.Subscription
-      | undefined;
+    let subscription: ScreenOrientation.Subscription | undefined;
+    let isActive = true;
 
     const setupOrientation = async () => {
-      // Allow rotation while ReaderView is open
-      await ScreenOrientation.unlockAsync();
-
-      // Get current orientation
-      const orientation =
-        await ScreenOrientation.getOrientationAsync();
-
-      const landscape =
-        orientation ===
-          ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
-        orientation ===
-          ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
-
-      setIsLandscape(landscape);
-
-      // Listen for orientation changes
-      subscription =
-        ScreenOrientation.addOrientationChangeListener(
-          (event) => {
-            const orientation =
-              event.orientationInfo.orientation;
-
-            const landscape =
-              orientation ===
-                ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
-              orientation ===
-                ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
-
-            setIsLandscape(landscape);
-          }
+      if (disableRotation) {
+        await ScreenOrientation.lockAsync(
+          ScreenOrientation.OrientationLock.PORTRAIT_UP
         );
-    };
 
-    setupOrientation();
-
-    return () => {
-      // Remove listener when ReaderView unmounts
-      if (subscription) {
-        ScreenOrientation.removeOrientationChangeListener(
-          subscription
-        );
+        if (isActive) setIsLandscape(false);
+        return;
       }
 
-      // Lock back to portrait after leaving ReaderView
-      ScreenOrientation.lockAsync(
-        ScreenOrientation.OrientationLock.PORTRAIT_UP
-      );
+      await ScreenOrientation.unlockAsync();
+
+      const orientation = await ScreenOrientation.getOrientationAsync();
+      const landscape =
+        orientation === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+        orientation === ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
+
+      if (!isActive) return;
+
+      setIsLandscape(landscape);
+      subscription = ScreenOrientation.addOrientationChangeListener((event) => {
+        const nextOrientation = event.orientationInfo.orientation;
+        const nextIsLandscape =
+          nextOrientation === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+          nextOrientation === ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
+
+        setIsLandscape(nextIsLandscape);
+      });
     };
-  }, [setIsLandscape]);
+
+    void setupOrientation();
+
+    return () => {
+      isActive = false;
+      subscription?.remove();
+
+      if (!disableRotation) {
+        void ScreenOrientation.lockAsync(
+          ScreenOrientation.OrientationLock.PORTRAIT_UP
+        );
+      }
+    };
+  }, [disableRotation, setIsLandscape]);
 }

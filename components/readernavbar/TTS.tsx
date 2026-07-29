@@ -1,5 +1,6 @@
 import { Button, ButtonText } from "@/components/ui/button";
 import { ChevronDownIcon, Icon } from "@/components/ui/icon";
+import { useHighlightingText } from "@/hooks/highlightingtext";
 import { Check } from "lucide-react-native";
 import * as Speech from "expo-speech";
 import React, { useCallback, useEffect, useState } from "react";
@@ -7,6 +8,8 @@ import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 
 type TTSProps = {
   text: string;
+  onHighlightWord: (charIndex: number, charLength: number) => void;
+  onClearHighlight: () => void;
 };
 const speedOptions = [
   { label: "0.5x", value: 0.5 },
@@ -38,13 +41,21 @@ const splitForSpeech = (text: string) => {
   return chunks;
 };
 
-export default function TTS({ text }: TTSProps) {
+export default function TTS({
+  text,
+  onHighlightWord,
+  onClearHighlight,
+}: TTSProps) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voices, setVoices] = useState<Speech.Voice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<string | undefined>();
   const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
   const [speechRate, setSpeechRate] = useState(1);
   const [isSpeedMenuOpen, setIsSpeedMenuOpen] = useState(false);
+  const { createBoundaryHandler, clearHighlight } = useHighlightingText({
+    onHighlight: onHighlightWord,
+    onClear: onClearHighlight,
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -62,12 +73,19 @@ export default function TTS({ text }: TTSProps) {
 
   const stopSpeaking = useCallback(async () => {
     await Speech.stop();
+    clearHighlight();
     setIsSpeaking(false);
-  }, []);
+  }, [clearHighlight]);
 
   useEffect(() => {
+    let isMounted = true;
+
+    Speech.isSpeakingAsync().then((speaking) => {
+      if (isMounted) setIsSpeaking(speaking);
+    });
+
     return () => {
-      void Speech.stop();
+      isMounted = false;
     };
   }, []);
 
@@ -80,18 +98,32 @@ export default function TTS({ text }: TTSProps) {
     if (!text.trim()) return;
 
     const chunks = splitForSpeech(text);
+    let nextChunkSearchIndex = 0;
+    clearHighlight();
     setIsSpeaking(true);
 
     chunks.forEach((chunk, index) => {
       const isLastChunk = index === chunks.length - 1;
+      const chunkOffset = text.indexOf(chunk, nextChunkSearchIndex);
+      nextChunkSearchIndex = Math.max(chunkOffset, 0) + chunk.length;
 
       Speech.speak(chunk, {
         voice: selectedVoice,
         rate: speechRate,
-        onDone: isLastChunk ? () => setIsSpeaking(false) : undefined,
-        onStopped: () => setIsSpeaking(false),
+        onBoundary: createBoundaryHandler(Math.max(chunkOffset, 0)),
+        onDone: isLastChunk
+          ? () => {
+              clearHighlight();
+              setIsSpeaking(false);
+            }
+          : undefined,
+        onStopped: () => {
+          clearHighlight();
+          setIsSpeaking(false);
+        },
         onError: () => {
           void Speech.stop();
+          clearHighlight();
           setIsSpeaking(false);
         },
       });

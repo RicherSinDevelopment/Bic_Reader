@@ -7,6 +7,7 @@ type ReaderSettingsState = {
   letterSpacing: number;
   wordSpacing: number;
   bold: boolean;
+  disableRotation: boolean;
 
   setFontFamily: (fontFamily: string) => void;
 
@@ -26,6 +27,7 @@ type ReaderSettingsState = {
   decreaseWordSpacing: () => void;
 
   toggleBold: () => void;
+  toggleDisableRotation: () => void;
 
   setBackgroundColor: (color: string) => void;
   setTextColor: (color: string) => void;
@@ -39,6 +41,7 @@ export const useReaderSettingsStore =
     letterSpacing: 0,
     wordSpacing: 0,
     bold: false,
+    disableRotation: false,
 
     setFontFamily: (fontFamily) => set({ fontFamily }),
 
@@ -109,6 +112,10 @@ export const useReaderSettingsStore =
         bold: !state.bold,
       })),
 
+    toggleDisableRotation: () =>
+      set((state) => ({
+        disableRotation: !state.disableRotation,
+      })),
     // Change background
     setBackgroundColor: (color) =>
       set({

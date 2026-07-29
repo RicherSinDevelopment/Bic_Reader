@@ -33,6 +33,7 @@ type ReaderViewProps = {
 const ReaderView = ({ isLandscape }: ReaderViewProps) => {
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
+  const [readerText, setReaderText] = useState("");
 
   // Bottom Sheet reference
   const bottomSheetRef =
@@ -212,60 +213,10 @@ const textColor =
       <body>
 
         <p>
-          Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-          Sed do eiusmod tempor incididunt ut labore et dolore magna
-          aliqua. Ut enim ad minim veniam, quis nostrud exercitation
-          ullamco laboris nisi ut aliquip ex ea commodo consequat.
+          The Roman Empire was one of the greatest and most influential civilizations in human history, shaping the political, cultural, legal, military, and architectural foundations of the Western world for centuries. Emerging from the Roman Republic after the rise of Augustus Caesar in 27 BC, the empire expanded to encompass vast territories across Europe, North Africa, and the Middle East, stretching from the Atlantic Ocean to the Euphrates River at its greatest extent. This immense empire united hundreds of different peoples, languages, and cultures under a single government, creating an unprecedented period of stability known as the *Pax Romana*, or "Roman Peace," which lasted for approximately two hundred years. During this era, commerce flourished as an extensive network of paved roads, bridges, ports, and aqueducts connected distant provinces, allowing goods, ideas, and people to travel more efficiently than ever before. Roman engineers demonstrated extraordinary skill by constructing monumental structures such as the Colosseum, the Pantheon, and countless amphitheaters, baths, and aqueducts, many of which still stand today as enduring symbols of Roman ingenuity. The empire's military was among the most disciplined and effective fighting forces in history, with highly trained legions that employed advanced tactics, standardized equipment, and exceptional organization to conquer and defend an enormous territory. Beyond military success, Rome profoundly influenced civilization through its legal system, developing principles of justice, citizenship, contracts, and governance that continue to shape modern legal codes around the world. Latin, the language of Rome, became the foundation for the Romance languagesâ€”including Italian, French, Spanish, Portuguese, and Romanianâ€”and contributed countless words to English and many other languages. Roman culture also embraced literature, philosophy, art, and education, producing renowned figures such as Virgil, Cicero, Ovid, and Seneca, whose writings remain widely studied today. Although the empire experienced remarkable prosperity, it also faced significant challenges, including political corruption, economic instability, civil wars, invasions by Germanic tribes, and the increasing difficulty of governing such an expansive realm. In AD 395, the empire was permanently divided into the Western and Eastern Roman Empires, with the Western Empire ultimately collapsing in AD 476 after the deposition of the last emperor, Romulus Augustulus. The Eastern Roman Empire, later known as the Byzantine Empire, continued to preserve Roman traditions and institutions for nearly another thousand years until the fall of Constantinople in 1453. Despite its eventual decline, the legacy of the Roman Empire has endured through its contributions to law, government, military organization, architecture, engineering, language, religion, and culture, making it one of the most transformative civilizations in world history. Its influence can still be seen in modern democratic institutions, legal systems, city planning, engineering practices, and countless aspects of contemporary society, demonstrating that the achievements of ancient Rome continue to shape the world more than two millennia after its rise.
+
         </p>
 
-        <p>
-          Duis aute irure dolor in reprehenderit in voluptate velit
-          esse cillum dolore eu fugiat nulla pariatur.
-        </p>
-
-        <p>
-          Excepteur sint occaecat cupidatat non proident, sunt in
-          culpa qui officia deserunt mollit anim id est laborum.
-        </p>
-
-        <p>
-          Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-          Integer nec odio. Praesent libero. Sed cursus ante dapibus
-          diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet.
-        </p>
-
-        <p>
-          Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-          Sed do eiusmod tempor incididunt ut labore et dolore magna
-          aliqua.
-        </p>
-
-        <p>
-          Excepteur sint occaecat cupidatat non proident, sunt in
-          culpa qui officia deserunt mollit anim id est laborum.
-        </p>
-
-        <p>
-          Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-          Integer nec odio. Praesent libero. Sed cursus ante dapibus
-          diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet.
-        </p>
-
-        <p>
-          Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-          Sed do eiusmod tempor incididunt ut labore et dolore magna
-          aliqua.
-        </p>
-
-        <p>
-          Duis aute irure dolor in reprehenderit in voluptate velit
-          esse cillum dolore eu fugiat nulla pariatur.
-        </p>
-
-        <p>
-          Excepteur sint occaecat cupidatat non proident, sunt in
-          culpa qui officia deserunt mollit anim id est laborum.
-        </p>
         <script>
   function handleMessage(event) {
     try {
@@ -442,6 +393,11 @@ const textColor =
         return;
       }
 
+      if (data.type === "readerText") {
+        setReaderText(typeof data.text === "string" ? data.text : "");
+        return;
+      }
+
     } catch (error) {
 
       console.log(
@@ -492,7 +448,7 @@ const textColor =
         return <BackgroundSettings />;
 
       case "tts":
-        return <TTS />;
+        return <TTS text={readerText} />;
 
       case "ai":
         return <AI />;
@@ -595,6 +551,22 @@ const textColor =
               }
 
               window.__readerInitialized = true;
+
+              const readerText = Array.from(
+                document.querySelectorAll('p')
+              )
+                .map(function(paragraph) {
+                  return paragraph.textContent || '';
+                })
+                .join('\\n\\n')
+                .trim();
+
+              window.ReactNativeWebView.postMessage(
+                JSON.stringify({
+                  type: 'readerText',
+                  text: readerText
+                })
+              );
 
               // --------------------------------
               // SCROLL HANDLING

@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+export type ReaderTransition = "scroll" | "fade" | "pageFlip";
+
 type ReaderSettingsState = {
   fontFamily: string;
   fontSize: number;
@@ -8,6 +10,7 @@ type ReaderSettingsState = {
   wordSpacing: number;
   bold: boolean;
   disableRotation: boolean;
+  transition: ReaderTransition;
 
   setFontFamily: (fontFamily: string) => void;
 
@@ -28,6 +31,7 @@ type ReaderSettingsState = {
 
   toggleBold: () => void;
   toggleDisableRotation: () => void;
+  setTransition: (transition: ReaderTransition) => void;
 
   setBackgroundColor: (color: string) => void;
   setTextColor: (color: string) => void;
@@ -42,6 +46,7 @@ export const useReaderSettingsStore =
     wordSpacing: 0,
     bold: false,
     disableRotation: false,
+    transition: "scroll",
 
     setFontFamily: (fontFamily) => set({ fontFamily }),
 
@@ -116,6 +121,8 @@ export const useReaderSettingsStore =
       set((state) => ({
         disableRotation: !state.disableRotation,
       })),
+    setTransition: (transition) => set({ transition }),
+
     // Change background
     setBackgroundColor: (color) =>
       set({

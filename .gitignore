@@ -43,3 +43,7 @@ app-example
 /android
 
 *.pdf
+
+credentials.json
+*.cer
+*.certSigningRequest

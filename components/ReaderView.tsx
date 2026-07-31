@@ -7,6 +7,7 @@ import BackgroundSettings from "@/components/readernavbar/BackgroundSettings";
 import FontSettings from "@/components/readernavbar/FontSettings";
 import Settings from "@/components/readernavbar/Settings";
 import TTS from "@/components/readernavbar/TTS";
+import { usePageTransition } from "@/hooks/pagetransition";
 import {
   BottomSheet,
   BottomSheetBackdrop,
@@ -16,9 +17,10 @@ import {
   type BottomSheetRef,
 } from "@/components/ui/bottomsheet";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  PanResponder,
   View,
 } from "react-native";
 
@@ -46,6 +48,41 @@ const ReaderView = ({ isLandscape }: ReaderViewProps) => {
   }, [isLandscape]);
   // WebView reference
   const webViewRef = useRef<WebView>(null);
+  const transition = useReaderSettingsStore((state) => state.transition);
+  const { isPaged, syncPageTransition } = usePageTransition({
+    webViewRef,
+    transition,
+  });
+
+  const navigateReaderPage = useCallback((direction: 1 | -1) => {
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "pageNavigate",
+        direction,
+      })
+    );
+  }, []);
+
+  const pagePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, gesture) =>
+          isPaged &&
+          Math.abs(gesture.dx) > 12 &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderRelease: (_, gesture) => {
+          const isSwipe =
+            Math.abs(gesture.dx) >= 45 ||
+            Math.abs(gesture.vx) >= 0.5;
+
+          if (isSwipe) {
+            navigateReaderPage(gesture.dx < 0 ? 1 : -1);
+          }
+        },
+        onPanResponderTerminationRequest: () => false,
+      }),
+    [isPaged, navigateReaderPage]
+  );
 
   const highlightSpokenWord = useCallback(
     (charIndex: number, charLength: number) => {
@@ -118,6 +155,10 @@ const textColor =
   useEffect(() => {
     sendReaderSettings();
   }, [sendReaderSettings]);
+  const handleReaderLoadEnd = useCallback(() => {
+    sendReaderSettings();
+    syncPageTransition();
+  }, [sendReaderSettings, syncPageTransition]);
   // Toolbar animation
   const toolbarTranslateY =
     useRef(new Animated.Value(0)).current;
@@ -204,6 +245,34 @@ const textColor =
             overflow-x: hidden;
           }
 
+          html.reader-paged,
+          html.reader-paged body {
+            width: 100%;
+            height: 100%;
+            min-height: 100%;
+            overflow: hidden;
+            overscroll-behavior: none;
+          }
+
+          body.reader-paged {
+            padding: 20px;
+            padding-bottom: 20px;
+          }
+
+          #reader-pages {
+            min-height: 100%;
+          }
+
+          #reader-pages.reader-paged {
+            height: 100%;
+            min-height: 0;
+            column-width: calc(100vw - 40px);
+            column-gap: 40px;
+            column-fill: auto;
+            transform-style: preserve-3d;
+            backface-visibility: hidden;
+            will-change: transform, opacity;
+          }
           p {
             margin-top: 0;
             margin-bottom: 24px;
@@ -254,6 +323,18 @@ const textColor =
     try {
       const message = JSON.parse(event.data);
 
+      if (message.type === 'pageNavigate') {
+        if (window.__navigateReaderPage) {
+          window.__navigateReaderPage(message.direction);
+        }
+        return;
+      }
+      if (message.type === 'pageTransition') {
+        if (window.__applyReaderTransition) {
+          window.__applyReaderTransition(message.transition, true);
+        }
+        return;
+      }
       if (message.type === 'ttsHighlight') {
         const words = Array.from(
           document.querySelectorAll('[data-tts-start]')
@@ -273,20 +354,35 @@ const textColor =
           activeWord.classList.add('tts-word-active');
 
           const bounds = activeWord.getBoundingClientRect();
-          const isNearBottom = bounds.bottom > window.innerHeight * 0.78;
-          const isAboveView = bounds.top < window.innerHeight * 0.12;
 
-          if (isNearBottom || isAboveView) {
-            window.scrollTo({
-              top:
-                window.scrollY +
-                bounds.top -
-                window.innerHeight * 0.3,
-              behavior: 'smooth'
-            });
+          if (
+            window.__readerTransition !== 'scroll' &&
+            window.__goToReaderPage
+          ) {
+            const wordDocumentLeft =
+              bounds.left +
+              (window.__readerCurrentPage || 0) * window.innerWidth;
+            const wordPage = Math.floor(
+              wordDocumentLeft / window.innerWidth
+            );
+            window.__goToReaderPage(wordPage);
+          } else {
+            const isNearBottom =
+              bounds.bottom > window.innerHeight * 0.78;
+            const isAboveView =
+              bounds.top < window.innerHeight * 0.12;
+
+            if (isNearBottom || isAboveView) {
+              window.scrollTo({
+                top:
+                  window.scrollY +
+                  bounds.top -
+                  window.innerHeight * 0.3,
+                behavior: 'smooth'
+              });
+            }
           }
         }
-
         return;
       }
 
@@ -324,6 +420,10 @@ const textColor =
         
         document.body.style.color =
           message.textColor;
+
+        if (window.__refreshReaderPages) {
+          setTimeout(window.__refreshReaderPages, 0);
+        }
       }
 
     } catch (error) {
@@ -558,6 +658,7 @@ const textColor =
           edges={isLandscape ? ["left", "right"] : []}
           style={{ flex: 1, backgroundColor }}
         >
+          <View className="flex-1" {...pagePanResponder.panHandlers}>
           <WebView
             ref={webViewRef}
 
@@ -570,17 +671,17 @@ const textColor =
             backgroundColor,
           }}
 
-          onLoadEnd={sendReaderSettings}
+          onLoadEnd={handleReaderLoadEnd}
 
           /*
            * Native scrolling.
            */
-          scrollEnabled={true}
+          scrollEnabled={!isPaged}
 
           /*
            * Native bounce behavior.
            */
-          bounces={true}
+          bounces={!isPaged}
 
           /*
            * Smooth iOS scrolling.
@@ -590,9 +691,9 @@ const textColor =
           /*
            * Android overscroll.
            */
-          overScrollMode="always"
+          overScrollMode={isPaged ? "never" : "always"}
 
-          showsVerticalScrollIndicator={true}
+          showsVerticalScrollIndicator={!isPaged}
 
           /*
            * JavaScript required for:
@@ -639,6 +740,19 @@ const textColor =
                 return (paragraph.textContent || '').trim();
               });
               const readerText = paragraphTexts.join('\\n\\n');
+
+              const readerPages = document.createElement('main');
+              readerPages.id = 'reader-pages';
+
+              if (paragraphs.length > 0) {
+                paragraphs[0].parentNode.insertBefore(
+                  readerPages,
+                  paragraphs[0]
+                );
+                paragraphs.forEach(function(paragraph) {
+                  readerPages.appendChild(paragraph);
+                });
+              }
 
               let globalOffset = 0;
 
@@ -687,6 +801,187 @@ const textColor =
                 })
               );
 
+              // --------------------------------
+              // PAGINATED READER
+              // --------------------------------
+
+              const pagedContent =
+                document.getElementById('reader-pages');
+              let currentPage = 0;
+              let pageCount = 1;
+              let pageAnimationRunning = false;
+
+              window.__readerTransition = 'scroll';
+              window.__readerCurrentPage = 0;
+
+              function pageTransform(page, rotation) {
+                return (
+                  'translate3d(' +
+                  -page * window.innerWidth +
+                  'px, 0, 0) perspective(900px) rotateY(' +
+                  rotation +
+                  'deg)'
+                );
+              }
+
+              function refreshReaderPages() {
+                if (
+                  window.__readerTransition === 'scroll' ||
+                  !pagedContent
+                ) {
+                  pageCount = 1;
+                  currentPage = 0;
+                  window.__readerCurrentPage = 0;
+                  return;
+                }
+
+                pageCount = Math.max(
+                  1,
+                  Math.ceil(
+                    pagedContent.scrollWidth / window.innerWidth
+                  )
+                );
+                currentPage = Math.min(currentPage, pageCount - 1);
+                window.__readerCurrentPage = currentPage;
+                pagedContent.style.transition = 'none';
+                pagedContent.style.transform = pageTransform(
+                  currentPage,
+                  0
+                );
+              }
+
+              function finishPageChange(targetPage) {
+                currentPage = targetPage;
+                window.__readerCurrentPage = currentPage;
+                pagedContent.style.transform = pageTransform(
+                  currentPage,
+                  0
+                );
+              }
+
+              function goToReaderPage(targetPage) {
+                if (
+                  window.__readerTransition === 'scroll' ||
+                  pageAnimationRunning ||
+                  !pagedContent
+                ) {
+                  return;
+                }
+
+                const nextPage = Math.max(
+                  0,
+                  Math.min(targetPage, pageCount - 1)
+                );
+
+                if (nextPage === currentPage) {
+                  return;
+                }
+
+                const direction = nextPage > currentPage ? 1 : -1;
+                pageAnimationRunning = true;
+
+                if (window.__readerTransition === 'fade') {
+                  pagedContent.style.transition = 'opacity 130ms ease';
+                  pagedContent.style.opacity = '0';
+
+                  setTimeout(function() {
+                    finishPageChange(nextPage);
+                    pagedContent.style.transition = 'opacity 170ms ease';
+                    pagedContent.style.opacity = '1';
+
+                    setTimeout(function() {
+                      pageAnimationRunning = false;
+                    }, 180);
+                  }, 135);
+
+                  return;
+                }
+
+                pagedContent.style.transformOrigin =
+                  direction > 0 ? 'left center' : 'right center';
+                pagedContent.style.transition =
+                  'transform 150ms ease-in, opacity 150ms ease-in';
+                pagedContent.style.transform = pageTransform(
+                  currentPage,
+                  direction > 0 ? -18 : 18
+                );
+                pagedContent.style.opacity = '0.4';
+
+                setTimeout(function() {
+                  currentPage = nextPage;
+                  window.__readerCurrentPage = currentPage;
+                  pagedContent.style.transition = 'none';
+                  pagedContent.style.transform = pageTransform(
+                    currentPage,
+                    direction > 0 ? 18 : -18
+                  );
+
+                  requestAnimationFrame(function() {
+                    requestAnimationFrame(function() {
+                      pagedContent.style.transition =
+                        'transform 190ms ease-out, opacity 190ms ease-out';
+                      pagedContent.style.transform = pageTransform(
+                        currentPage,
+                        0
+                      );
+                      pagedContent.style.opacity = '1';
+
+                      setTimeout(function() {
+                        pageAnimationRunning = false;
+                      }, 200);
+                    });
+                  });
+                }, 155);
+              }
+
+              function applyReaderTransition(mode, resetPage) {
+                window.__readerTransition =
+                  mode === 'fade' || mode === 'pageFlip'
+                    ? mode
+                    : 'scroll';
+
+                const paged = window.__readerTransition !== 'scroll';
+                document.documentElement.classList.toggle(
+                  'reader-paged',
+                  paged
+                );
+                document.body.classList.toggle('reader-paged', paged);
+                pagedContent?.classList.toggle('reader-paged', paged);
+                pageAnimationRunning = false;
+
+                if (resetPage) {
+                  currentPage = 0;
+                }
+
+                window.__readerCurrentPage = currentPage;
+
+                if (pagedContent) {
+                  pagedContent.style.transition = 'none';
+                  pagedContent.style.opacity = '1';
+                  pagedContent.style.transform = paged
+                    ? pageTransform(currentPage, 0)
+                    : 'none';
+                }
+
+                window.scrollTo(0, 0);
+
+                requestAnimationFrame(function() {
+                  requestAnimationFrame(refreshReaderPages);
+                });
+              }
+
+              window.__refreshReaderPages = refreshReaderPages;
+              window.__goToReaderPage = goToReaderPage;
+              window.__navigateReaderPage = function(direction) {
+                goToReaderPage(
+                  currentPage + (direction > 0 ? 1 : -1)
+                );
+              };
+              window.__applyReaderTransition = applyReaderTransition;
+
+              window.addEventListener('resize', function() {
+                setTimeout(refreshReaderPages, 50);
+              });
               // --------------------------------
               // SCROLL HANDLING
               // --------------------------------
@@ -784,6 +1079,7 @@ const textColor =
           `}
 
           />
+          </View>
         </SafeAreaView>
 
         {/* ========================= */}

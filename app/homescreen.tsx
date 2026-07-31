@@ -34,11 +34,9 @@ import {
 } from '@/components/ui/tabs';
 import { Text } from '@/components/ui/text';
 import * as Haptics from 'expo-haptics';
-import { useRouter } from "expo-router";
 import React from 'react';
 import { View } from 'react-native';
-const router = useRouter();
-const homescreen = () => {
+const HomeScreen = () => {
   return (
     <View className="flex-1 bg-gray-300 px-6 py-8">
       <Text className="mb-4 text-lg text-gray-900">homescreen</Text>
@@ -118,4 +116,4 @@ const homescreen = () => {
   );
 };
 
-export default homescreen;
+export default HomeScreen;

@@ -3,7 +3,7 @@ import { useBottomSheet } from "@/hooks/useBottomSheet";
 import { Link } from 'expo-router';
 import React from 'react';
 import { Button, Text, View } from 'react-native';
-const singup = () => {
+const SignUp = () => {
   const sheet = useBottomSheet();
   return (
     <View className="flex-1 p-6">
@@ -37,4 +37,4 @@ const singup = () => {
   )
 }
 
-export default singup
+export default SignUp

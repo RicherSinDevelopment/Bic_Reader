@@ -2,7 +2,7 @@ import { useDocumentPicker } from "@/hooks/useDocumentPicker";
 import { Link } from 'expo-router';
 import React from 'react';
 import { Pressable, Text, View } from "react-native";
-const signin = () => {
+const SignIn = () => {
   const { pickPdf } = useDocumentPicker();
 
   const handlePickPdf = async () => {
@@ -31,4 +31,4 @@ const signin = () => {
   )
 }
 
-export default signin
+export default SignIn

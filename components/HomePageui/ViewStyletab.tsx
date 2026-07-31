@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { Animated, Pressable, Text, View } from "react-native";
 
 interface PdfLayoutTabsProps {
@@ -13,7 +13,7 @@ export default function PdfLayoutTabs({
   onColumnsChange,
 }: PdfLayoutTabsProps) {
   const [selectedColumns, setSelectedColumns] = useState<1 | 2 | 3>(1);
-  const indicatorX = useRef(new Animated.Value(0)).current;
+  const [indicatorX] = useState(() => new Animated.Value(0));
 
   const selectColumns = (columns: 1 | 2 | 3) => {
     setSelectedColumns(columns);

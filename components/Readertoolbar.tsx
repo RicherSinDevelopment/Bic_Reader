@@ -40,20 +40,15 @@ export default function ReaderToolbar({
   activeItem,
   onSelectItem,
 }: Props) {
-  const primaryColor = "#0891b2";
   const greyColor = "#737373";
 
   const renderIcon = (
     item: ReaderBottomNavItem,
     isFocused: boolean
   ) => {
-    const color = isFocused
-      ? primaryColor
-      : greyColor;
-
     const iconProps = {
       size: 22,
-      color,
+      color: greyColor,
       strokeWidth: isFocused ? 2.5 : 2,
     };
 
@@ -96,11 +91,6 @@ export default function ReaderToolbar({
               selected: isFocused,
             }}
           >
-            {/* Active indicator */}
-            {isFocused && (
-              <View style={styles.activeIndicator} />
-            )}
-
             {/* Icon */}
             {renderIcon(item.id, isFocused)}
           </Pressable>
@@ -156,17 +146,5 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
 
-  activeIndicator: {
-    position: "absolute",
-
-    top: -15,
-
-    width: 35,
-    height: 3,
-
-    borderRadius: 10,
-
-    backgroundColor: "#0891b2",
-  },
 });
 

@@ -63,6 +63,7 @@ const ReaderView = ({ isLandscape }: ReaderViewProps) => {
     );
   }, []);
 
+  /* eslint-disable react-hooks/refs -- PanResponder callbacks read WebView refs only after gestures. */
   const pagePanResponder = useMemo(
     () =>
       PanResponder.create({
@@ -83,6 +84,7 @@ const ReaderView = ({ isLandscape }: ReaderViewProps) => {
       }),
     [isPaged, navigateReaderPage]
   );
+  /* eslint-enable react-hooks/refs */
 
   const highlightSpokenWord = useCallback(
     (charIndex: number, charLength: number) => {
@@ -160,8 +162,7 @@ const textColor =
     syncPageTransition();
   }, [sendReaderSettings, syncPageTransition]);
   // Toolbar animation
-  const toolbarTranslateY =
-    useRef(new Animated.Value(0)).current;
+  const [toolbarTranslateY] = useState(() => new Animated.Value(0));
 
   // Previous scroll position
   const lastScrollY =

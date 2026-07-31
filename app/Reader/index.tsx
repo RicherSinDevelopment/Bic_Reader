@@ -12,11 +12,11 @@ import {
 } from "@/components/ui/tabs";
 import { useScreenRotation } from "@/hooks/screenRotation";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Animated, View } from "react-native";
 
 export default function ReaderScreen() {
-  const headerVisibility = useRef(new Animated.Value(1)).current;
+  const [headerVisibility] = useState(() => new Animated.Value(1));
   const [activeTab, setActiveTab] = useState("reader");
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isLandscape, setIsLandscape] = useState(false);

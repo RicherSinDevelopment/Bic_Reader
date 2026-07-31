@@ -45,6 +45,7 @@
     "react-aria": "^3.45.0",
     "react-dom": "19.2.3",
     "react-native": "0.86.2",
+    "react-native-blob-util": "^0.24.10",
     "react-native-css": "^3.0.7",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-pager-view": "8.0.2",

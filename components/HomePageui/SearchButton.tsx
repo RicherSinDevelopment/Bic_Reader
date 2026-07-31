@@ -1,4 +1,4 @@
-import PdfCoverCard from '@/components/pdfcardcomponent/createpdfcardexpocom';
+import PdfCoverCard from '@/components/pdfcardcomponent/createpdfcard';
 import {
   BottomSheet,
   BottomSheetBackdrop,
@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Icon, SearchIcon } from '@/components/ui/icon';
 import type { PdfLibraryItem } from '@/hooks/displaypdfs';
+import { useRouter } from 'expo-router';
 import React, { useMemo, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +23,7 @@ type SearchButtonProps = {
 
 export default function SearchButton({ pdfs }: SearchButtonProps) {
   const bottomSheetRef = useRef<BottomSheetRef>(null);
+  const router = useRouter();
   const [query, setQuery] = useState('');
   const insets = useSafeAreaInsets();
 
@@ -95,6 +97,13 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
                 fileName={item.name}
                 dateOpened={item.dateOpened}
                 completionPercentage={item.completionPercentage}
+                onOpen={() => {
+                  bottomSheetRef.current?.close();
+                  router.push({
+                    pathname: "/Reader/[pdfId]",
+                    params: { pdfId: item.id },
+                  });
+                }}
               />
             )}
           />

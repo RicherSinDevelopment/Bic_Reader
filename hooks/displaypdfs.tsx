@@ -1,4 +1,6 @@
-import PdfCoverCard from "@/components/pdfcardcomponent/createpdfcardexpocom";
+import PdfCoverCard from "@/components/pdfcardcomponent/createpdfcard";
+import type { PdfDocument } from "@/database/types";
+import { useRouter } from "expo-router";
 import {
   FlatList,
   Text,
@@ -10,15 +12,7 @@ import {
 // PROPS
 // ========================================
 
-export interface PdfLibraryItem {
-  id: string;
-  name: string;
-  uri: string;
-  size?: number;
-  mimeType?: string;
-  dateOpened: string;
-  completionPercentage: number;
-}
+export type PdfLibraryItem = PdfDocument;
 
 interface PdfLibraryProps {
   numColumns: 1 | 2 | 3;
@@ -37,6 +31,8 @@ export default function PdfLibrary({
   onDeletePdf,
   onRenamePdf,
 }: PdfLibraryProps) {
+  const router = useRouter();
+
   // ========================================
   // CUSTOMIZE SPACING
   // ========================================
@@ -119,6 +115,12 @@ export default function PdfLibrary({
               completionPercentage={item.completionPercentage}
               onDelete={() => onDeletePdf(item.id)}
               onRename={(name) => onRenamePdf(item.id, name)}
+              onOpen={() =>
+                router.push({
+                  pathname: "/Reader/[pdfId]",
+                  params: { pdfId: item.id },
+                })
+              }
             />
           </View>
         )}

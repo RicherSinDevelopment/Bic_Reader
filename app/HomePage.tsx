@@ -5,24 +5,16 @@ import SortButton, {
   type PdfSortOption,
 } from "@/components/HomePageui/SortBybutton";
 import PdfLayoutTabs from "@/components/HomePageui/ViewStyletab";
-import PdfLibrary, { type PdfLibraryItem } from "@/hooks/displaypdfs";
+import PdfLibrary from "@/hooks/displaypdfs";
 import type { PickedPdf } from "@/hooks/useDocumentPicker";
+import { usePdfLibrary } from "@/hooks/usePdfLibrary";
 import React, { useMemo, useState } from "react";
 import { Modal, Pressable, Text, View } from "react-native";
 
-function normalizePdfName(name: string) {
-  const normalizedName = name
-    .replace(/\.pdf$/i, "")
-    .replace(/\s*(?:\(\d+\)|-?\s*copy)$/i, "")
-    .toLocaleLowerCase()
-    .replace(/[^\p{L}\p{N}]/gu, "");
-
-  return normalizedName || name.toLocaleLowerCase().trim();
-}
 
 const HomePage = () => {
   const [numColumns, setNumColumns] = useState<1 | 2 | 3>(1);
-  const [pdfs, setPdfs] = useState<PdfLibraryItem[]>([]);
+  const { pdfs, importPdf, deletePdf, renamePdf } = usePdfLibrary();
   const [sortOption, setSortOption] = useState<PdfSortOption>("newest");
   const [duplicatePdfName, setDuplicatePdfName] = useState<string | null>(null);
 
@@ -42,38 +34,20 @@ const HomePage = () => {
     });
   }, [pdfs, sortOption]);
 
-  const handlePdfPicked = (pdf: PickedPdf) => {
-    const normalizedName = normalizePdfName(pdf.name);
-    const duplicate = pdfs.some(
-      (existingPdf) => normalizePdfName(existingPdf.name) === normalizedName
-    );
+  const handlePdfPicked = async (pdf: PickedPdf) => {
+    const result = await importPdf(pdf);
 
-    if (duplicate) {
+    if (result.status === "duplicate") {
       setDuplicatePdfName(pdf.name);
-      return;
     }
-
-    const addedAt = new Date().toISOString();
-
-    setPdfs((currentPdfs) => [
-      {
-        ...pdf,
-        id: `${Date.now()}-${pdf.name}`,
-        dateOpened: addedAt,
-        completionPercentage: 0,
-      },
-      ...currentPdfs,
-    ]);
   };
 
   const handleDeletePdf = (id: string) => {
-    setPdfs((currentPdfs) => currentPdfs.filter((pdf) => pdf.id !== id));
+    void deletePdf(id);
   };
 
   const handleRenamePdf = (id: string, name: string) => {
-    setPdfs((currentPdfs) =>
-      currentPdfs.map((pdf) => (pdf.id === id ? { ...pdf, name } : pdf))
-    );
+    void renamePdf(id, name);
   };
 
   return (

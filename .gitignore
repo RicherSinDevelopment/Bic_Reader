@@ -41,6 +41,9 @@ app-example
 # generated native folders
 /ios
 /android
+/pdf_reader/target/
+/pdf_reader/output.json
+/modules/bic-pdf-reader/ios/Frameworks/
 
 *.pdf
 

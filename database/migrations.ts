@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 
 export async function migrateDatabase(db: SQLiteDatabase) {
   await db.execAsync(`
@@ -39,6 +39,18 @@ export async function migrateDatabase(db: SQLiteDatabase) {
 
       CREATE INDEX IF NOT EXISTS idx_pdf_documents_added_at
       ON pdf_documents(added_at DESC);
+    `);
+  }
+
+  if (currentVersion < 2) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS pdf_extractions (
+        pdf_id TEXT PRIMARY KEY NOT NULL,
+        engine_version INTEGER NOT NULL,
+        document_json TEXT NOT NULL,
+        extracted_at TEXT NOT NULL,
+        FOREIGN KEY (pdf_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
+      );
     `);
   }
 

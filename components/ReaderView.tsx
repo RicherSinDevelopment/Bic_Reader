@@ -27,15 +27,47 @@ import {
 import { useReaderSettingsStore } from '@/stores/readerSettingsStore';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
+import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 
 type ReaderViewProps = {
   isLandscape: boolean;
+  blocks: ExtractedPdfBlock[];
 };
 
-const ReaderView = ({ isLandscape }: ReaderViewProps) => {
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function blockTag(block: ExtractedPdfBlock) {
+  switch (block.kind) {
+    case "title": return "h1";
+    case "heading": return "h2";
+    case "listItem": return "li";
+    case "footnote": return "aside";
+    default: return "p";
+  }
+}
+
+function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
+  return blocks.map((block) => {
+    const tag = blockTag(block);
+    return `<${tag} data-reader-block data-block-id="${escapeHtml(block.id)}" data-source-page="${block.page}">${escapeHtml(block.text)}</${tag}>`;
+  }).join("\n");
+}
+
+const ReaderView = ({ isLandscape, blocks }: ReaderViewProps) => {
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
   const [readerText, setReaderText] = useState("");
+  const [initialBlocks] = useState(() => blocks);
+  const readerMarkup = useMemo(() => blocksToMarkup(initialBlocks), [initialBlocks]);
+  const appendedBlockCount = useRef(initialBlocks.length);
+  const [webViewReady, setWebViewReady] = useState(false);
 
   // Bottom Sheet reference
   const bottomSheetRef =
@@ -48,6 +80,16 @@ const ReaderView = ({ isLandscape }: ReaderViewProps) => {
   }, [isLandscape]);
   // WebView reference
   const webViewRef = useRef<WebView>(null);
+
+  useEffect(() => {
+    if (!webViewReady || blocks.length <= appendedBlockCount.current) return;
+    const appended = blocks.slice(appendedBlockCount.current);
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "appendBlocks",
+      html: blocksToMarkup(appended),
+    }));
+    appendedBlockCount.current = blocks.length;
+  }, [blocks, webViewReady]);
   const transition = useReaderSettingsStore((state) => state.transition);
   const { isPaged, syncPageTransition } = usePageTransition({
     webViewRef,
@@ -158,6 +200,7 @@ const textColor =
     sendReaderSettings();
   }, [sendReaderSettings]);
   const handleReaderLoadEnd = useCallback(() => {
+    setWebViewReady(true);
     sendReaderSettings();
     syncPageTransition();
   }, [sendReaderSettings, syncPageTransition]);
@@ -180,7 +223,7 @@ const textColor =
   // HTML READER
   // --------------------------------
 
-  const htmlContent = `
+  const htmlContent = useMemo(() => `
     <!DOCTYPE html>
 
     <html>
@@ -189,7 +232,7 @@ const textColor =
 
         <meta
           name="viewport"
-          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes"
+          content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no"
         />
 
         <style>
@@ -210,6 +253,7 @@ const textColor =
             min-height: 100%;
 
             overscroll-behavior-y: auto;
+            touch-action: pan-y;
           }
 
           body {
@@ -278,6 +322,27 @@ const textColor =
             margin-top: 0;
             margin-bottom: 24px;
           }
+          h1 {
+            font-size: 1.7em;
+            font-weight: inherit;
+            line-height: 1.2;
+            margin: 0 0 1em;
+          }
+          h2 {
+            font-size: 1.3em;
+            font-weight: inherit;
+            line-height: 1.3;
+            margin: 1.3em 0 0.65em;
+          }
+          li {
+            margin: 0 0 0.65em 1.2em;
+          }
+          aside {
+            font-size: 0.82em;
+            line-height: 1.45;
+            opacity: 0.78;
+            margin-bottom: 1em;
+          }
           .tts-word-active {
             background-color: #fde047;
             border-radius: 4px;
@@ -311,18 +376,41 @@ const textColor =
 
       <body>
 
-        <p>
-          The Roman Empire was one of the greatest and most influential civilizations in human history, shaping the political, cultural, legal, military, and architectural foundations of the Western world for centuries. Emerging from the Roman Republic after the rise of Augustus Caesar in 27 BC, the empire expanded to encompass vast territories across Europe, North Africa, and the Middle East, stretching from the Atlantic Ocean to the Euphrates River at its greatest extent. This immense empire united hundreds of different peoples, languages, and cultures under a single government, creating an unprecedented period of stability known as the *Pax Romana*, or "Roman Peace," which lasted for approximately two hundred years. During this era, commerce flourished as an extensive network of paved roads, bridges, ports, and aqueducts connected distant provinces, allowing goods, ideas,
-          and people to travel more efficiently than ever before. Roman engineers demonstrated extraordinary skill by constructing monumental structures such as the Colosseum, the Pantheon, and countless amphitheaters, baths, and aqueducts, many of which still stand today as enduring symbols of Roman ingenuity. The empire's military was among the most disciplined and effective fighting forces in history, with highly trained legions that employed advanced tactics, standardized equipment, and exceptional organization to conquer and defend an enormous territory. Beyond military success, Rome profoundly influenced civilization through its legal system, developing principles of justice, citizenship, contracts, and governance that continue to shape modern legal codes around the world. Latin, the language of Rome, became the foundation for the Romance including Italian, French, Spanish, Portuguese, and contributed countless words to English and many other languages. Roman culture also embraced literature, philosophy, art, and education, producing renowned figures such as Virgil, Cicero, Ovid, and Seneca, whose writings remain widely studied today. Although the empire experienced remarkable prosperity, it also faced significant challenges, including political corruption, economic instability, civil wars, invasions by Germanic tribes, and the increasing difficulty 
-          of governing such an expansive realm. In AD 395, the empire was permanently divided into the Western and Eastern Roman Empires, with the Western Empire
-          ultimately collapsing in AD 476 after the deposition of the last emperor, Romulus Augustulus. The Eastern Roman Empire, later known as the Byzantine Empire, continued to preserve Roman traditions and institutions for nearly another thousand years until the fall of Constantinople in 1453. Despite its eventual decline, the legacy of the Roman Empire has endured through its contributions to law, government, military organization, architecture, engineering, language, religion, and culture, making it one of the most transformative civilizations in world history. Its influence can still be seen in modern democratic institutions, legal systems, city planning, engineering practices, and countless aspects of contemporary society, demonstrating that the achievements of ancient Rome continue to shape the world more than two millennia after its rise.
-
-        </p>
+        <main id="reader-pages">
+          ${readerMarkup}
+        </main>
 
         <script>
   function handleMessage(event) {
     try {
       const message = JSON.parse(event.data);
+
+      if (message.type === 'appendBlocks') {
+        const container = document.getElementById('reader-pages');
+        if (!container || !message.html) return;
+        container.insertAdjacentHTML('beforeend', message.html);
+
+        const allBlocks = Array.from(
+          container.querySelectorAll('[data-reader-block]')
+        );
+        let offset = 0;
+        const allText = allBlocks.map(function(block) {
+          const text = (block.textContent || '').trim();
+          block.dataset.ttsStart = String(offset);
+          block.dataset.ttsEnd = String(offset + text.length);
+          offset += text.length + 2;
+          return text;
+        }).join('\\n\\n');
+
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'readerText',
+          text: allText
+        }));
+        if (window.__refreshReaderPages) {
+          requestAnimationFrame(window.__refreshReaderPages);
+        }
+        return;
+      }
 
       if (message.type === 'pageNavigate') {
         if (window.__navigateReaderPage) {
@@ -336,10 +424,61 @@ const textColor =
         }
         return;
       }
-      if (message.type === 'ttsHighlight') {
-        const words = Array.from(
-          document.querySelectorAll('[data-tts-start]')
-        );
+       if (message.type === 'ttsHighlight') {
+         const readerBlocks = Array.from(
+           document.querySelectorAll('[data-reader-block]')
+         );
+         const targetBlock = readerBlocks.find(function(block) {
+           const start = Number(block.dataset.ttsStart);
+           const end = Number(block.dataset.ttsEnd);
+           return message.charIndex >= start && message.charIndex < end;
+         });
+
+         if (targetBlock && window.__activeTtsBlock !== targetBlock) {
+           if (window.__activeTtsBlock) {
+             const previousText = window.__activeTtsBlock.textContent || '';
+             window.__activeTtsBlock.replaceChildren(
+               document.createTextNode(previousText)
+             );
+           }
+
+           const blockText = targetBlock.textContent || '';
+           const blockStart = Number(targetBlock.dataset.ttsStart);
+           const fragment = document.createDocumentFragment();
+           const wordPattern = /\\S+/g;
+           let cursor = 0;
+           let match;
+
+           while ((match = wordPattern.exec(blockText)) !== null) {
+             if (match.index > cursor) {
+               fragment.appendChild(
+                 document.createTextNode(blockText.slice(cursor, match.index))
+               );
+             }
+
+             const word = document.createElement('span');
+             word.textContent = match[0];
+             word.dataset.ttsStart = String(blockStart + match.index);
+             word.dataset.ttsEnd = String(
+               blockStart + match.index + match[0].length
+             );
+             fragment.appendChild(word);
+             cursor = match.index + match[0].length;
+           }
+
+           if (cursor < blockText.length) {
+             fragment.appendChild(
+               document.createTextNode(blockText.slice(cursor))
+             );
+           }
+
+           targetBlock.replaceChildren(fragment);
+           window.__activeTtsBlock = targetBlock;
+         }
+
+         const words = targetBlock
+           ? Array.from(targetBlock.querySelectorAll('[data-tts-start]'))
+           : [];
         const activeWord = words.find(function(word) {
           const start = Number(word.dataset.ttsStart);
           const end = Number(word.dataset.ttsEnd);
@@ -422,6 +561,10 @@ const textColor =
         document.body.style.color =
           message.textColor;
 
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'settingsApplied'
+        }));
+
         if (window.__refreshReaderPages) {
           setTimeout(window.__refreshReaderPages, 0);
         }
@@ -448,7 +591,9 @@ const textColor =
       </body>
 
     </html>
-  `;
+  `, [readerMarkup]);
+
+  const webViewSource = useMemo(() => ({ html: htmlContent }), [htmlContent]);
 
   // --------------------------------
   // SHOW / HIDE TOOLBAR
@@ -663,9 +808,7 @@ const textColor =
           <WebView
             ref={webViewRef}
 
-          source={{
-            html: htmlContent,
-          }}
+          source={webViewSource}
 
           style={{
             flex: 1,
@@ -735,63 +878,23 @@ const textColor =
               window.__readerInitialized = true;
 
               const paragraphs = Array.from(
-                document.querySelectorAll('p')
+                document.querySelectorAll('[data-reader-block]')
               );
               const paragraphTexts = paragraphs.map(function(paragraph) {
                 return (paragraph.textContent || '').trim();
               });
               const readerText = paragraphTexts.join('\\n\\n');
 
-              const readerPages = document.createElement('main');
-              readerPages.id = 'reader-pages';
-
-              if (paragraphs.length > 0) {
-                paragraphs[0].parentNode.insertBefore(
-                  readerPages,
-                  paragraphs[0]
-                );
-                paragraphs.forEach(function(paragraph) {
-                  readerPages.appendChild(paragraph);
-                });
-              }
+              const readerPages = document.getElementById('reader-pages');
 
               let globalOffset = 0;
 
               paragraphs.forEach(function(paragraph, paragraphIndex) {
                 const paragraphText = paragraphTexts[paragraphIndex];
-                const fragment = document.createDocumentFragment();
-                const wordPattern = /\\S+/g;
-                let cursor = 0;
-                let match;
-
-                while ((match = wordPattern.exec(paragraphText)) !== null) {
-                  if (match.index > cursor) {
-                    fragment.appendChild(
-                      document.createTextNode(
-                        paragraphText.slice(cursor, match.index)
-                      )
-                    );
-                  }
-
-                  const word = document.createElement('span');
-                  word.textContent = match[0];
-                  word.dataset.ttsStart = String(
-                    globalOffset + match.index
-                  );
-                  word.dataset.ttsEnd = String(
-                    globalOffset + match.index + match[0].length
-                  );
-                  fragment.appendChild(word);
-                  cursor = match.index + match[0].length;
-                }
-
-                if (cursor < paragraphText.length) {
-                  fragment.appendChild(
-                    document.createTextNode(paragraphText.slice(cursor))
-                  );
-                }
-
-                paragraph.replaceChildren(fragment);
+                paragraph.dataset.ttsStart = String(globalOffset);
+                paragraph.dataset.ttsEnd = String(
+                  globalOffset + paragraphText.length
+                );
                 globalOffset += paragraphText.length + 2;
               });
 

@@ -13,9 +13,7 @@ import { FlatList, Platform, Pressable, Text, View } from 'react-native';
 import Animated, {
   runOnJS,
   useAnimatedScrollHandler,
-  useAnimatedStyle,
   useSharedValue,
-  withSpring,
 } from 'react-native-reanimated';
 import { TabsAnimatedIndicator } from './TabsAnimatedIndicator';
 
@@ -335,7 +333,7 @@ const TabsContent = React.forwardRef<
 const TabsContentWrapper = React.forwardRef<
   React.ComponentRef<typeof UITabs.ContentWrapper>,
   ITabsContentWrapperProps
->(({ className, targetHeight, ...props }: any, ref) => {
+>(({ className, targetHeight, style, ...props }: any, ref) => {
   const context = React.useContext(TabsContext);
 
   // Get the height of the selected content from the layouts Map
@@ -344,35 +342,10 @@ const TabsContentWrapper = React.forwardRef<
     : null;
   const height = selectedLayout?.height || 0;
 
-  // Use shared value for Reanimated with initial height
-  const heightValue = useSharedValue(height);
-  const isFirstRender = React.useRef(true);
-
-  // Update shared value when height changes
-  React.useEffect(() => {
-    if (height > 0) {
-      if (isFirstRender.current) {
-        // Set initial height without animation
-        heightValue.value = height;
-        isFirstRender.current = false;
-      } else {
-        // Animate height changes
-        heightValue.value = withSpring(height,{duration:100});
-      }
-    }
-  }, [height, heightValue]);
-
-  // Animated style for height transitions
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      height: heightValue.value > 0 ? heightValue.value : 'auto',
-    };
-  }, []);
-
   return (
     <UITabs.ContentWrapper
       ref={ref}
-      style={animatedStyle}
+      style={[style, height > 0 ? { height } : undefined]}
       {...props}
       className={tabsContentWrapperStyle({ class: className })}
     />

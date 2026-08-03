@@ -1,0 +1,120 @@
+diff --git a/node_modules/react-native-webview/apple/RNCWebViewImpl.m b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
+index 7f5c24d..043ac37 100644
+--- a/node_modules/react-native-webview/apple/RNCWebViewImpl.m
++++ b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
+@@ -25,6 +25,11 @@ static NSDictionary* customCertificatesForHost;
+ 
+ NSString *const CUSTOM_SELECTOR = @"_CUSTOM_SELECTOR_";
+ 
++@class RNCWebViewImpl;
++@interface RNCWebViewImpl (BicSelectionMenuForwarding)
++- (void)tappedMenuItem:(NSString *)eventType;
++@end
++
+ #if TARGET_OS_IOS
+ // runtime trick to remove WKWebView keyboard default toolbar
+ // see: http://stackoverflow.com/questions/19033292/ios-7-uiwebview-keyboard-issue/19042279#19042279
+@@ -52,6 +57,7 @@ NSString *const CUSTOM_SELECTOR = @"_CUSTOM_SELECTOR_";
+ #if !TARGET_OS_OSX
+ @property (nonatomic, copy) NSArray<NSDictionary *> * _Nullable menuItems;
+ @property (nonatomic, copy) NSArray<NSString *> * _Nullable suppressMenuItems;
++@property (nonatomic, weak) RNCWebViewImpl * _Nullable menuActionOwner;
+ #endif // !TARGET_OS_OSX
+ @end
+ @implementation RNCWKWebView
+@@ -87,19 +93,43 @@ NSString *const CUSTOM_SELECTOR = @"_CUSTOM_SELECTOR_";
+       }
+   }
+ 
+-  if (!self.menuItems) {
+-      return [super canPerformAction:action withSender:sender];
+-  }
+-
+-  return NO;
++  return [super canPerformAction:action withSender:sender];
+ }
+ - (void)buildMenuWithBuilder:(id<UIMenuBuilder>)builder API_AVAILABLE(ios(13.0))  {
++    [super buildMenuWithBuilder:builder];
+     if (@available(iOS 16.0, *)) {
+-      if(self.menuItems){
+-        [builder removeMenuForIdentifier:UIMenuLookup];
++      if (self.menuItems.count == 0 || !self.menuActionOwner) return;
++
++      NSMutableArray<UIMenuElement *> *actions = [NSMutableArray new];
++      __weak RNCWebViewImpl *owner = self.menuActionOwner;
++      for (NSDictionary *menuItem in self.menuItems) {
++        NSString *label = [RCTConvert NSString:menuItem[@"label"]];
++        NSString *key = [RCTConvert NSString:menuItem[@"key"]];
++        UIImage *icon = nil;
++        if ([key isEqualToString:@"highlight"]) {
++          icon = [UIImage systemImageNamed:@"highlighter"];
++          if (!icon) icon = [UIImage systemImageNamed:@"pencil.tip"];
++        } else if ([key isEqualToString:@"askAI"]) {
++          icon = [UIImage systemImageNamed:@"sparkles"];
++        }
++        UIAction *action = [UIAction actionWithTitle:label
++                                               image:icon
++                                          identifier:nil
++                                             handler:^(__kindof UIAction *selectedAction) {
++          [owner tappedMenuItem:key];
++        }];
++        [actions addObject:action];
+       }
++
++      UIMenuIdentifier identifier = @"com.bicreader.selection-actions";
++      [builder removeMenuForIdentifier:identifier];
++      UIMenu *customMenu = [UIMenu menuWithTitle:@""
++                                           image:nil
++                                      identifier:identifier
++                                         options:UIMenuOptionsDisplayInline
++                                        children:actions];
++      [builder insertChildMenu:customMenu atEndOfMenuForIdentifier:UIMenuStandardEdit];
+     }
+-    [super buildMenuWithBuilder:builder];
+ }
+ #else // TARGET_OS_OSX
+ - (void)scrollWheel:(NSEvent *)theEvent {
+@@ -297,14 +327,22 @@ RCTAutoInsetsProtocol>
+     NSString *menuItemLabel = [RCTConvert NSString:menuItem[@"label"]];
+     NSString *menuItemKey = [RCTConvert NSString:menuItem[@"key"]];
+     NSString *sel = [NSString stringWithFormat:@"%@%@", CUSTOM_SELECTOR, menuItemKey];
++    UIImage *icon = nil;
++    if ([menuItemKey isEqualToString:@"highlight"]) {
++      icon = [UIImage systemImageNamed:@"highlighter"];
++      if (!icon) icon = [UIImage systemImageNamed:@"pencil.tip"];
++    } else if ([menuItemKey isEqualToString:@"askAI"]) {
++      icon = [UIImage systemImageNamed:@"sparkles"];
++    }
+     UICommand *command = [UICommand commandWithTitle:menuItemLabel
+-                                               image:nil
++                                               image:icon
+                                               action:NSSelectorFromString(sel)
+                                         propertyList:nil];
+     [menuItems addObject:command];
+   }
+-  UIMenu *menu = [UIMenu menuWithChildren:menuItems];
+-  return menu;
++  NSMutableArray<UIMenuElement *> *combinedActions = [suggestedActions mutableCopy];
++  [combinedActions addObjectsFromArray:menuItems];
++  return [UIMenu menuWithChildren:combinedActions];
+ }
+ #endif // !TARGET_OS_OSX
+ 
+@@ -521,6 +559,7 @@ RCTAutoInsetsProtocol>
+ #if !TARGET_OS_OSX
+     _webView.menuItems = _menuItems;
+     _webView.suppressMenuItems = _suppressMenuItems;
++    _webView.menuActionOwner = self;
+     _webView.scrollView.delegate = self;
+ #endif // !TARGET_OS_OSX
+     _webView.UIDelegate = self;
+@@ -580,6 +619,9 @@ RCTAutoInsetsProtocol>
+ #if !TARGET_OS_OSX
+   // Allow this object to recognize gestures
+   if (self.menuItems != nil) {
++    if (@available(iOS 16.0, *)) {
++      return;
++    }
+     UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(startLongPress:)];
+     longPress.delegate = self;
+ 

@@ -1,7 +1,7 @@
 import BackButton from "@/components/Backbutton";
 import OriginalPDF from "@/components/OriginalPDF";
 import ReaderView from "@/components/ReaderView";
-import ThreeLinesButton from "@/components/threelinesbutton";
+import ThreeLinesButton, { type ReaderChapter } from "@/components/threelinesbutton";
 import { Box } from "@/components/ui/box";
 import { Text } from "@/components/ui/text";
 import {
@@ -22,6 +22,7 @@ import {
 } from "@/database/pdfExtractionRepository";
 import type { PdfDocument } from "@/database/types";
 import { useScreenRotation } from "@/hooks/screenRotation";
+import { useSwitchHighlight, type PdfPageSize } from "@/hooks/switchhighlight";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
@@ -31,7 +32,7 @@ import {
   type ExtractedPdfBlock,
   type ExtractedPdfDocument,
 } from "@/modules/bic-pdf-reader";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Animated, View } from "react-native";
 
 function isVisibleReaderBlock(block: ExtractedPdfBlock) {
@@ -41,6 +42,15 @@ function isVisibleReaderBlock(block: ExtractedPdfBlock) {
     || normalized.startsWith("aronson rdg_")
     || (normalized.includes("_ch") && normalized.includes(" page "));
   return !isPrepressMarker;
+}
+
+function firstMissingPageIndex(document: ExtractedPdfDocument | null | undefined) {
+  if (!document) return 0;
+  const loaded = new Set(document.pages.map((page) => page.page));
+  for (let page = 1; page <= document.pageCount; page += 1) {
+    if (!loaded.has(page)) return page - 1;
+  }
+  return document.pageCount;
 }
 
 export default function ReaderScreen() {
@@ -54,9 +64,20 @@ export default function ReaderScreen() {
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isLandscape, setIsLandscape] = useState(false);
   const [readerBlocks, setReaderBlocks] = useState<ExtractedPdfBlock[]>([]);
+  const [readerPageSizes, setReaderPageSizes] = useState<Record<number, PdfPageSize>>({});
   const [readerLoading, setReaderLoading] = useState(true);
   const [readerError, setReaderError] = useState<string | null>(null);
+  const [readerPageCount, setReaderPageCount] = useState(0);
+  const [readerCurrentPage, setReaderCurrentPage] = useState(1);
+  const [originalCurrentPage, setOriginalCurrentPage] = useState(1);
+  const [originalPageCount, setOriginalPageCount] = useState(0);
+  const [readerDestination, setReaderDestination] = useState<{ page: number; blockId?: string; nonce: number } | null>(null);
   const readerExtractionStarted = React.useRef(false);
+  const requestedExtractionPage = React.useRef<number | null>(null);
+  const { reportVisibleBlock, target: switchHighlightTarget } = useSwitchHighlight(
+    readerBlocks,
+    readerPageSizes,
+  );
 
   useScreenRotation(setIsLandscape);
 
@@ -121,20 +142,30 @@ export default function ReaderScreen() {
               setReaderBlocks(value.pages.flatMap((page) =>
                 page.blocks.filter(isVisibleReaderBlock),
               ));
+              setReaderPageCount(value.pageCount);
+              setReaderPageSizes(Object.fromEntries(
+                value.pages.map((page) => [page.page, {
+                  width: page.width,
+                  height: page.height,
+                }]),
+              ));
               setReaderLoading(false);
             }
           };
 
           if (document?.pages.length) publish(document);
 
-          let nextPage = document?.pages.reduce(
-            (highest, page) => Math.max(highest, page.page),
-            0,
-          ) ?? 0;
+          let nextPage = firstMissingPageIndex(document);
           let pageCount = document?.pageCount ?? Number.MAX_SAFE_INTEGER;
 
           while (!cancelled && nextPage < pageCount) {
-            const chunk = await extractPdfDocumentRange(pdf.uri, nextPage, 40);
+            const requestedPage = requestedExtractionPage.current;
+            const requestIsMissing = requestedPage !== null &&
+              !document?.pages.some((page) => page.page === requestedPage);
+            const firstPage = requestIsMissing ? requestedPage - 1 : nextPage;
+            if (requestIsMissing) requestedExtractionPage.current = null;
+
+            const chunk = await extractPdfDocumentRange(pdf.uri, firstPage, 16);
             const pagesByNumber = new Map(
               document?.pages.map((page) => [page.page, page]) ?? [],
             );
@@ -144,14 +175,12 @@ export default function ReaderScreen() {
               pages: Array.from(pagesByNumber.values()).sort((a, b) => a.page - b.page),
             };
             pageCount = document.pageCount;
-            nextPage = document.pages.reduce(
-              (highest, page) => Math.max(highest, page.page),
-              0,
-            );
+            nextPage = firstMissingPageIndex(document);
             await savePdfExtraction(db, pdfId, document);
             publish(document);
 
             if (chunk.pages.length === 0) break;
+            await new Promise<void>((resolve) => setTimeout(resolve, 16));
           }
         } catch (error) {
           if (!cancelled) {
@@ -187,12 +216,48 @@ export default function ReaderScreen() {
 
   const handlePageChanged = useCallback(
     (page: number, totalPages: number) => {
+      setOriginalCurrentPage(page);
+      setOriginalPageCount(totalPages);
       if (pdfId) {
         void updatePdfProgress(db, pdfId, page, totalPages);
       }
     },
     [db, pdfId],
   );
+
+  const readerChapters = useMemo<ReaderChapter[]>(() => {
+    const headings = readerBlocks.filter(
+      (block) => block.kind === "title" || block.kind === "heading",
+    );
+    const isChapterStart = (block: ExtractedPdfBlock) => block.kind === "title" ||
+      /^(chapter|part|book)\b/i.test(block.text.trim());
+    const hasRecognizableChapters = headings.some(isChapterStart);
+    if (!hasRecognizableChapters) {
+      return headings.map((block) => ({ id: block.id, title: block.text, page: block.page }));
+    }
+
+    const chapters: ReaderChapter[] = [];
+    headings.forEach((block) => {
+      const item = { id: block.id, title: block.text, page: block.page };
+      if (isChapterStart(block) || chapters.length === 0) {
+        chapters.push({ ...item, children: [] });
+      } else {
+        chapters.at(-1)?.children?.push(item);
+      }
+    });
+    return chapters;
+  }, [readerBlocks]);
+
+  const visiblePage = activeTab === "original" ? originalCurrentPage : readerCurrentPage;
+  const visiblePageCount = activeTab === "original"
+    ? (originalPageCount || pdf?.totalPages || readerPageCount)
+    : readerPageCount;
+
+  const goToReaderPage = useCallback((page: number, blockId?: string) => {
+    requestedExtractionPage.current = page;
+    setActiveTab("reader");
+    setReaderDestination({ page, blockId, nonce: Date.now() });
+  }, []);
 
   if (isLoading) {
     return (
@@ -264,7 +329,13 @@ export default function ReaderScreen() {
               </Box>
 
               <Box className="absolute right-2 top-1/2 -translate-y-1/2">
-                <ThreeLinesButton />
+                <ThreeLinesButton
+                  chapters={readerChapters}
+                  currentPage={visiblePage}
+                  totalPages={visiblePageCount}
+                  onGoToPage={(page) => goToReaderPage(page)}
+                  onGoToChapter={(chapter) => goToReaderPage(chapter.page, chapter.id)}
+                />
               </Box>
 
               <TabsList className="rounded-xl p-2">
@@ -280,6 +351,11 @@ export default function ReaderScreen() {
               </TabsList>
             </Box>
           </Tabs>
+          {visiblePageCount > 0 && (
+            <Text className="mt-2 text-center font-lato-bold text-xs text-black/55">
+              {visiblePage} of {visiblePageCount}
+            </Text>
+          )}
         </View>
       </Animated.View>
 
@@ -290,8 +366,10 @@ export default function ReaderScreen() {
         >
           <OriginalPDF
             pdfUri={pdf.uri}
+            fileSize={pdf.size}
             initialPage={pdf.currentPage || 1}
             onPageChanged={handlePageChanged}
+            highlightTarget={activeTab === "original" ? switchHighlightTarget : null}
           />
         </View>
 
@@ -300,7 +378,14 @@ export default function ReaderScreen() {
           style={{ position: "absolute", inset: 0, opacity: activeTab === "reader" ? 1 : 0 }}
         >
           {readerBlocks.length > 0 ? (
-            <ReaderView isLandscape={isLandscape} blocks={readerBlocks} />
+            <ReaderView
+              isLandscape={isLandscape}
+              blocks={readerBlocks}
+              pageCount={readerPageCount}
+              destination={readerDestination}
+              onPageChange={setReaderCurrentPage}
+              onSwitchAnchorChange={reportVisibleBlock}
+            />
           ) : readerLoading ? (
             <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8">
               <ActivityIndicator size="large" color="#8fb996" />

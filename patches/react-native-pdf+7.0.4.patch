@@ -1,0 +1,161 @@
+diff --git a/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js
+index 43fea3b..4271514 100644
+--- a/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js
++++ b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js
+@@ -35,14 +35,23 @@
+  |}>;
+ 
+  interface NativeCommands {
+-  +setNativePage: (
++ +setNativePage: (
+     viewRef: React.ElementRef<ComponentType>,
+     page: Int32,
+   ) => void;
++  +setNativeHighlight: (
++    viewRef: React.ElementRef<ComponentType>,
++    page: Int32,
++    left: Float,
++    top: Float,
++    right: Float,
++    bottom: Float,
++  ) => void;
++  +clearNativeHighlight: (viewRef: React.ElementRef<ComponentType>) => void;
+ }
+ 
+ export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
+-  supportedCommands: ['setNativePage'],
++  supportedCommands: ['setNativePage', 'setNativeHighlight', 'clearNativeHighlight'],
+ });
+ 
+  export default codegenNativeComponent<NativeProps>('RNPDFPdfView');
+diff --git a/node_modules/react-native-pdf/index.d.ts b/node_modules/react-native-pdf/index.d.ts
+index cfcea72..c5a9bbf 100644
+--- a/node_modules/react-native-pdf/index.d.ts
++++ b/node_modules/react-native-pdf/index.d.ts
+@@ -66,7 +66,9 @@ export interface PdfProps {
+ }
+ 
+ export interface PdfRef {
+-    setPage(pageNumber: number): void
++    setPage(pageNumber: number): void;
++    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number): void;
++    clearHighlight(): void;
+ }
+ 
+ declare const Pdf: React.ForwardRefExoticComponent<PdfProps & React.RefAttributes<PdfRef>>
+diff --git a/node_modules/react-native-pdf/index.js b/node_modules/react-native-pdf/index.js
+index f807178..5502e30 100644
+--- a/node_modules/react-native-pdf/index.js
++++ b/node_modules/react-native-pdf/index.js
+@@ -368,6 +368,18 @@ export default class Pdf extends Component {
+         
+     }
+ 
++    setHighlight(pageNumber, left, top, right, bottom) {
++        if (!this._root) return;
++        PdfViewCommands.setNativeHighlight(
++            this._root, pageNumber, left, top, right, bottom,
++        );
++    }
++
++    clearHighlight() {
++        if (!this._root) return;
++        PdfViewCommands.clearNativeHighlight(this._root);
++    }
++
+     _onChange = (event) => {
+         // Handle direct events for text selection/highlight
+         if (event.nativeEvent.type) {
+diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
+index 723ca7b..e12236b 100644
+--- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
++++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
+@@ -60,6 +60,13 @@ UIView
+ 
+ @property(nonatomic, copy) RCTBubblingEventBlock onTextSelectionChange;
+ 
++- (void)setNativeHighlight:(NSInteger)page
++                      left:(CGFloat)left
++                       top:(CGFloat)top
++                     right:(CGFloat)right
++                    bottom:(CGFloat)bottom;
++- (void)clearNativeHighlight;
++
+ @end
+ 
+ #endif /* RNPDFPdfView_h */
+diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
+index de46c98..aad0b2a 100644
+--- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
++++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
+@@ -75,6 +75,7 @@ const float MIN_SCALE = 1.0f;
+     UIPinchGestureRecognizer *_pinchRecognizer;
+     UILongPressGestureRecognizer *_longPressRecognizer;
+     UITapGestureRecognizer *_doubleTapEmptyRecognizer;
++    PDFSelection *_switchHighlightSelection;
+ }
+ 
+ #ifdef RCT_NEW_ARCH_ENABLED
+@@ -234,6 +235,62 @@ using namespace facebook::react;
+     [self didSetProps:[NSArray arrayWithObject:@"page"]];
+ }
+ 
++- (void)setNativeHighlight:(NSInteger)page
++                      left:(CGFloat)left
++                       top:(CGFloat)top
++                     right:(CGFloat)right
++                    bottom:(CGFloat)bottom
++{
++    [self clearNativeHighlight];
++    if (!_pdfDocument || page < 1 || page > (NSInteger)_pdfDocument.pageCount) {
++        RLog(@"switch highlight rejected: document=%@ page=%ld pageCount=%lu",
++             _pdfDocument ? @"loaded" : @"missing",
++             (long)page,
++             (unsigned long)_pdfDocument.pageCount);
++        return;
++    }
++
++    PDFPage *pdfPage = [_pdfDocument pageAtIndex:page - 1];
++    CGRect crop = [pdfPage boundsForBox:kPDFDisplayBoxCropBox];
++    CGRect wordRect = CGRectMake(
++        CGRectGetMinX(crop) + left,
++        CGRectGetMinY(crop) + CGRectGetHeight(crop) - bottom,
++        MAX(1.0, right - left),
++        MAX(1.0, bottom - top)
++    );
++    PDFSelection *selection = [pdfPage selectionForRect:CGRectInset(wordRect, -2.0, -2.0)];
++    if (selection.string.length == 0) {
++        selection = [pdfPage selectionForWordAtPoint:CGPointMake(
++            CGRectGetMidX(wordRect), CGRectGetMidY(wordRect)
++        )];
++    }
++    if (selection.string.length == 0) {
++        RLog(@"switch highlight rejected: no PDFKit text at page=%ld rect=%@",
++             (long)page, NSStringFromCGRect(wordRect));
++        return;
++    }
++
++    selection.color = [[UIColor systemYellowColor] colorWithAlphaComponent:0.58];
++    _switchHighlightSelection = selection;
++    _pdfView.highlightedSelections = @[selection];
++    CGRect selectionRect = [selection boundsForPage:pdfPage];
++    [_pdfView goToRect:CGRectInset(selectionRect, -8.0, -24.0) onPage:pdfPage];
++    [_pdfView setNeedsDisplay];
++    RLog(@"switch highlight applied: page=%ld text=%@ rect=%@",
++         (long)page,
++         selection.string,
++         NSStringFromCGRect(selectionRect));
++}
++
++- (void)clearNativeHighlight
++{
++    if (_switchHighlightSelection) {
++        _pdfView.highlightedSelections = nil;
++        _switchHighlightSelection = nil;
++        [_pdfView setNeedsDisplay];
++    }
++}
++
+ #endif
+ 
+ - (instancetype)initWithBridge:(RCTBridge *)bridge

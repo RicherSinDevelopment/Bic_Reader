@@ -50,3 +50,4 @@ app-example
 credentials.json
 *.cer
 *.certSigningRequest
+/.expo-pdfjs-check*/

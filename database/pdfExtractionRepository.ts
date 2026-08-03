@@ -1,7 +1,7 @@
 import type { ExtractedPdfDocument } from "@/modules/bic-pdf-reader";
 import type { SQLiteDatabase } from "expo-sqlite";
 
-export const PDF_EXTRACTION_ENGINE_VERSION = 3;
+export const PDF_EXTRACTION_ENGINE_VERSION = 5;
 
 export async function getCachedPdfExtraction(db: SQLiteDatabase, pdfId: string) {
   const row = await db.getFirstAsync<{ document_json: string; engine_version: number }>(

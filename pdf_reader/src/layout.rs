@@ -75,12 +75,15 @@ fn build_line(mut row: Vec<Glyph>) -> Option<Line> {
 
     let mut text = String::new();
     let mut previous: Option<&Glyph> = None;
+    let mut word_bounds = Vec::new();
+    let mut current_word: Option<crate::model::Bounds> = None;
     for glyph in &row {
         if glyph.character.is_whitespace() {
             if !text.ends_with(' ') {
                 text.push(' ');
             }
         } else {
+            let mut starts_word = false;
             if let Some(prior) = previous {
                 let gap = if rtl {
                     prior.bounds.left - glyph.bounds.right
@@ -94,11 +97,22 @@ fn build_line(mut row: Vec<Glyph>) -> Option<Line> {
                 let explicit_space = glyph.whitespace_before && gap > glyph.font_size * 0.03;
                 if (explicit_space || gap > word_gap) && !text.ends_with(' ') {
                     text.push(' ');
+                    starts_word = true;
                 }
             }
+            if starts_word {
+                if let Some(bounds) = current_word.take() {
+                    word_bounds.push(bounds);
+                }
+            }
+            current_word =
+                Some(current_word.map_or(glyph.bounds, |bounds| bounds.union(glyph.bounds)));
             text.push(glyph.character);
         }
         previous = Some(glyph);
+    }
+    if let Some(bounds) = current_word {
+        word_bounds.push(bounds);
     }
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.is_empty() {
@@ -113,6 +127,7 @@ fn build_line(mut row: Vec<Glyph>) -> Option<Line> {
     Some(Line {
         text,
         bounds,
+        word_bounds,
         font_size,
         bold,
         column: 0,
@@ -199,14 +214,28 @@ pub(crate) fn lines_to_blocks(lines: Vec<Line>, page: u16, height: f32) -> Vec<T
             });
         if can_join {
             let block = blocks.last_mut().expect("previous block checked");
-            if block.text.ends_with('-') && line.text.chars().next().is_some_and(char::is_lowercase)
-            {
+            let dehyphenate = block.text.ends_with('-')
+                && line.text.chars().next().is_some_and(char::is_lowercase);
+            if dehyphenate {
                 block.text.pop();
             } else {
                 block.text.push(' ');
             }
             block.text.push_str(&line.text);
             block.source_bounds = block.source_bounds.union(line.bounds);
+            let mut next_words = line.word_bounds.into_iter();
+            if dehyphenate
+                && let (Some(previous), Some(next)) =
+                    (block.word_bounds.last_mut(), next_words.next())
+            {
+                previous[0] = previous[0].min(next.left);
+                previous[1] = previous[1].min(next.top);
+                previous[2] = previous[2].max(next.right);
+                previous[3] = previous[3].max(next.bottom);
+            }
+            block.word_bounds.extend(
+                next_words.map(|bounds| [bounds.left, bounds.top, bounds.right, bounds.bottom]),
+            );
         } else {
             let reading_order = blocks.len() as u32;
             let hidden = matches!(kind, BlockKind::Header | BlockKind::Footer);
@@ -216,6 +245,11 @@ pub(crate) fn lines_to_blocks(lines: Vec<Line>, page: u16, height: f32) -> Vec<T
                 text: line.text,
                 page,
                 source_bounds: line.bounds,
+                word_bounds: line
+                    .word_bounds
+                    .into_iter()
+                    .map(|bounds| [bounds.left, bounds.top, bounds.right, bounds.bottom])
+                    .collect(),
                 reading_order,
                 confidence: 0.88,
                 hidden_in_reader: hidden,
@@ -286,6 +320,7 @@ mod tests {
             },
             font_size: 11.0,
             bold: false,
+            word_bounds: Vec::new(),
             column,
         }
     }
@@ -332,6 +367,8 @@ mod tests {
             glyph('r', 70.0, 74.0),
             glyph('e', 74.0, 80.0),
         ];
-        assert_eq!(build_line(row).unwrap().text, "Hi there");
+        let line = build_line(row).unwrap();
+        assert_eq!(line.text, "Hi there");
+        assert_eq!(line.word_bounds.len(), 2);
     }
 }

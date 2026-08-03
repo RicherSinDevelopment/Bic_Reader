@@ -46,8 +46,27 @@ pub fn extract_document(
 }
 
 fn extract_page(page: &PdfPage<'_>, number: u16) -> Result<ExtractedPage> {
-    let width = page.width().value;
-    let height = page.height().value;
+    let visible_box = page
+        .boundaries()
+        .crop()
+        .or_else(|_| page.boundaries().media())
+        .ok();
+    let origin_left = visible_box
+        .as_ref()
+        .map(|boundary| boundary.bounds.left().value)
+        .unwrap_or(0.0);
+    let origin_top = visible_box
+        .as_ref()
+        .map(|boundary| boundary.bounds.top().value)
+        .unwrap_or(page.height().value);
+    let width = visible_box
+        .as_ref()
+        .map(|boundary| boundary.bounds.width().value)
+        .unwrap_or(page.width().value);
+    let height = visible_box
+        .as_ref()
+        .map(|boundary| boundary.bounds.height().value)
+        .unwrap_or(page.height().value);
     let text = page.text()?;
     let mut glyphs = Vec::with_capacity(text.len().max(0) as usize);
     let mut whitespace_before = false;
@@ -67,10 +86,10 @@ fn extract_page(page: &PdfPage<'_>, number: u16) -> Result<ExtractedPage> {
             character: value,
             whitespace_before,
             bounds: Bounds {
-                left: rect.left().value,
-                top: height - rect.top().value,
-                right: rect.right().value,
-                bottom: height - rect.bottom().value,
+                left: rect.left().value - origin_left,
+                top: origin_top - rect.top().value,
+                right: rect.right().value - origin_left,
+                bottom: origin_top - rect.bottom().value,
             },
             font_size: character.scaled_font_size().value.max(1.0),
             bold: font.contains("bold") || font.contains("black"),

@@ -4,12 +4,13 @@
     "slug": "Bic_Reader",
     "version": "1.0.0",
     "orientation": "default",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/Bicreaderlogo-large.png",
     "scheme": "bicreader",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.bicreader.app",
+      "icon": "./assets/images/Bicreaderlogo-large.png",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -26,7 +27,7 @@
     "web": {
       "output": "static",
       "bundler": "metro",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/Bicreaderlogo-large.png"
     },
     "plugins": [
       "expo-router",

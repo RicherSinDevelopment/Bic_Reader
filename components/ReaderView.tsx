@@ -20,7 +20,9 @@ import {
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  Modal,
   PanResponder,
+  Pressable,
   View,
 } from "react-native";
 
@@ -32,7 +34,25 @@ import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 type ReaderViewProps = {
   isLandscape: boolean;
   blocks: ExtractedPdfBlock[];
+  pageCount: number;
+  destination?: { page: number; blockId?: string; nonce: number } | null;
+  onPageChange?: (page: number) => void;
+  onSwitchAnchorChange?: (blockId: string, word: string, wordIndex: number) => void;
 };
+
+const readerMenuItems = [
+  { key: "highlight", label: "Highlight" },
+  { key: "askAI", label: "Ask AI" },
+];
+
+const highlightColors = [
+  "#fde68a",
+  "#f9a8d4",
+  "#c4b5fd",
+  "#93c5fd",
+  "#86efac",
+  "#fdba74",
+];
 
 function escapeHtml(value: string) {
   return value
@@ -54,20 +74,29 @@ function blockTag(block: ExtractedPdfBlock) {
 }
 
 function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
-  return blocks.map((block) => {
-    const tag = blockTag(block);
-    return `<${tag} data-reader-block data-block-id="${escapeHtml(block.id)}" data-source-page="${block.page}">${escapeHtml(block.text)}</${tag}>`;
-  }).join("\n");
+  const pages = new Map<number, ExtractedPdfBlock[]>();
+  blocks.forEach((block) => pages.set(block.page, [...(pages.get(block.page) ?? []), block]));
+  return Array.from(pages.entries()).map(([page, pageBlocks]) => `
+    <section class="source-page" data-source-page-section="${page}" aria-label="Page ${page}">
+      ${pageBlocks.map((block) => {
+        const tag = blockTag(block);
+        return `<${tag} data-reader-block data-block-id="${escapeHtml(block.id)}" data-source-page="${block.page}">${escapeHtml(block.text)}</${tag}>`;
+      }).join("\n")}
+      <div class="page-divider"><span>Page ${page}</span></div>
+    </section>`).join("\n");
 }
 
-const ReaderView = ({ isLandscape, blocks }: ReaderViewProps) => {
+const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange, onSwitchAnchorChange }: ReaderViewProps) => {
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
   const [readerText, setReaderText] = useState("");
   const [initialBlocks] = useState(() => blocks);
   const readerMarkup = useMemo(() => blocksToMarkup(initialBlocks), [initialBlocks]);
   const appendedBlockCount = useRef(initialBlocks.length);
+  const sentBlockIds = useRef(new Set(initialBlocks.map((block) => block.id)));
   const [webViewReady, setWebViewReady] = useState(false);
+  const [highlightPickerVisible, setHighlightPickerVisible] = useState(false);
+  const [selectedAIText, setSelectedAIText] = useState("");
 
   // Bottom Sheet reference
   const bottomSheetRef =
@@ -82,14 +111,21 @@ const ReaderView = ({ isLandscape, blocks }: ReaderViewProps) => {
   const webViewRef = useRef<WebView>(null);
 
   useEffect(() => {
-    if (!webViewReady || blocks.length <= appendedBlockCount.current) return;
-    const appended = blocks.slice(appendedBlockCount.current);
+    if (!webViewReady) return;
+    const appended = blocks.filter((block) => !sentBlockIds.current.has(block.id));
+    if (!appended.length) return;
     webViewRef.current?.postMessage(JSON.stringify({
       type: "appendBlocks",
       html: blocksToMarkup(appended),
     }));
+    appended.forEach((block) => sentBlockIds.current.add(block.id));
     appendedBlockCount.current = blocks.length;
   }, [blocks, webViewReady]);
+
+  useEffect(() => {
+    if (!webViewReady || !destination) return;
+    webViewRef.current?.postMessage(JSON.stringify({ type: "goToSourcePage", ...destination }));
+  }, [destination, webViewReady]);
   const transition = useReaderSettingsStore((state) => state.transition);
   const { isPaged, syncPageTransition } = usePageTransition({
     webViewRef,
@@ -147,6 +183,29 @@ const ReaderView = ({ isLandscape, blocks }: ReaderViewProps) => {
         type: "ttsClearHighlight",
       })
     );
+  }, []);
+
+  const handleCustomMenuSelection = useCallback(
+    (event: { nativeEvent: { key: string; selectedText?: string } }) => {
+      if (event.nativeEvent.key === "highlight") {
+        setHighlightPickerVisible(true);
+        return;
+      }
+      if (event.nativeEvent.key === "askAI") {
+        setSelectedAIText(event.nativeEvent.selectedText?.trim() ?? "");
+        setActiveItem("ai");
+        bottomSheetRef.current?.open(0);
+      }
+    },
+    []
+  );
+
+  const applyHighlightColor = useCallback((color: string) => {
+    setHighlightPickerVisible(false);
+    webViewRef.current?.injectJavaScript(`
+      window.__applyReaderHighlight?.(${JSON.stringify(color)});
+      true;
+    `);
   }, []);
 
   const fontSize = useReaderSettingsStore(
@@ -343,6 +402,24 @@ const textColor =
             opacity: 0.78;
             margin-bottom: 1em;
           }
+          .source-page { position: relative; }
+          .page-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            clear: both;
+            margin: 34px -20px 30px;
+            color: rgba(71, 85, 105, 0.65);
+            font-size: 12px;
+            white-space: nowrap;
+          }
+          .page-divider::before, .page-divider::after {
+            content: '';
+            height: 1px;
+            flex: 1;
+            background: rgba(100, 116, 139, 0.25);
+          }
+          body.reader-paged .page-divider { display: none; }
           .tts-word-active {
             background-color: #fde047;
             border-radius: 4px;
@@ -350,6 +427,19 @@ const textColor =
             -webkit-box-decoration-break: clone;
             padding: 1px 2px;
             margin: 0 -2px;
+          }
+          .switch-word-highlight {
+            background: rgba(250, 204, 21, 0.62);
+            border-radius: 3px;
+            padding: 1px 2px;
+            margin: 0 -2px;
+          }
+          .reader-user-highlight {
+            background-color: #fde68a;
+            border-radius: 3px;
+            box-decoration-break: clone;
+            -webkit-box-decoration-break: clone;
+            padding: 1px 0;
           }
 
           /*
@@ -380,6 +470,7 @@ const textColor =
           ${readerMarkup}
         </main>
 
+
         <script>
   function handleMessage(event) {
     try {
@@ -388,10 +479,28 @@ const textColor =
       if (message.type === 'appendBlocks') {
         const container = document.getElementById('reader-pages');
         if (!container || !message.html) return;
-        container.insertAdjacentHTML('beforeend', message.html);
+        const template = document.createElement('template');
+        template.innerHTML = message.html;
+        Array.from(template.content.children).forEach(function(section) {
+          const page = Number(section.dataset.sourcePageSection);
+          const next = Array.from(container.children).find(function(candidate) {
+            return Number(candidate.dataset.sourcePageSection) > page;
+          });
+          container.insertBefore(section, next || null);
+        });
+        if (
+          window.__readerTransition !== 'scroll' &&
+          window.__refreshReaderPages
+        ) {
+          requestAnimationFrame(window.__refreshReaderPages);
+        }
+        window.__tryPendingSourceDestination?.();
+        return;
+      }
 
+      if (message.type === 'requestReaderText') {
         const allBlocks = Array.from(
-          container.querySelectorAll('[data-reader-block]')
+          document.querySelectorAll('[data-reader-block]')
         );
         let offset = 0;
         const allText = allBlocks.map(function(block) {
@@ -401,14 +510,10 @@ const textColor =
           offset += text.length + 2;
           return text;
         }).join('\\n\\n');
-
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'readerText',
           text: allText
         }));
-        if (window.__refreshReaderPages) {
-          requestAnimationFrame(window.__refreshReaderPages);
-        }
         return;
       }
 
@@ -416,6 +521,26 @@ const textColor =
         if (window.__navigateReaderPage) {
           window.__navigateReaderPage(message.direction);
         }
+        return;
+      }
+      window.__tryPendingSourceDestination = window.__tryPendingSourceDestination || function() {
+        const pending = window.__pendingSourceDestination;
+        if (!pending) return;
+        const block = pending.blockId
+          ? document.querySelector('[data-block-id="' + CSS.escape(pending.blockId) + '"]')
+          : null;
+        const target = block || document.querySelector('[data-source-page-section="' + pending.page + '"]');
+        if (!target) return;
+        window.__pendingSourceDestination = null;
+        if (window.__readerTransition === 'scroll') {
+          target.scrollIntoView({ behavior: 'auto', block: 'start' });
+        } else if (window.__goToElementPage) {
+          window.__goToElementPage(target);
+        }
+      };
+      if (message.type === 'goToSourcePage') {
+        window.__pendingSourceDestination = message;
+        window.__tryPendingSourceDestination();
         return;
       }
       if (message.type === 'pageTransition') {
@@ -587,6 +712,56 @@ const textColor =
     'message',
     handleMessage
   );
+
+  window.__applyReaderHighlight = function(color) {
+    const selection = window.getSelection();
+    const liveRange = selection && selection.rangeCount > 0
+      ? selection.getRangeAt(0)
+      : null;
+    const range = liveRange && !liveRange.collapsed
+      ? liveRange.cloneRange()
+      : window.__readerSelectionRange;
+
+    if (!range || range.collapsed) return;
+
+    const root = range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+      ? range.commonAncestorContainer.parentNode
+      : range.commonAncestorContainer;
+    if (!root) return;
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let node = root.nodeType === Node.TEXT_NODE ? root : walker.nextNode();
+
+    while (node) {
+      if (
+        range.intersectsNode(node) &&
+        !node.parentElement?.closest('.reader-user-highlight')
+      ) {
+        textNodes.push(node);
+      }
+      node = walker.nextNode();
+    }
+
+    textNodes.reverse().forEach(function(textNode) {
+      const start = textNode === range.startContainer ? range.startOffset : 0;
+      const end = textNode === range.endContainer
+        ? range.endOffset
+        : (textNode.textContent || '').length;
+      if (start >= end) return;
+
+      const highlightRange = document.createRange();
+      highlightRange.setStart(textNode, start);
+      highlightRange.setEnd(textNode, end);
+      const marker = document.createElement('mark');
+      marker.className = 'reader-user-highlight';
+      marker.style.backgroundColor = color || '#fde68a';
+      highlightRange.surroundContents(marker);
+    });
+
+    selection?.removeAllRanges();
+    window.__readerSelectionRange = null;
+  };
 </script>
       </body>
 
@@ -662,6 +837,10 @@ const textColor =
 
       if (data.type === "scroll") {
 
+        if (typeof data.sourcePage === "number") {
+          onPageChange?.(data.sourcePage);
+        }
+
         const currentScrollY =
           data.scrollY;
 
@@ -718,6 +897,27 @@ const textColor =
         return;
       }
 
+      if (data.type === "sourcePage" && typeof data.page === "number") {
+        onPageChange?.(data.page);
+        return;
+      }
+
+      if (data.type === "askAI") {
+        setSelectedAIText(typeof data.text === "string" ? data.text.trim() : "");
+        setActiveItem("ai");
+        bottomSheetRef.current?.open(0);
+        return;
+      }
+
+      if (data.type === "switchAnchor" && typeof data.blockId === "string") {
+        onSwitchAnchorChange?.(
+          data.blockId,
+          typeof data.word === "string" ? data.word : "",
+          typeof data.wordIndex === "number" ? data.wordIndex : 0,
+        );
+        return;
+      }
+
     } catch (error) {
 
       console.log(
@@ -740,6 +940,10 @@ const textColor =
      * Update selected toolbar item.
      */
     setActiveItem(item);
+
+    if (item === "tts") {
+      webViewRef.current?.postMessage(JSON.stringify({ type: "requestReaderText" }));
+    }
 
     /*
      * Make sure toolbar is visible
@@ -777,7 +981,7 @@ const textColor =
         );
 
       case "ai":
-        return <AI />;
+        return <AI selectedText={selectedAIText} />;
 
       case "settings":
         return <Settings />;
@@ -795,6 +999,56 @@ const textColor =
     >
 
       <View className="flex-1">
+
+        <Modal
+          animationType="fade"
+          transparent
+          visible={highlightPickerVisible}
+          onRequestClose={() => setHighlightPickerVisible(false)}
+        >
+          <Pressable
+            accessibilityLabel="Close highlight color picker"
+            onPress={() => setHighlightPickerVisible(false)}
+            style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
+          >
+            <Pressable
+              accessibilityRole="menu"
+              onPress={(event) => event.stopPropagation()}
+              style={{
+                paddingHorizontal: 16,
+                paddingVertical: 12,
+                borderRadius: 30,
+                borderWidth: 1,
+                borderColor: "rgba(255, 255, 255, 0.85)",
+                backgroundColor: "rgba(248, 250, 252, 0.96)",
+                shadowColor: "#000000",
+                shadowOpacity: 0.22,
+                shadowRadius: 18,
+                shadowOffset: { width: 0, height: 8 },
+                elevation: 10,
+              }}
+            >
+              <View style={{ flexDirection: "row", gap: 14 }}>
+                {highlightColors.map((color, index) => (
+                  <Pressable
+                    key={color}
+                    accessibilityLabel={`Highlight color ${index + 1}`}
+                    accessibilityRole="menuitem"
+                    onPress={() => applyHighlightColor(color)}
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      borderWidth: 1,
+                      borderColor: "rgba(15, 23, 42, 0.08)",
+                      backgroundColor: color,
+                    }}
+                  />
+                ))}
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         {/* ========================= */}
         {/* HTML READER */}
@@ -816,6 +1070,13 @@ const textColor =
           }}
 
           onLoadEnd={handleReaderLoadEnd}
+
+          onContentProcessDidTerminate={() => {
+            appendedBlockCount.current = initialBlocks.length;
+            sentBlockIds.current = new Set(initialBlocks.map((block) => block.id));
+            setWebViewReady(false);
+            webViewRef.current?.reload();
+          }}
 
           /*
            * Native scrolling.
@@ -861,6 +1122,10 @@ const textColor =
             handleWebViewMessage
           }
 
+          menuItems={readerMenuItems}
+
+          onCustomMenuSelection={handleCustomMenuSelection}
+
           /*
            * Injected JavaScript.
            */
@@ -905,6 +1170,83 @@ const textColor =
                 })
               );
 
+
+              let lastSwitchAnchorKey = null;
+              function reportSwitchAnchor() {
+                const previous = document.querySelector('.switch-word-highlight');
+                if (previous) {
+                  const parent = previous.parentNode;
+                  previous.replaceWith(document.createTextNode(previous.textContent || ''));
+                  parent?.normalize();
+                }
+
+                let block = null;
+                for (let y = 12; y < window.innerHeight && !block; y += 36) {
+                  const hit = document.elementFromPoint(24, y) ||
+                    document.elementFromPoint(window.innerWidth / 2, y);
+                  block = hit?.closest?.('[data-reader-block]') || null;
+                }
+                if (!block) return;
+                const blockRect = block.getBoundingClientRect();
+                const probeX = Math.max(8, Math.min(
+                  window.innerWidth - 8,
+                  Math.max(0, blockRect.left) + 8
+                ));
+                const probeY = Math.max(8, Math.min(
+                  window.innerHeight - 8,
+                  Math.max(0, blockRect.top) + 8
+                ));
+                const caret = document.caretRangeFromPoint
+                  ? document.caretRangeFromPoint(probeX, probeY)
+                  : null;
+                const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+                let textNode = caret && caret.startContainer.nodeType === Node.TEXT_NODE &&
+                  block.contains(caret.startContainer)
+                    ? caret.startContainer
+                    : walker.nextNode();
+                let localOffset = textNode === caret?.startContainer ? caret.startOffset : 0;
+                while (textNode && !(textNode.textContent || '').trim()) {
+                  textNode = walker.nextNode();
+                  localOffset = 0;
+                }
+                let highlightedWord = '';
+                let highlightedWordIndex = 0;
+                if (textNode) {
+                  const text = textNode.textContent || '';
+                  const matches = Array.from(text.matchAll(/\\S+/g));
+                  const match = matches.find(function(candidate) {
+                    return candidate.index + candidate[0].length > localOffset;
+                  }) || matches[0];
+                  if (match) {
+                    const prefix = document.createRange();
+                    prefix.selectNodeContents(block);
+                    prefix.setEnd(textNode, match.index);
+                    highlightedWordIndex = (prefix.toString().match(/\\S+/g) || []).length;
+                    const range = document.createRange();
+                    range.setStart(textNode, match.index);
+                    range.setEnd(textNode, match.index + match[0].length);
+                    const marker = document.createElement('span');
+                    marker.className = 'switch-word-highlight';
+                    range.surroundContents(marker);
+                    highlightedWord = match[0];
+                  }
+                }
+
+                const blockId = block.dataset.blockId;
+                const anchorKey = blockId + ':' + highlightedWordIndex;
+                if (blockId && anchorKey !== lastSwitchAnchorKey) {
+                  lastSwitchAnchorKey = anchorKey;
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'switchAnchor',
+                    blockId: blockId,
+                    word: highlightedWord,
+                    wordIndex: highlightedWordIndex
+                  }));
+                }
+              }
+              window.__reportSwitchAnchor = reportSwitchAnchor;
+              requestAnimationFrame(reportSwitchAnchor);
+
               // --------------------------------
               // PAGINATED READER
               // --------------------------------
@@ -936,6 +1278,7 @@ const textColor =
                   pageCount = 1;
                   currentPage = 0;
                   window.__readerCurrentPage = 0;
+                  reportSourcePage();
                   return;
                 }
 
@@ -952,6 +1295,7 @@ const textColor =
                   currentPage,
                   0
                 );
+                reportSourcePage();
               }
 
               function finishPageChange(targetPage) {
@@ -961,7 +1305,42 @@ const textColor =
                   currentPage,
                   0
                 );
+                reportSourcePage();
               }
+
+              function sourcePageAtViewport() {
+                const probeX = window.innerWidth / 2;
+                const probeY = window.innerHeight * 0.28;
+                let section = document.elementFromPoint(probeX, probeY)
+                  ?.closest?.('[data-source-page-section]');
+                if (!section) {
+                  for (let y = probeY; y >= 8 && !section; y -= 36) {
+                    section = document.elementFromPoint(probeX, y)
+                      ?.closest?.('[data-source-page-section]');
+                  }
+                }
+                return Number(section?.dataset.sourcePageSection) ||
+                  lastReportedSourcePage || 1;
+              }
+
+              let lastReportedSourcePage = 0;
+              function reportSourcePage() {
+                const page = sourcePageAtViewport();
+                if (page === lastReportedSourcePage) return page;
+                lastReportedSourcePage = page;
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'sourcePage',
+                  page: page
+                }));
+                return page;
+              }
+
+              window.__goToElementPage = function(element) {
+                if (!element || window.__readerTransition === 'scroll') return;
+                const rect = element.getBoundingClientRect();
+                const documentLeft = rect.left + currentPage * window.innerWidth;
+                goToReaderPage(Math.floor(documentLeft / window.innerWidth));
+              };
 
               function goToReaderPage(targetPage) {
                 if (
@@ -1090,7 +1469,7 @@ const textColor =
               // SCROLL HANDLING
               // --------------------------------
 
-              let ticking = false;
+              let scrollTimer = null;
 
               window.addEventListener(
                 'scroll',
@@ -1103,24 +1482,25 @@ const textColor =
                    * to React Native for every single
                    * scroll event.
                    */
-                  if (!ticking) {
-
-                    window.requestAnimationFrame(
+                  if (!scrollTimer) {
+                    scrollTimer = setTimeout(
                       function() {
 
                         window.ReactNativeWebView.postMessage(
                           JSON.stringify({
                             type: 'scroll',
-                            scrollY: window.scrollY
+                            scrollY: window.scrollY,
+                            sourcePage: reportSourcePage()
                           })
                         );
 
-                        ticking = false;
+                        reportSwitchAnchor();
 
-                      }
+                        scrollTimer = null;
+
+                      },
+                      80
                     );
-
-                    ticking = true;
                   }
 
                 },
@@ -1160,6 +1540,11 @@ const textColor =
                             : '';
 
                         if (text.length > 0) {
+
+                          if (selection.rangeCount > 0) {
+                            window.__readerSelectionRange =
+                              selection.getRangeAt(0).cloneRange();
+                          }
 
                           window.ReactNativeWebView.postMessage(
                             JSON.stringify({

@@ -40,6 +40,7 @@ pub struct TextBlock {
     pub text: String,
     pub page: u16,
     pub source_bounds: Bounds,
+    pub word_bounds: Vec<[f32; 4]>,
     pub reading_order: u32,
     pub confidence: f32,
     pub hidden_in_reader: bool,
@@ -76,6 +77,7 @@ pub(crate) struct Glyph {
 pub(crate) struct Line {
     pub text: String,
     pub bounds: Bounds,
+    pub word_bounds: Vec<Bounds>,
     pub font_size: f32,
     pub bold: bool,
     pub column: i8,

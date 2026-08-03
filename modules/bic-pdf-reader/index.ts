@@ -14,6 +14,7 @@ export type ExtractedPdfBlock = {
   text: string;
   page: number;
   sourceBounds: PdfSourceBounds;
+  wordBounds: [number, number, number, number][];
   readingOrder: number;
   confidence: number;
   hiddenInReader: boolean;

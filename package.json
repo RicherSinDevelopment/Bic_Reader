@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
+    "postinstall": "patch-package && node ./scripts/prepare-pdfjs-assets.js",
     "eas-build-pre-install": "bash ./pdf_reader/scripts/prepare-eas-ios.sh",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
@@ -41,6 +42,7 @@
     "expo-web-browser": "~57.0.2",
     "lucide-react-native": "^1.26.0",
     "nativewind": "^5.0.0-preview.4",
+    "pdfjs-dist": "^4.10.38",
     "prettier-plugin-tailwindcss": "^0.5.14",
     "react": "19.2.3",
     "react-aria": "^3.45.0",
@@ -69,6 +71,7 @@
     "babel-plugin-module-resolver": "^5.0.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~57.0.1",
+    "patch-package": "^8.0.1",
     "tailwindcss": "^4.2.0",
     "typescript": "~6.0.3"
   },

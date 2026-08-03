@@ -35,6 +35,7 @@ type ReaderSettingsState = {
 
   setBackgroundColor: (color: string) => void;
   setTextColor: (color: string) => void;
+  setColorPreset: (backgroundColor: string, textColor: string) => void;
 };
 
 export const useReaderSettingsStore =
@@ -125,13 +126,24 @@ export const useReaderSettingsStore =
 
     // Change background
     setBackgroundColor: (color) =>
-      set({
-        backgroundColor: color,
-      }),
+      set((state) =>
+        color.toLowerCase() === state.textColor.toLowerCase()
+          ? state
+          : { backgroundColor: color }
+      ),
 
     // Change text color
     setTextColor: (color) =>
-      set({
-        textColor: color,
-      }),
+      set((state) =>
+        color.toLowerCase() === state.backgroundColor.toLowerCase()
+          ? state
+          : { textColor: color }
+      ),
+
+    setColorPreset: (backgroundColor, textColor) =>
+      set((state) =>
+        backgroundColor.toLowerCase() === textColor.toLowerCase()
+          ? state
+          : { backgroundColor, textColor }
+      ),
   }));

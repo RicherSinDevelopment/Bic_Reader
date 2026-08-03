@@ -1,6 +1,7 @@
 import BackButton from "@/components/Backbutton";
-import OriginalPDF from "@/components/OriginalPDF";
+import OriginalPDF, { type PdfOutlineItem } from "@/components/OriginalPDF";
 import ReaderView from "@/components/ReaderView";
+import ReaderSearchButton from "@/components/ReaderSearchButton";
 import ThreeLinesButton, { type ReaderChapter } from "@/components/threelinesbutton";
 import { Box } from "@/components/ui/box";
 import { Text } from "@/components/ui/text";
@@ -61,6 +62,7 @@ export default function ReaderScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [headerVisibility] = useState(() => new Animated.Value(1));
   const [activeTab, setActiveTab] = useState("reader");
+  const [hasVisitedOriginal, setHasVisitedOriginal] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isLandscape, setIsLandscape] = useState(false);
   const [readerBlocks, setReaderBlocks] = useState<ExtractedPdfBlock[]>([]);
@@ -71,6 +73,7 @@ export default function ReaderScreen() {
   const [readerCurrentPage, setReaderCurrentPage] = useState(1);
   const [originalCurrentPage, setOriginalCurrentPage] = useState(1);
   const [originalPageCount, setOriginalPageCount] = useState(0);
+  const [pdfOutline, setPdfOutline] = useState<PdfOutlineItem[]>([]);
   const [readerDestination, setReaderDestination] = useState<{ page: number; blockId?: string; nonce: number } | null>(null);
   const readerExtractionStarted = React.useRef(false);
   const requestedExtractionPage = React.useRef<number | null>(null);
@@ -211,6 +214,7 @@ export default function ReaderScreen() {
 
   const handleTabChange = (value: string) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (value === "original") setHasVisitedOriginal(true);
     setActiveTab(value);
   };
 
@@ -226,27 +230,19 @@ export default function ReaderScreen() {
   );
 
   const readerChapters = useMemo<ReaderChapter[]>(() => {
-    const headings = readerBlocks.filter(
-      (block) => block.kind === "title" || block.kind === "heading",
-    );
-    const isChapterStart = (block: ExtractedPdfBlock) => block.kind === "title" ||
-      /^(chapter|part|book)\b/i.test(block.text.trim());
-    const hasRecognizableChapters = headings.some(isChapterStart);
-    if (!hasRecognizableChapters) {
-      return headings.map((block) => ({ id: block.id, title: block.text, page: block.page }));
-    }
+    const convert = (items: PdfOutlineItem[], path = "outline"): ReaderChapter[] =>
+      items.map((item, index) => ({
+        id: `${path}-${index}-${item.page}`,
+        title: item.title,
+        page: item.page,
+        children: convert(item.children ?? [], `${path}-${index}`),
+      }));
+    return convert(pdfOutline);
+  }, [pdfOutline]);
 
-    const chapters: ReaderChapter[] = [];
-    headings.forEach((block) => {
-      const item = { id: block.id, title: block.text, page: block.page };
-      if (isChapterStart(block) || chapters.length === 0) {
-        chapters.push({ ...item, children: [] });
-      } else {
-        chapters.at(-1)?.children?.push(item);
-      }
-    });
-    return chapters;
-  }, [readerBlocks]);
+  const handleOutlineChanged = useCallback((outline: PdfOutlineItem[]) => {
+    setPdfOutline(outline);
+  }, []);
 
   const visiblePage = activeTab === "original" ? originalCurrentPage : readerCurrentPage;
   const visiblePageCount = activeTab === "original"
@@ -328,13 +324,17 @@ export default function ReaderScreen() {
                 <BackButton />
               </Box>
 
-              <Box className="absolute right-2 top-1/2 -translate-y-1/2">
+              <Box className="absolute right-2 top-1/2 -translate-y-1/2 flex-row gap-2">
+                <ReaderSearchButton
+                  blocks={readerBlocks}
+                  onSelectResult={(page, blockId) => goToReaderPage(page, blockId)}
+                />
                 <ThreeLinesButton
                   chapters={readerChapters}
                   currentPage={visiblePage}
                   totalPages={visiblePageCount}
                   onGoToPage={(page) => goToReaderPage(page)}
-                  onGoToChapter={(chapter) => goToReaderPage(chapter.page, chapter.id)}
+                  onGoToChapter={(chapter) => goToReaderPage(chapter.page, chapter.blockId)}
                 />
               </Box>
 
@@ -362,13 +362,18 @@ export default function ReaderScreen() {
       <View className="flex-1 overflow-hidden">
         <View
           pointerEvents={activeTab === "original" ? "auto" : "none"}
-          style={{ position: "absolute", inset: 0, opacity: activeTab === "original" ? 1 : 0 }}
+          style={{
+            position: "absolute",
+            inset: 0,
+            opacity: activeTab === "original" ? 1 : 0,
+          }}
         >
           <OriginalPDF
             pdfUri={pdf.uri}
             fileSize={pdf.size}
             initialPage={pdf.currentPage || 1}
             onPageChanged={handlePageChanged}
+            onOutlineChanged={handleOutlineChanged}
             highlightTarget={activeTab === "original" ? switchHighlightTarget : null}
           />
         </View>
@@ -385,6 +390,7 @@ export default function ReaderScreen() {
               destination={readerDestination}
               onPageChange={setReaderCurrentPage}
               onSwitchAnchorChange={reportVisibleBlock}
+              showSwitchHighlight={hasVisitedOriginal && activeTab === "reader"}
             />
           ) : readerLoading ? (
             <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8">

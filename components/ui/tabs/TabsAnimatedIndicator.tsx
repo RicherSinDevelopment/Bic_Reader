@@ -5,7 +5,6 @@ import Animated, {
   withTiming,
   withDelay,
   Easing,
-  SharedValue,
 } from 'react-native-reanimated';
 import type { LayoutData } from '@gluestack-ui/core/tabs/creator';
 import { tabsAnimationConfig } from './animation-config';
@@ -16,7 +15,6 @@ interface TabsAnimatedIndicatorProps {
   orientation: 'horizontal' | 'vertical';
   triggerLayouts: Map<any, LayoutData>;
   scrollOffset?: number;
-  animatedScrollOffset?: SharedValue<number>;
   className?: string;
   style?: any;
 }
@@ -32,7 +30,6 @@ export const TabsAnimatedIndicator = React.forwardRef<
       orientation,
       triggerLayouts,
       scrollOffset = 0,
-      animatedScrollOffset,
       className,
       style,
     },
@@ -49,10 +46,8 @@ export const TabsAnimatedIndicator = React.forwardRef<
 
     // Update scroll offset shared value when scrollOffset changes
     useEffect(() => {
-      if (!animatedScrollOffset) {
-        scrollOffsetShared.value = scrollOffset;
-      }
-    }, [scrollOffset, scrollOffsetShared, animatedScrollOffset]);
+      scrollOffsetShared.value = scrollOffset;
+    }, [scrollOffset, scrollOffsetShared]);
 
     useEffect(() => {
       if (selectedKey && triggerLayouts.has(selectedKey)) {
@@ -106,9 +101,7 @@ export const TabsAnimatedIndicator = React.forwardRef<
     const animatedStyle = useAnimatedStyle(() => {
       'worklet';
 
-      const scrollOffsetValue = animatedScrollOffset
-        ? animatedScrollOffset.value
-        : scrollOffsetShared.value;
+      const scrollOffsetValue = scrollOffsetShared.value;
 
       const xPos = orientation === 'horizontal'
         ? animatedX.value - scrollOffsetValue

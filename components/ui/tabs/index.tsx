@@ -10,11 +10,7 @@ import {
 import { styled } from 'nativewind';
 import React, { useEffect, useMemo, useRef } from 'react';
 import { FlatList, Platform, Pressable, Text, View } from 'react-native';
-import Animated, {
-  runOnJS,
-  useAnimatedScrollHandler,
-  useSharedValue,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { TabsAnimatedIndicator } from './TabsAnimatedIndicator';
 
 const SCOPE = 'TABS';
@@ -154,19 +150,6 @@ const TabsList = React.forwardRef<
 
   const { orientation, setScrollOffset, selectedKey, listRef } = context;
 
-  // Shared value for indicator sync
-  const animatedScrollOffset = useSharedValue(0);
-
-  /**
-   * Expose shared value to context
-   */
-  useEffect(() => {
-    if (context) {
-      // @ts-ignore
-      context.animatedScrollOffset = animatedScrollOffset;
-    }
-  }, [context, animatedScrollOffset]);
-
   /**
    * Auto scroll to selected tab
    */
@@ -195,24 +178,8 @@ const TabsList = React.forwardRef<
   /**
    * Native animated scroll handler (ONLY for iOS / Android)
    */
-  const nativeScrollHandler =
-    Platform.OS === 'web'
-      ? undefined
-      : useAnimatedScrollHandler({
-          onScroll: (event) => {
-            'worklet';
-            const x = event.contentOffset.x;
-            animatedScrollOffset.value = x;
-            runOnJS(setScrollOffset)(x);
-          },
-        });
-
-  /**
-   * Web scroll handler (JS thread)
-   */
-  const handleWebScroll = (e: any) => {
+  const handleScroll = (e: any) => {
     const x = e.nativeEvent.contentOffset.x;
-    animatedScrollOffset.value = x;
     setScrollOffset(x);
   };
 
@@ -262,11 +229,7 @@ const TabsList = React.forwardRef<
     alignItems: 'center',
     justifyContent: 'center',
   }}
-  onScroll={
-    Platform.OS === 'web'
-      ? handleWebScroll
-      : nativeScrollHandler
-  }
+  onScroll={handleScroll}
   onScrollToIndexFailed={(info) => {
     setTimeout(() => {
       try {
@@ -411,9 +374,6 @@ const TabsIndicator = React.forwardRef<
   }
 
   const { selectedKey, orientation, triggerLayouts, scrollOffset } = context;
-  // @ts-ignore - Get animated scroll offset from context
-  const animatedScrollOffset = context.animatedScrollOffset;
-
   return (
     <TabsAnimatedIndicator
       ref={ref}
@@ -421,7 +381,6 @@ const TabsIndicator = React.forwardRef<
       orientation={orientation}
       triggerLayouts={triggerLayouts}
       scrollOffset={scrollOffset}
-      animatedScrollOffset={animatedScrollOffset}
       className={tabsIndicatorStyle({
         parentVariants: { variant },
         class: className,

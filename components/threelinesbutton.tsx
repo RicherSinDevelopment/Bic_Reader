@@ -15,12 +15,13 @@ import { FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 export type ReaderChapter = {
   id: string;
+  blockId?: string;
   title: string;
   page: number;
   children?: ReaderChapter[];
 };
 
-type OutlineRow = { chapter: ReaderChapter; isChild: boolean };
+type OutlineRow = { chapter: ReaderChapter; depth: number };
 
 type Props = {
   chapters?: ReaderChapter[];
@@ -39,7 +40,7 @@ export default function ThreeLinesButton({
 }: Props) {
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [pageInput, setPageInput] = React.useState(String(currentPage));
-  const [expandedChapterId, setExpandedChapterId] = React.useState<string | null>(null);
+  const [expandedChapterIds, setExpandedChapterIds] = React.useState<string[]>([]);
 
   const goToPage = () => {
     const requested = Number.parseInt(pageInput, 10);
@@ -53,36 +54,40 @@ export default function ThreeLinesButton({
     requestAnimationFrame(() => onGoToPage?.(page));
   };
 
-  const outlineRows = React.useMemo<OutlineRow[]>(() => chapters.flatMap((chapter) => [
-    { chapter, isChild: false },
-    ...(expandedChapterId === chapter.id
-      ? (chapter.children ?? []).map((child) => ({ chapter: child, isChild: true }))
-      : []),
-  ]), [chapters, expandedChapterId]);
+  const outlineRows = React.useMemo<OutlineRow[]>(() => {
+    const rows: OutlineRow[] = [];
+    const append = (items: ReaderChapter[], depth: number) => items.forEach((chapter) => {
+      rows.push({ chapter, depth });
+      if (expandedChapterIds.includes(chapter.id)) append(chapter.children ?? [], depth + 1);
+    });
+    append(chapters, 0);
+    return rows;
+  }, [chapters, expandedChapterIds]);
 
   const renderChapter = React.useCallback(({ item }: { item: OutlineRow }) => {
-    const { chapter, isChild } = item;
-    const hasChildren = !isChild && Boolean(chapter.children?.length);
-    const isExpanded = expandedChapterId === chapter.id;
+    const { chapter, depth } = item;
+    const hasChildren = Boolean(chapter.children?.length);
+    const isExpanded = expandedChapterIds.includes(chapter.id);
     return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${chapter.title}, page ${chapter.page}`}
       onPress={() => {
         if (hasChildren && !isExpanded) {
-          setExpandedChapterId(chapter.id);
+          setExpandedChapterIds((current) => [...current, chapter.id]);
           return;
         }
         setShowDrawer(false);
-        requestAnimationFrame(() => onGoToChapter?.(chapter));
+    requestAnimationFrame(() => onGoToChapter?.(chapter));
       }}
       style={({ pressed }) => [
         styles.chapter,
-        isChild && styles.section,
+        depth > 0 && styles.section,
+        depth > 0 && { marginLeft: Math.min(depth, 4) * 16 },
         pressed && styles.pressed,
       ]}
     >
-      {isChild
+      {depth > 0
         ? <View style={styles.sectionMarker} />
         : <BookOpen size={17} color="#64748b" />}
       <Text className="flex-1 text-sm text-black" numberOfLines={2}>
@@ -94,7 +99,7 @@ export default function ThreeLinesButton({
         : <ChevronRight size={16} color="#64748b" />)}
     </Pressable>
   );
-  }, [expandedChapterId, onGoToChapter]);
+  }, [expandedChapterIds, onGoToChapter]);
 
   return (
     <>
@@ -170,7 +175,7 @@ export default function ThreeLinesButton({
           <FlatList
             data={outlineRows}
             renderItem={renderChapter}
-            keyExtractor={({ chapter, isChild }) => `${isChild ? 'section' : 'chapter'}-${chapter.id}`}
+            keyExtractor={({ chapter }) => chapter.id}
             contentContainerStyle={styles.chapterList}
             initialNumToRender={10}
             maxToRenderPerBatch={8}
@@ -179,7 +184,7 @@ export default function ThreeLinesButton({
             removeClippedSubviews
             ListEmptyComponent={
               <Text className="px-5 py-6 text-sm text-black/50">
-                No chapter headings were found in this document.
+                This PDF does not contain an embedded table of contents.
               </Text>
             }
           />
@@ -196,7 +201,7 @@ const styles = StyleSheet.create({
   goButton: { marginLeft: 'auto', width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: '#719b79' },
   chapterList: { paddingHorizontal: 12, paddingBottom: 24 },
   chapter: { height: 60, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
-  section: { height: 52, marginLeft: 18, paddingLeft: 14 },
+  section: { height: 52, paddingLeft: 14 },
   sectionMarker: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#94a3b8' },
   pressed: { backgroundColor: '#f1f5f9' },
 });

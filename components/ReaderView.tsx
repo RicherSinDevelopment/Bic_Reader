@@ -38,6 +38,7 @@ type ReaderViewProps = {
   destination?: { page: number; blockId?: string; nonce: number } | null;
   onPageChange?: (page: number) => void;
   onSwitchAnchorChange?: (blockId: string, word: string, wordIndex: number) => void;
+  showSwitchHighlight?: boolean;
 };
 
 const readerMenuItems = [
@@ -86,15 +87,22 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
     </section>`).join("\n");
 }
 
-const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange, onSwitchAnchorChange }: ReaderViewProps) => {
+const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange, onSwitchAnchorChange, showSwitchHighlight = false }: ReaderViewProps) => {
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
   const [readerText, setReaderText] = useState("");
-  const [initialBlocks] = useState(() => blocks);
+  const [initialBlocks] = useState(() => {
+    const firstPage = blocks[0]?.page ?? 1;
+    return blocks.filter((block) => block.page < firstPage + 12);
+  });
   const readerMarkup = useMemo(() => blocksToMarkup(initialBlocks), [initialBlocks]);
   const appendedBlockCount = useRef(initialBlocks.length);
   const sentBlockIds = useRef(new Set(initialBlocks.map((block) => block.id)));
+  const lastSourcePageRef = useRef(1);
+  const recoveryPageRef = useRef<number | null>(null);
   const [webViewReady, setWebViewReady] = useState(false);
+  const [loadedThroughPage, setLoadedThroughPage] = useState(Math.min(300, pageCount));
+  const [appendPass, setAppendPass] = useState(0);
   const [highlightPickerVisible, setHighlightPickerVisible] = useState(false);
   const [selectedAIText, setSelectedAIText] = useState("");
 
@@ -112,20 +120,61 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
 
   useEffect(() => {
     if (!webViewReady) return;
-    const appended = blocks.filter((block) => !sentBlockIds.current.has(block.id));
-    if (!appended.length) return;
+    const remaining = blocks.filter(
+      (block) => block.page <= loadedThroughPage && !sentBlockIds.current.has(block.id),
+    );
+    const destinationBlocks = destination
+      ? remaining.filter((block) => destination.blockId
+          ? block.id === destination.blockId
+          : block.page === destination.page)
+      : [];
+    const appended = destinationBlocks.length
+      ? destinationBlocks.slice(0, 220)
+      : remaining.slice(0, 220);
+    const highestAvailablePage = blocks.reduce(
+      (highest, block) => Math.max(highest, block.page),
+      0,
+    );
+    const hasMore = loadedThroughPage < pageCount || highestAvailablePage < loadedThroughPage;
+    const currentSegmentReady =
+      highestAvailablePage >= loadedThroughPage && remaining.length <= appended.length;
+    if (!appended.length) {
+      webViewRef.current?.postMessage(JSON.stringify({
+        type: "appendBlocks",
+        html: "",
+        hasMore,
+        currentSegmentReady,
+      }));
+      return;
+    }
     webViewRef.current?.postMessage(JSON.stringify({
       type: "appendBlocks",
       html: blocksToMarkup(appended),
+      hasMore,
+      currentSegmentReady,
     }));
     appended.forEach((block) => sentBlockIds.current.add(block.id));
     appendedBlockCount.current = blocks.length;
-  }, [blocks, webViewReady]);
+    if (remaining.length > appended.length) {
+      const timer = setTimeout(() => setAppendPass((value) => value + 1), 45);
+      return () => clearTimeout(timer);
+    }
+  }, [appendPass, blocks, destination, loadedThroughPage, pageCount, webViewReady]);
 
   useEffect(() => {
     if (!webViewReady || !destination) return;
-    webViewRef.current?.postMessage(JSON.stringify({ type: "goToSourcePage", ...destination }));
-  }, [destination, webViewReady]);
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "goToSourcePage",
+      ...destination,
+    }));
+    const timer = setTimeout(() => {
+      setLoadedThroughPage((current) => Math.min(
+        pageCount,
+        Math.max(current, Math.ceil(destination.page / 300) * 300),
+      ));
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [destination, pageCount, webViewReady]);
   const transition = useReaderSettingsStore((state) => state.transition);
   const { isPaged, syncPageTransition } = usePageTransition({
     webViewRef,
@@ -258,11 +307,34 @@ const textColor =
   useEffect(() => {
     sendReaderSettings();
   }, [sendReaderSettings]);
+
+  useEffect(() => {
+    if (!webViewReady) return;
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "setSwitchHighlightVisible",
+      visible: showSwitchHighlight,
+    }));
+  }, [showSwitchHighlight, webViewReady]);
+
   const handleReaderLoadEnd = useCallback(() => {
     setWebViewReady(true);
     sendReaderSettings();
     syncPageTransition();
-  }, [sendReaderSettings, syncPageTransition]);
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "setSwitchHighlightVisible",
+      visible: showSwitchHighlight,
+    }));
+    const recoveryPage = recoveryPageRef.current;
+    if (recoveryPage !== null) {
+      recoveryPageRef.current = null;
+      setTimeout(() => {
+        webViewRef.current?.postMessage(JSON.stringify({
+          type: "goToSourcePage",
+          page: recoveryPage,
+        }));
+      }, 0);
+    }
+  }, [sendReaderSettings, showSwitchHighlight, syncPageTransition]);
   // Toolbar animation
   const [toolbarTranslateY] = useState(() => new Animated.Value(0));
 
@@ -420,17 +492,32 @@ const textColor =
             background: rgba(100, 116, 139, 0.25);
           }
           body.reader-paged .page-divider { display: none; }
+          #reader-loader {
+            padding: 28px 12px 150px;
+            color: rgba(71, 85, 105, 0.7);
+            font-size: 13px;
+            text-align: center;
+          }
+          #reader-loader-top {
+            display: none;
+            position: fixed;
+            top: 8px;
+            left: 50%;
+            z-index: 20;
+            transform: translateX(-50%);
+            padding: 18px 12px;
+            border-radius: 16px;
+            background: rgba(248, 250, 252, 0.94);
+            color: rgba(71, 85, 105, 0.7);
+            font-size: 13px;
+            text-align: center;
+          }
+          body.reader-paged #reader-loader { display: none; }
           .tts-word-active {
             background-color: #fde047;
             border-radius: 4px;
             box-decoration-break: clone;
             -webkit-box-decoration-break: clone;
-            padding: 1px 2px;
-            margin: 0 -2px;
-          }
-          .switch-word-highlight {
-            background: rgba(250, 204, 21, 0.62);
-            border-radius: 3px;
             padding: 1px 2px;
             margin: 0 -2px;
           }
@@ -440,6 +527,13 @@ const textColor =
             box-decoration-break: clone;
             -webkit-box-decoration-break: clone;
             padding: 1px 0;
+          }
+          #reader-switch-highlight {
+            position: absolute;
+            z-index: 12;
+            border-radius: 3px;
+            background-color: rgba(250, 204, 21, 0.62);
+            pointer-events: none;
           }
 
           /*
@@ -466,9 +560,11 @@ const textColor =
 
       <body>
 
+        <div id="reader-loader-top">Loading previous pages…</div>
         <main id="reader-pages">
           ${readerMarkup}
         </main>
+        <div id="reader-loader">Scroll down to load more pages</div>
 
 
         <script>
@@ -478,16 +574,32 @@ const textColor =
 
       if (message.type === 'appendBlocks') {
         const container = document.getElementById('reader-pages');
-        if (!container || !message.html) return;
-        const template = document.createElement('template');
-        template.innerHTML = message.html;
-        Array.from(template.content.children).forEach(function(section) {
-          const page = Number(section.dataset.sourcePageSection);
-          const next = Array.from(container.children).find(function(candidate) {
-            return Number(candidate.dataset.sourcePageSection) > page;
+        if (!container) return;
+        if (message.html) {
+          const template = document.createElement('template');
+          template.innerHTML = message.html;
+          Array.from(template.content.children).forEach(function(section) {
+            const page = Number(section.dataset.sourcePageSection);
+            const next = Array.from(container.children).find(function(candidate) {
+              return Number(candidate.dataset.sourcePageSection) > page;
+            });
+            container.insertBefore(section, next || null);
           });
-          container.insertBefore(section, next || null);
-        });
+        }
+        window.__readerMoreRequested = false;
+        window.__readerPreviousRequested = false;
+        window.__readerHasMore = Boolean(message.hasMore);
+        window.__readerCanLoadNextSegment = Boolean(message.currentSegmentReady);
+        const loader = document.getElementById('reader-loader');
+        const previousLoader = document.getElementById('reader-loader-top');
+        if (previousLoader) previousLoader.style.display = 'none';
+        if (loader) {
+          loader.textContent = !window.__readerHasMore
+            ? 'End of book'
+            : window.__readerCanLoadNextSegment
+              ? 'Scroll down to load the next 300 pages'
+              : 'Loading this section…';
+        }
         if (
           window.__readerTransition !== 'scroll' &&
           window.__refreshReaderPages
@@ -495,6 +607,16 @@ const textColor =
           requestAnimationFrame(window.__refreshReaderPages);
         }
         window.__tryPendingSourceDestination?.();
+        return;
+      }
+
+      if (message.type === 'setSwitchHighlightVisible') {
+        window.__showReaderSwitchHighlight = Boolean(message.visible);
+        if (!window.__showReaderSwitchHighlight) {
+          window.__clearReaderSwitchHighlight?.();
+        } else {
+          window.__reportSwitchAnchor?.();
+        }
         return;
       }
 
@@ -530,12 +652,21 @@ const textColor =
           ? document.querySelector('[data-block-id="' + CSS.escape(pending.blockId) + '"]')
           : null;
         const target = block || document.querySelector('[data-source-page-section="' + pending.page + '"]');
-        if (!target) return;
+        let resolvedTarget = target;
+        if (!resolvedTarget && window.__readerHasMore === false) {
+          const sections = Array.from(
+            document.querySelectorAll('[data-source-page-section]')
+          );
+          resolvedTarget = sections.find(function(section) {
+            return Number(section.dataset.sourcePageSection) >= Number(pending.page);
+          }) || sections[sections.length - 1];
+        }
+        if (!resolvedTarget) return;
         window.__pendingSourceDestination = null;
         if (window.__readerTransition === 'scroll') {
-          target.scrollIntoView({ behavior: 'auto', block: 'start' });
+          resolvedTarget.scrollIntoView({ behavior: 'auto', block: 'start' });
         } else if (window.__goToElementPage) {
-          window.__goToElementPage(target);
+          window.__goToElementPage(resolvedTarget);
         }
       };
       if (message.type === 'goToSourcePage') {
@@ -659,6 +790,12 @@ const textColor =
       }
       if (message.type === 'readerSettings') {
 
+        const anchorElement = document.elementFromPoint(
+          window.innerWidth / 2,
+          window.innerHeight * 0.3
+        )?.closest?.('[data-reader-block]');
+        const anchorTop = anchorElement?.getBoundingClientRect().top || 0;
+
         document.body.style.fontFamily =
           message.fontFamily;
 
@@ -686,13 +823,23 @@ const textColor =
         document.body.style.color =
           message.textColor;
 
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'settingsApplied'
-        }));
-
-        if (window.__refreshReaderPages) {
-          setTimeout(window.__refreshReaderPages, 0);
-        }
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            window.__refreshReaderPages?.();
+            if (anchorElement) {
+              if (window.__readerTransition === 'scroll') {
+                const nextTop = anchorElement.getBoundingClientRect().top;
+                window.scrollBy(0, nextTop - anchorTop);
+              } else {
+                window.__goToElementPage?.(anchorElement);
+              }
+            }
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'settingsApplied'
+            }));
+          });
+        });
+        return;
       }
 
     } catch (error) {
@@ -838,6 +985,7 @@ const textColor =
       if (data.type === "scroll") {
 
         if (typeof data.sourcePage === "number") {
+          lastSourcePageRef.current = data.sourcePage;
           onPageChange?.(data.sourcePage);
         }
 
@@ -898,7 +1046,19 @@ const textColor =
       }
 
       if (data.type === "sourcePage" && typeof data.page === "number") {
+        lastSourcePageRef.current = data.page;
         onPageChange?.(data.page);
+        return;
+      }
+
+
+      if (data.type === "requestMoreBlocks") {
+        setLoadedThroughPage((current) => Math.min(pageCount, current + 300));
+        return;
+      }
+
+      if (data.type === "requestPreviousBlocks") {
+        setAppendPass((value) => value + 1);
         return;
       }
 
@@ -1072,6 +1232,7 @@ const textColor =
           onLoadEnd={handleReaderLoadEnd}
 
           onContentProcessDidTerminate={() => {
+            recoveryPageRef.current = lastSourcePageRef.current;
             appendedBlockCount.current = initialBlocks.length;
             sentBlockIds.current = new Set(initialBlocks.map((block) => block.id));
             setWebViewReady(false);
@@ -1141,7 +1302,11 @@ const textColor =
               }
 
               window.__readerInitialized = true;
-
+              window.__readerHasMore = true;
+              window.__readerMoreRequested = false;
+              window.__readerCanLoadNextSegment = false;
+              window.__readerPreviousRequested = false;
+              window.__showReaderSwitchHighlight = false;
               const paragraphs = Array.from(
                 document.querySelectorAll('[data-reader-block]')
               );
@@ -1172,14 +1337,28 @@ const textColor =
 
 
               let lastSwitchAnchorKey = null;
-              function reportSwitchAnchor() {
-                const previous = document.querySelector('.switch-word-highlight');
-                if (previous) {
-                  const parent = previous.parentNode;
-                  previous.replaceWith(document.createTextNode(previous.textContent || ''));
-                  parent?.normalize();
-                }
+              function clearReaderSwitchHighlight() {
+                document.getElementById('reader-switch-highlight')?.remove();
+              }
+              window.__clearReaderSwitchHighlight = clearReaderSwitchHighlight;
 
+              function drawReaderSwitchHighlight(range) {
+                clearReaderSwitchHighlight();
+                if (!range) return;
+                const rect = Array.from(range.getClientRects()).find(function(item) {
+                  return item.width > 0 && item.height > 0;
+                });
+                if (!rect) return;
+                const marker = document.createElement('div');
+                marker.id = 'reader-switch-highlight';
+                marker.style.left = (rect.left + window.scrollX) + 'px';
+                marker.style.top = (rect.top + window.scrollY) + 'px';
+                marker.style.width = rect.width + 'px';
+                marker.style.height = rect.height + 'px';
+                document.body.appendChild(marker);
+              }
+
+              function reportSwitchAnchor() {
                 let block = null;
                 for (let y = 12; y < window.innerHeight && !block; y += 36) {
                   const hit = document.elementFromPoint(24, y) ||
@@ -1211,6 +1390,7 @@ const textColor =
                 }
                 let highlightedWord = '';
                 let highlightedWordIndex = 0;
+                let switchHighlightRange = null;
                 if (textNode) {
                   const text = textNode.textContent || '';
                   const matches = Array.from(text.matchAll(/\\S+/g));
@@ -1222,18 +1402,18 @@ const textColor =
                     prefix.selectNodeContents(block);
                     prefix.setEnd(textNode, match.index);
                     highlightedWordIndex = (prefix.toString().match(/\\S+/g) || []).length;
-                    const range = document.createRange();
-                    range.setStart(textNode, match.index);
-                    range.setEnd(textNode, match.index + match[0].length);
-                    const marker = document.createElement('span');
-                    marker.className = 'switch-word-highlight';
-                    range.surroundContents(marker);
                     highlightedWord = match[0];
+                    switchHighlightRange = document.createRange();
+                    switchHighlightRange.setStart(textNode, match.index);
+                    switchHighlightRange.setEnd(textNode, match.index + match[0].length);
                   }
                 }
 
                 const blockId = block.dataset.blockId;
                 const anchorKey = blockId + ':' + highlightedWordIndex;
+                if (blockId && window.__showReaderSwitchHighlight) {
+                  drawReaderSwitchHighlight(switchHighlightRange);
+                }
                 if (blockId && anchorKey !== lastSwitchAnchorKey) {
                   lastSwitchAnchorKey = anchorKey;
                   window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -1456,6 +1636,19 @@ const textColor =
               window.__refreshReaderPages = refreshReaderPages;
               window.__goToReaderPage = goToReaderPage;
               window.__navigateReaderPage = function(direction) {
+                if (
+                  direction > 0 &&
+                  currentPage >= pageCount - 1 &&
+                  window.__readerHasMore &&
+                  window.__readerCanLoadNextSegment &&
+                  !window.__readerMoreRequested
+                ) {
+                  window.__readerMoreRequested = true;
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'requestMoreBlocks'
+                  }));
+                  return;
+                }
                 goToReaderPage(
                   currentPage + (direction > 0 ? 1 : -1)
                 );
@@ -1470,10 +1663,16 @@ const textColor =
               // --------------------------------
 
               let scrollTimer = null;
+              let lastWebScrollY = window.scrollY;
 
               window.addEventListener(
                 'scroll',
                 function() {
+
+                  if (window.__showReaderSwitchHighlight) {
+                    window.__showReaderSwitchHighlight = false;
+                    clearReaderSwitchHighlight();
+                  }
 
                   /*
                    * Wait for the next animation frame.
@@ -1495,6 +1694,50 @@ const textColor =
                         );
 
                         reportSwitchAnchor();
+
+                        const currentWebScrollY = window.scrollY;
+                        const scrollingUp = currentWebScrollY < lastWebScrollY;
+                        lastWebScrollY = currentWebScrollY;
+                        if (scrollingUp && !window.__readerPreviousRequested) {
+                          const visibleSection = document.elementFromPoint(
+                            window.innerWidth / 2,
+                            window.innerHeight * 0.25
+                          )?.closest?.('[data-source-page-section]');
+                          const previousSection = visibleSection?.previousElementSibling;
+                          const visibleSourcePage = Number(
+                            visibleSection?.dataset.sourcePageSection
+                          );
+                          const previousSourcePage = Number(
+                            previousSection?.dataset?.sourcePageSection
+                          );
+                          if (
+                            visibleSourcePage > 1 &&
+                            previousSourcePage > 0 &&
+                            visibleSourcePage - previousSourcePage > 1
+                          ) {
+                            window.__readerPreviousRequested = true;
+                            const previousLoader = document.getElementById('reader-loader-top');
+                            if (previousLoader) previousLoader.style.display = 'block';
+                            window.ReactNativeWebView.postMessage(JSON.stringify({
+                              type: 'requestPreviousBlocks'
+                            }));
+                          }
+                        }
+
+                        if (
+                          window.__readerHasMore &&
+                          window.__readerCanLoadNextSegment &&
+                          !window.__readerMoreRequested &&
+                          window.scrollY + window.innerHeight >=
+                            document.documentElement.scrollHeight - window.innerHeight * 2.5
+                        ) {
+                          window.__readerMoreRequested = true;
+                          const loader = document.getElementById('reader-loader');
+                          if (loader) loader.textContent = 'Loading more pages…';
+                          window.ReactNativeWebView.postMessage(JSON.stringify({
+                            type: 'requestMoreBlocks'
+                          }));
+                        }
 
                         scrollTimer = null;
 

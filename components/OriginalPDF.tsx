@@ -18,7 +18,15 @@ type OriginalPdfProps = {
   fileSize?: number;
   initialPage?: number;
   onPageChanged?: (page: number, totalPages: number) => void;
+  onOutlineChanged?: (outline: PdfOutlineItem[]) => void;
   highlightTarget?: SwitchHighlightTarget | null;
+  outlineOnly?: boolean;
+};
+
+export type PdfOutlineItem = {
+  title: string;
+  page: number;
+  children: PdfOutlineItem[];
 };
 
 type PdfJsSources = { library: string; worker: string };
@@ -42,7 +50,7 @@ async function loadPdfJsSources() {
   return cachedSources;
 }
 
-function makeViewerHtml(sources: PdfJsSources, size: number, firstChunk: string, initialPage: number) {
+function makeViewerHtml(sources: PdfJsSources, size: number, firstChunk: string, initialPage: number, outlineOnly: boolean) {
   const config = JSON.stringify({
     library: sources.library,
     worker: sources.worker,
@@ -50,6 +58,7 @@ function makeViewerHtml(sources: PdfJsSources, size: number, firstChunk: string,
     firstChunk,
     initialPage: Math.max(1, initialPage),
     rangeChunkSize: RANGE_CHUNK_SIZE,
+    outlineOnly,
   }).replace(/</g, "\\u003c");
 
   return `<!doctype html>
@@ -82,9 +91,10 @@ async function goToPage(page,smooth=true){const number=Math.max(1,Math.min(total
 function clearHighlight(){document.querySelectorAll('.switchHighlight').forEach(node=>node.remove())}
 function drawHighlight(target){clearHighlight();const item=rendered.get(target.page);if(!item)return;const bounds=target.sourceBounds,pageSize=target.pageSize;if(!bounds||!pageSize?.width||!pageSize?.height)return;const mark=document.createElement('div');mark.className='switchHighlight';mark.style.left=(bounds.left/pageSize.width*100)+'%';mark.style.top=(bounds.top/pageSize.height*100)+'%';mark.style.width=(Math.max(1,bounds.right-bounds.left)/pageSize.width*100)+'%';mark.style.height=(Math.max(1,bounds.bottom-bounds.top)/pageSize.height*100)+'%';item.section.appendChild(mark)}
 async function showTarget(target){currentTarget=target||null;clearHighlight();if(!target)return;suppressScroll=true;await goToPage(target.page,false);await renderPage(target.page);drawHighlight(target);setTimeout(()=>{suppressScroll=false},250)}
+async function resolveOutline(items){return Promise.all((items||[]).map(async item=>{let destination=item.dest;if(typeof destination==='string')destination=await documentProxy.getDestination(destination);const reference=Array.isArray(destination)?destination[0]:null;let page=1;try{page=typeof reference==='number'?reference+1:(await documentProxy.getPageIndex(reference))+1}catch{}return{title:(item.title||'').trim(),page,children:await resolveOutline(item.items)}}))}
 let scrollTimer;window.addEventListener('scroll',()=>{isScrolling=true;if(!suppressScroll&&currentTarget){currentTarget=null;clearHighlight();send({type:'highlightDismissed'})}clearTimeout(scrollTimer);scrollTimer=setTimeout(()=>{isScrolling=false;currentPage=pageAtViewportCenter();unloadFarPages(currentPage);scheduleRender(currentPage+1);scheduleRender(currentPage-1);send({type:'pageChanged',page:currentPage,totalPages})},140)},{passive:true});
 let zoomTimer;function finishZoom(){clearTimeout(zoomTimer);zoomTimer=setTimeout(()=>{currentPage=pageAtViewportCenter();const zoom=Math.max(1,window.visualViewport?.scale||1);renderPage(currentPage,zoom,true)},220)}if(window.visualViewport){window.visualViewport.addEventListener('resize',finishZoom);window.visualViewport.addEventListener('scroll',finishZoom)}
-try{documentProxy=await pdfjs.getDocument({range:transport,length:CONFIG.fileSize,rangeChunkSize:CONFIG.rangeChunkSize,disableStream:true,disableAutoFetch:true}).promise;totalPages=documentProxy.numPages;const firstPage=await documentProxy.getPage(1),firstViewport=firstPage.getViewport({scale:1});buildPlaceholders(totalPages,firstViewport.height/firstViewport.width);for(const section of pages.children)observer.observe(section);status.remove();await goToPage(CONFIG.initialPage,false);send({type:'ready',totalPages})}catch(error){status.innerHTML='<span>Could not open this PDF</span>';send({type:'error',message:String(error?.message||error)})}
+try{documentProxy=await pdfjs.getDocument({range:transport,length:CONFIG.fileSize,rangeChunkSize:CONFIG.rangeChunkSize,disableStream:true,disableAutoFetch:true}).promise;totalPages=documentProxy.numPages;let outline=[];try{outline=await resolveOutline(await documentProxy.getOutline())}catch{}send({type:'outline',outline});if(CONFIG.outlineOnly){status.remove();send({type:'ready',totalPages})}else{const firstPage=await documentProxy.getPage(1),firstViewport=firstPage.getViewport({scale:1});buildPlaceholders(totalPages,firstViewport.height/firstViewport.width);for(const section of pages.children)observer.observe(section);status.remove();await goToPage(CONFIG.initialPage,false);send({type:'ready',totalPages})}}catch(error){status.innerHTML='<span>Could not open this PDF</span>';send({type:'error',message:String(error?.message||error)})}
 </script></body></html>`;
 }
 
@@ -93,7 +103,9 @@ export default function OriginalPDF({
   fileSize,
   initialPage = 1,
   onPageChanged,
+  onOutlineChanged,
   highlightTarget,
+  outlineOnly = false,
 }: OriginalPdfProps) {
   const webViewRef = useRef<WebView>(null);
   const [html, setHtml] = useState<string | null>(null);
@@ -115,12 +127,12 @@ export default function OriginalPDF({
           length: Math.min(size, RANGE_CHUNK_SIZE),
         }),
       ]);
-      if (!cancelled) setHtml(makeViewerHtml(sources, size, firstChunk, initialPage));
+      if (!cancelled) setHtml(makeViewerHtml(sources, size, firstChunk, initialPage, outlineOnly));
     })().catch((error) => {
       if (!cancelled) setErrorMessage(error instanceof Error ? error.message : "Preview unavailable.");
     });
     return () => { cancelled = true; };
-  }, [fileSize, initialPage, pdfUri]);
+  }, [fileSize, initialPage, outlineOnly, pdfUri]);
 
   const sendToViewer = useCallback((message: object) => {
     webViewRef.current?.postMessage(JSON.stringify(message));
@@ -150,10 +162,12 @@ export default function OriginalPDF({
       setReady(true);
     } else if (message.type === "pageChanged") {
       onPageChanged?.(Number(message.page), Number(message.totalPages));
+    } else if (message.type === "outline") {
+      onOutlineChanged?.((message.outline as PdfOutlineItem[]) ?? []);
     } else if (message.type === "error") {
       setErrorMessage(String(message.message ?? "Preview unavailable."));
     }
-  }, [onPageChanged, pdfUri, sendToViewer]);
+  }, [onOutlineChanged, onPageChanged, pdfUri, sendToViewer]);
 
   const source = useMemo(() => html ? { html, baseUrl: "https://bic-reader.local/" } : undefined, [html]);
 

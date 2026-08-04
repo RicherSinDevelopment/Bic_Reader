@@ -1,6 +1,7 @@
 import ReaderToolbar, {
   ReaderBottomNavItem,
 } from "@/components/Readertoolbar";
+import HorizontalReaderPager from "@/components/HorizontalReaderPager";
 
 import AI from "@/components/readernavbar/AI";
 import BackgroundSettings from "@/components/readernavbar/BackgroundSettings";
@@ -21,7 +22,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Animated,
   Modal,
-  PanResponder,
   Pressable,
   StyleSheet,
   Text,
@@ -46,6 +46,7 @@ type ReaderViewProps = {
     nonce: number;
   } | null;
   onPageChange?: (page: number) => void;
+  onPaginationChange?: (currentPage: number, totalPages: number) => void;
   onSwitchAnchorChange?: (blockId: string, word: string, wordIndex: number) => void;
   showSwitchHighlight?: boolean;
 };
@@ -96,7 +97,7 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
     </section>`).join("\n");
 }
 
-const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange, onSwitchAnchorChange, showSwitchHighlight = false }: ReaderViewProps) => {
+const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange, onPaginationChange, onSwitchAnchorChange, showSwitchHighlight = false }: ReaderViewProps) => {
   const { height: windowHeight } = useWindowDimensions();
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
@@ -190,38 +191,6 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
     webViewRef,
     transition,
   });
-
-  const navigateReaderPage = useCallback((direction: 1 | -1) => {
-    webViewRef.current?.postMessage(
-      JSON.stringify({
-        type: "pageNavigate",
-        direction,
-      })
-    );
-  }, []);
-
-  /* eslint-disable react-hooks/refs -- PanResponder callbacks read WebView refs only after gestures. */
-  const pagePanResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponderCapture: (_, gesture) =>
-          isPaged &&
-          Math.abs(gesture.dx) > 12 &&
-          Math.abs(gesture.dx) > Math.abs(gesture.dy),
-        onPanResponderRelease: (_, gesture) => {
-          const isSwipe =
-            Math.abs(gesture.dx) >= 45 ||
-            Math.abs(gesture.vx) >= 0.5;
-
-          if (isSwipe) {
-            navigateReaderPage(gesture.dx < 0 ? 1 : -1);
-          }
-        },
-        onPanResponderTerminationRequest: () => false,
-      }),
-    [isPaged, navigateReaderPage]
-  );
-  /* eslint-enable react-hooks/refs */
 
   const highlightSpokenWord = useCallback(
     (charIndex: number, charLength: number) => {
@@ -336,6 +305,15 @@ const textColor =
     setLineGuideEnabled(false);
     setWordGuideEnabled(false);
   }, [setLineGuideEnabled, setWordGuideEnabled]);
+
+  const handlePagerPageChange = useCallback((
+    current: number,
+    total: number,
+    sourcePage: number,
+  ) => {
+    onPaginationChange?.(current, total);
+    onPageChange?.(sourcePage);
+  }, [onPageChange, onPaginationChange]);
 
 
   const sendReaderSettings = useCallback(() => {
@@ -1053,7 +1031,7 @@ const textColor =
   // SHOW / HIDE TOOLBAR
   // --------------------------------
 
-  const showToolbar = () => {
+  const showToolbar = useCallback(() => {
     if (!toolbarHidden.current) {
       return;
     }
@@ -1073,9 +1051,9 @@ const textColor =
       );
 
     toolbarAnimation.current.start();
-  };
+  }, [toolbarTranslateY]);
 
-  const hideToolbar = () => {
+  const hideToolbar = useCallback(() => {
     if (toolbarHidden.current) {
       return;
     }
@@ -1095,7 +1073,7 @@ const textColor =
       );
 
     toolbarAnimation.current.start();
-  };
+  }, [toolbarTranslateY]);
 
   // --------------------------------
   // WEBVIEW MESSAGE HANDLER
@@ -1119,6 +1097,7 @@ const textColor =
         if (typeof data.sourcePage === "number") {
           lastSourcePageRef.current = data.sourcePage;
           onPageChange?.(data.sourcePage);
+          onPaginationChange?.(data.sourcePage, pageCount);
         }
 
         const currentScrollY =
@@ -1180,6 +1159,7 @@ const textColor =
       if (data.type === "sourcePage" && typeof data.page === "number") {
         lastSourcePageRef.current = data.page;
         onPageChange?.(data.page);
+        onPaginationChange?.(data.page, pageCount);
         return;
       }
 
@@ -1219,6 +1199,14 @@ const textColor =
 
     }
   };
+
+  useEffect(() => {
+    if (isPaged) {
+      hideToolbar();
+    } else {
+      showToolbar();
+    }
+  }, [hideToolbar, isPaged, showToolbar]);
 
   // --------------------------------
   // TOOLBAR BUTTON
@@ -1350,7 +1338,35 @@ const textColor =
           edges={isLandscape ? ["left", "right"] : []}
           style={{ flex: 1, backgroundColor }}
         >
-          <View className="flex-1" {...pagePanResponder.panHandlers}>
+          <View className="flex-1">
+          {isPaged && (
+            <View style={StyleSheet.absoluteFill}>
+              <HorizontalReaderPager
+                blocks={blocks}
+                destination={destination}
+                fontFamily={fontFamily.split(",")[0].replaceAll("'", "").trim()}
+                fontSize={fontSize}
+                lineHeight={lineHeight}
+                letterSpacing={letterSpacing}
+                bold={bold}
+                backgroundColor={backgroundColor}
+                textColor={textColor}
+                onPageChange={handlePagerPageChange}
+                onReaderTap={() => {
+                  if (toolbarHidden.current) {
+                    showToolbar();
+                  } else {
+                    hideToolbar();
+                  }
+                }}
+                onSwipeStart={hideToolbar}
+              />
+            </View>
+          )}
+          <View
+            pointerEvents={isPaged ? "none" : "auto"}
+            style={[StyleSheet.absoluteFill, { opacity: isPaged ? 0 : 1 }]}
+          >
           <WebView
             ref={webViewRef}
 
@@ -2055,68 +2071,13 @@ const textColor =
                   return;
                 }
 
-                const direction = nextPage > currentPage ? 1 : -1;
                 pageAnimationRunning = true;
-
-                if (window.__readerTransition === 'fade') {
-                  pagedContent.style.transition = 'opacity 130ms ease';
-                  pagedContent.style.opacity = '0';
-
-                  setTimeout(function() {
-                    finishPageChange(nextPage);
-                    pagedContent.style.transition = 'opacity 170ms ease';
-                    pagedContent.style.opacity = '1';
-
-                    setTimeout(function() {
-                      pageAnimationRunning = false;
-                    }, 180);
-                  }, 135);
-
-                  return;
-                }
-
-                pagedContent.style.transformOrigin =
-                  direction > 0 ? 'left center' : 'right center';
-                pagedContent.style.transition =
-                  'transform 150ms ease-in, opacity 150ms ease-in';
-                pagedContent.style.transform = pageTransform(
-                  currentPage,
-                  direction > 0 ? -18 : 18
-                );
-                pagedContent.style.opacity = '0.4';
-
-                setTimeout(function() {
-                  currentPage = nextPage;
-                  window.__readerCurrentPage = currentPage;
-                  pagedContent.style.transition = 'none';
-                  pagedContent.style.transform = pageTransform(
-                    currentPage,
-                    direction > 0 ? 18 : -18
-                  );
-
-                  requestAnimationFrame(function() {
-                    requestAnimationFrame(function() {
-                      pagedContent.style.transition =
-                        'transform 190ms ease-out, opacity 190ms ease-out';
-                      pagedContent.style.transform = pageTransform(
-                        currentPage,
-                        0
-                      );
-                      pagedContent.style.opacity = '1';
-
-                      setTimeout(function() {
-                        pageAnimationRunning = false;
-                      }, 200);
-                    });
-                  });
-                }, 155);
+                finishPageChange(nextPage);
+                pageAnimationRunning = false;
               }
 
               function applyReaderTransition(mode, resetPage) {
-                window.__readerTransition =
-                  mode === 'fade' || mode === 'pageFlip'
-                    ? mode
-                    : 'scroll';
+                window.__readerTransition = 'scroll';
 
                 const paged = window.__readerTransition !== 'scroll';
                 document.documentElement.classList.toggle(
@@ -2346,6 +2307,7 @@ const textColor =
           `}
 
           />
+          </View>
           </View>
         </SafeAreaView>
 

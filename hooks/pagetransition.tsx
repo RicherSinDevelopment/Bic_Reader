@@ -1,5 +1,5 @@
 import type { ReaderTransition } from "@/stores/readerSettingsStore";
-import { useCallback, useEffect, type RefObject } from "react";
+import { useCallback, type RefObject } from "react";
 import type { WebView } from "react-native-webview";
 
 type UsePageTransitionOptions = {
@@ -15,17 +15,13 @@ export function usePageTransition({
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: "pageTransition",
-        transition,
+        transition: "scroll",
       })
     );
-  }, [transition, webViewRef]);
-
-  useEffect(() => {
-    syncPageTransition();
-  }, [syncPageTransition]);
+  }, [webViewRef]);
 
   return {
-    isPaged: transition !== "scroll",
+    isPaged: transition === "pager",
     syncPageTransition,
   };
 }

@@ -10,9 +10,8 @@ import React from "react";
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 
 const transitionOptions: { label: string; value: ReaderTransition }[] = [
-  { label: "Scroll", value: "scroll" },
-  { label: "Fade", value: "fade" },
-  { label: "Page flip", value: "pageFlip" },
+  { label: "Vertical scroll", value: "scroll" },
+  { label: "Horizontal swipe", value: "pager" },
 ];
 
 const dimmingOptions = Array.from({ length: 10 }, (_, index) => index * 10);
@@ -49,16 +48,12 @@ export default function Settings() {
   const setTransition = useReaderSettingsStore((state) => state.setTransition);
   const selectedTransitionLabel =
     transitionOptions.find((option) => option.value === transition)?.label ??
-    "Scroll";
+    "Vertical scroll";
 
   return (
     <View className="px-4 py-4">
       <Text className="text-lg font-semibold text-slate-900">
         Reader Settings
-      </Text>
-      <Text className="mt-2 text-sm text-slate-600">
-        Open reader settings to control page layout, navigation behavior, and
-        general reading preferences.
       </Text>
 
       <View className="mt-6 flex-row items-center justify-between">

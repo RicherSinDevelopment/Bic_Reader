@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ReaderTransition = "scroll" | "fade" | "pageFlip";
+export type ReaderTransition = "scroll" | "pager";
 
 type ReaderSettingsState = {
   fontFamily: string;

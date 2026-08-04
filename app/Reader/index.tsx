@@ -71,6 +71,8 @@ export default function ReaderScreen() {
   const [readerError, setReaderError] = useState<string | null>(null);
   const [readerPageCount, setReaderPageCount] = useState(0);
   const [readerCurrentPage, setReaderCurrentPage] = useState(1);
+  const [readerDisplayCurrentPage, setReaderDisplayCurrentPage] = useState(1);
+  const [readerDisplayPageCount, setReaderDisplayPageCount] = useState(0);
   const [originalCurrentPage, setOriginalCurrentPage] = useState(1);
   const [originalPageCount, setOriginalPageCount] = useState(0);
   const [pdfOutline, setPdfOutline] = useState<PdfOutlineItem[]>([]);
@@ -250,10 +252,20 @@ export default function ReaderScreen() {
     setPdfOutline(outline);
   }, []);
 
-  const visiblePage = activeTab === "original" ? originalCurrentPage : readerCurrentPage;
+  const handleReaderPagination = useCallback((current: number, total: number) => {
+    setReaderDisplayCurrentPage(current);
+    setReaderDisplayPageCount(total);
+  }, []);
+
+  const visiblePage = activeTab === "original"
+    ? originalCurrentPage
+    : readerDisplayCurrentPage;
   const visiblePageCount = activeTab === "original"
     ? (originalPageCount || pdf?.totalPages || readerPageCount)
-    : readerPageCount;
+    : (readerDisplayPageCount || readerPageCount);
+  const navigationCurrentPage = activeTab === "original"
+    ? originalCurrentPage
+    : readerCurrentPage;
 
   const goToReaderPage = useCallback((
     page: number,
@@ -350,7 +362,7 @@ export default function ReaderScreen() {
                 />
                 <ThreeLinesButton
                   chapters={readerChapters}
-                  currentPage={visiblePage}
+                  currentPage={navigationCurrentPage}
                   totalPages={visiblePageCount}
                   onGoToPage={(page) => goToReaderPage(page)}
                   onGoToChapter={(chapter) => goToReaderPage(chapter.page, chapter.blockId)}
@@ -408,6 +420,7 @@ export default function ReaderScreen() {
               pageCount={readerPageCount}
               destination={readerDestination}
               onPageChange={setReaderCurrentPage}
+              onPaginationChange={handleReaderPagination}
               onSwitchAnchorChange={reportVisibleBlock}
               showSwitchHighlight={hasVisitedOriginal && activeTab === "reader"}
             />

@@ -10,6 +10,9 @@ type ReaderSettingsState = {
   wordSpacing: number;
   bold: boolean;
   disableRotation: boolean;
+  lineGuideEnabled: boolean;
+  wordGuideEnabled: boolean;
+  guideBackgroundDimming: number;
   transition: ReaderTransition;
 
   setFontFamily: (fontFamily: string) => void;
@@ -31,6 +34,9 @@ type ReaderSettingsState = {
 
   toggleBold: () => void;
   toggleDisableRotation: () => void;
+  setLineGuideEnabled: (enabled: boolean) => void;
+  setWordGuideEnabled: (enabled: boolean) => void;
+  setGuideBackgroundDimming: (percentage: number) => void;
   setTransition: (transition: ReaderTransition) => void;
 
   setBackgroundColor: (color: string) => void;
@@ -47,6 +53,9 @@ export const useReaderSettingsStore =
     wordSpacing: 0,
     bold: false,
     disableRotation: false,
+    lineGuideEnabled: false,
+    wordGuideEnabled: false,
+    guideBackgroundDimming: 60,
     transition: "scroll",
 
     setFontFamily: (fontFamily) => set({ fontFamily }),
@@ -122,6 +131,17 @@ export const useReaderSettingsStore =
       set((state) => ({
         disableRotation: !state.disableRotation,
       })),
+    setLineGuideEnabled: (enabled) => set({
+      lineGuideEnabled: enabled,
+      ...(enabled ? { wordGuideEnabled: false } : {}),
+    }),
+    setWordGuideEnabled: (enabled) => set({
+      wordGuideEnabled: enabled,
+      ...(enabled ? { lineGuideEnabled: false } : {}),
+    }),
+    setGuideBackgroundDimming: (percentage) => set({
+      guideBackgroundDimming: Math.max(0, Math.min(90, percentage)),
+    }),
     setTransition: (transition) => set({ transition }),
 
     // Change background

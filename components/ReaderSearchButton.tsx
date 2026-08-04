@@ -18,11 +18,12 @@ type SearchResult = {
   blockId: string;
   page: number;
   snippet: string;
+  matchIndex: number;
 };
 
 type Props = {
   blocks: ExtractedPdfBlock[];
-  onSelectResult: (page: number, blockId: string) => void;
+  onSelectResult: (page: number, blockId: string, query: string, matchIndex: number) => void;
 };
 
 function resultSnippet(text: string, query: string) {
@@ -52,6 +53,7 @@ export default function ReaderSearchButton({ blocks, onSelectResult }: Props) {
           blockId: block.id,
           page: block.page,
           snippet: resultSnippet(block.text, deferredQuery),
+          matchIndex: match,
         });
         occurrence += 1;
         fromIndex = match + Math.max(1, deferredQuery.length);
@@ -128,7 +130,14 @@ export default function ReaderSearchButton({ blocks, onSelectResult }: Props) {
                 accessibilityLabel={`Search result on page ${item.page}`}
                 onPress={() => {
                   setIsOpen(false);
-                  requestAnimationFrame(() => onSelectResult(item.page, item.blockId));
+                  requestAnimationFrame(() =>
+                    onSelectResult(
+                      item.page,
+                      item.blockId,
+                      deferredQuery,
+                      item.matchIndex
+                    )
+                  );
                 }}
                 style={({ pressed }) => [styles.result, pressed && styles.pressed]}
               >

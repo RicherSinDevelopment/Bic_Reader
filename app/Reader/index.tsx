@@ -74,7 +74,13 @@ export default function ReaderScreen() {
   const [originalCurrentPage, setOriginalCurrentPage] = useState(1);
   const [originalPageCount, setOriginalPageCount] = useState(0);
   const [pdfOutline, setPdfOutline] = useState<PdfOutlineItem[]>([]);
-  const [readerDestination, setReaderDestination] = useState<{ page: number; blockId?: string; nonce: number } | null>(null);
+  const [readerDestination, setReaderDestination] = useState<{
+    page: number;
+    blockId?: string;
+    searchQuery?: string;
+    searchMatchIndex?: number;
+    nonce: number;
+  } | null>(null);
   const readerExtractionStarted = React.useRef(false);
   const requestedExtractionPage = React.useRef<number | null>(null);
   const { reportVisibleBlock, target: switchHighlightTarget } = useSwitchHighlight(
@@ -249,10 +255,21 @@ export default function ReaderScreen() {
     ? (originalPageCount || pdf?.totalPages || readerPageCount)
     : readerPageCount;
 
-  const goToReaderPage = useCallback((page: number, blockId?: string) => {
+  const goToReaderPage = useCallback((
+    page: number,
+    blockId?: string,
+    searchQuery?: string,
+    searchMatchIndex?: number,
+  ) => {
     requestedExtractionPage.current = page;
     setActiveTab("reader");
-    setReaderDestination({ page, blockId, nonce: Date.now() });
+    setReaderDestination({
+      page,
+      blockId,
+      searchQuery,
+      searchMatchIndex,
+      nonce: Date.now(),
+    });
   }, []);
 
   if (isLoading) {
@@ -327,7 +344,9 @@ export default function ReaderScreen() {
               <Box className="absolute right-2 top-1/2 -translate-y-1/2 flex-row gap-2">
                 <ReaderSearchButton
                   blocks={readerBlocks}
-                  onSelectResult={(page, blockId) => goToReaderPage(page, blockId)}
+                  onSelectResult={(page, blockId, query, matchIndex) =>
+                    goToReaderPage(page, blockId, query, matchIndex)
+                  }
                 />
                 <ThreeLinesButton
                   chapters={readerChapters}

@@ -23,6 +23,9 @@ import {
   Modal,
   PanResponder,
   Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -35,7 +38,13 @@ type ReaderViewProps = {
   isLandscape: boolean;
   blocks: ExtractedPdfBlock[];
   pageCount: number;
-  destination?: { page: number; blockId?: string; nonce: number } | null;
+  destination?: {
+    page: number;
+    blockId?: string;
+    searchQuery?: string;
+    searchMatchIndex?: number;
+    nonce: number;
+  } | null;
   onPageChange?: (page: number) => void;
   onSwitchAnchorChange?: (blockId: string, word: string, wordIndex: number) => void;
   showSwitchHighlight?: boolean;
@@ -88,6 +97,7 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
 }
 
 const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange, onSwitchAnchorChange, showSwitchHighlight = false }: ReaderViewProps) => {
+  const { height: windowHeight } = useWindowDimensions();
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
   const [readerText, setReaderText] = useState("");
@@ -287,6 +297,46 @@ const textColor =
     (state) => state.textColor
   );
 
+  const lineGuideEnabled = useReaderSettingsStore(
+    (state) => state.lineGuideEnabled
+  );
+  const setLineGuideEnabled = useReaderSettingsStore(
+    (state) => state.setLineGuideEnabled
+  );
+  const wordGuideEnabled = useReaderSettingsStore(
+    (state) => state.wordGuideEnabled
+  );
+  const setWordGuideEnabled = useReaderSettingsStore(
+    (state) => state.setWordGuideEnabled
+  );
+  const guideBackgroundDimming = useReaderSettingsStore(
+    (state) => state.guideBackgroundDimming
+  );
+  const readerGuideMode = lineGuideEnabled
+    ? "line"
+    : wordGuideEnabled
+      ? "word"
+      : null;
+
+  useEffect(() => {
+    if (!readerGuideMode) return;
+    bottomSheetRef.current?.close();
+  }, [readerGuideMode]);
+
+  const moveLineGuide = useCallback((direction: 1 | -1) => {
+    webViewRef.current?.injectJavaScript(
+      `window.__moveReaderGuide?.(${direction}); true;`
+    );
+  }, []);
+
+  const closeReaderGuide = useCallback(() => {
+    webViewRef.current?.injectJavaScript(
+      `window.__setReaderGuideMode?.(null); true;`
+    );
+    setLineGuideEnabled(false);
+    setWordGuideEnabled(false);
+  }, [setLineGuideEnabled, setWordGuideEnabled]);
+
 
   const sendReaderSettings = useCallback(() => {
     webViewRef.current?.postMessage(
@@ -316,6 +366,22 @@ const textColor =
     }));
   }, [showSwitchHighlight, webViewReady]);
 
+  useEffect(() => {
+    if (!webViewReady) return;
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "setReaderGuideMode",
+      mode: readerGuideMode,
+    }));
+  }, [readerGuideMode, webViewReady]);
+
+  useEffect(() => {
+    if (!webViewReady) return;
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "setGuideBackgroundDimming",
+      percentage: guideBackgroundDimming,
+    }));
+  }, [guideBackgroundDimming, webViewReady]);
+
   const handleReaderLoadEnd = useCallback(() => {
     setWebViewReady(true);
     sendReaderSettings();
@@ -323,6 +389,14 @@ const textColor =
     webViewRef.current?.postMessage(JSON.stringify({
       type: "setSwitchHighlightVisible",
       visible: showSwitchHighlight,
+    }));
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "setReaderGuideMode",
+      mode: readerGuideMode,
+    }));
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "setGuideBackgroundDimming",
+      percentage: guideBackgroundDimming,
     }));
     const recoveryPage = recoveryPageRef.current;
     if (recoveryPage !== null) {
@@ -334,7 +408,7 @@ const textColor =
         }));
       }, 0);
     }
-  }, [sendReaderSettings, showSwitchHighlight, syncPageTransition]);
+  }, [guideBackgroundDimming, readerGuideMode, sendReaderSettings, showSwitchHighlight, syncPageTransition]);
   // Toolbar animation
   const [toolbarTranslateY] = useState(() => new Animated.Value(0));
 
@@ -528,12 +602,38 @@ const textColor =
             -webkit-box-decoration-break: clone;
             padding: 1px 0;
           }
+          .reader-search-highlight {
+            border-radius: 3px;
+            background-color: #facc15;
+            color: inherit;
+            box-decoration-break: clone;
+            -webkit-box-decoration-break: clone;
+            padding: 1px 2px;
+            margin: 0 -2px;
+          }
           #reader-switch-highlight {
             position: absolute;
             z-index: 12;
             border-radius: 3px;
             background-color: rgba(250, 204, 21, 0.62);
             pointer-events: none;
+          }
+          #reader-line-guide,
+          #reader-word-guide {
+            display: none;
+            position: fixed;
+            z-index: 30;
+            pointer-events: none;
+            border-radius: 4px;
+            background: rgba(245, 158, 11, 0.3);
+            box-shadow:
+              0 0 0 9999px color-mix(
+                in srgb,
+                var(--reader-background, #f8fafc) var(--guide-dimming, 60%),
+                transparent
+              ),
+              inset 0 0 0 1px rgba(217, 119, 6, 0.38);
+            transition: left 90ms ease, top 90ms ease, width 90ms ease, height 90ms ease;
           }
 
           /*
@@ -560,6 +660,8 @@ const textColor =
 
       <body>
 
+        <div id="reader-line-guide" aria-hidden="true"></div>
+        <div id="reader-word-guide" aria-hidden="true"></div>
         <div id="reader-loader-top">Loading previous pages…</div>
         <main id="reader-pages">
           ${readerMarkup}
@@ -620,6 +722,25 @@ const textColor =
         return;
       }
 
+      if (message.type === 'setReaderGuideMode') {
+        window.__setReaderGuideMode?.(message.mode);
+        return;
+      }
+
+      if (message.type === 'setGuideBackgroundDimming') {
+        const percentage = Math.max(0, Math.min(90, Number(message.percentage) || 0));
+        document.documentElement.style.setProperty(
+          '--guide-dimming',
+          percentage + '%'
+        );
+        return;
+      }
+
+      if (message.type === 'moveLineGuide') {
+        window.__moveLineGuide?.(message.direction < 0 ? -1 : 1);
+        return;
+      }
+
       if (message.type === 'requestReaderText') {
         const allBlocks = Array.from(
           document.querySelectorAll('[data-reader-block]')
@@ -663,10 +784,16 @@ const textColor =
         }
         if (!resolvedTarget) return;
         window.__pendingSourceDestination = null;
+        const searchHighlight = window.__highlightReaderSearch?.(
+          resolvedTarget,
+          pending.searchQuery,
+          pending.searchMatchIndex
+        );
+        const destinationTarget = searchHighlight || resolvedTarget;
         if (window.__readerTransition === 'scroll') {
-          resolvedTarget.scrollIntoView({ behavior: 'auto', block: 'start' });
+          destinationTarget.scrollIntoView({ behavior: 'auto', block: 'center' });
         } else if (window.__goToElementPage) {
-          window.__goToElementPage(resolvedTarget);
+          window.__goToElementPage(destinationTarget);
         }
       };
       if (message.type === 'goToSourcePage') {
@@ -819,6 +946,11 @@ const textColor =
 
         document.documentElement.style.backgroundColor =
           message.backgroundColor;
+
+        document.documentElement.style.setProperty(
+          '--reader-background',
+          message.backgroundColor
+        );
         
         document.body.style.color =
           message.textColor;
@@ -1427,6 +1559,389 @@ const textColor =
               window.__reportSwitchAnchor = reportSwitchAnchor;
               requestAnimationFrame(reportSwitchAnchor);
 
+              let searchHighlightDismissArmed = false;
+              let searchHighlightArmTimer = null;
+
+              function clearReaderSearchHighlight() {
+                document.querySelectorAll('.reader-search-highlight').forEach(function(mark) {
+                  const parent = mark.parentNode;
+                  mark.replaceWith(document.createTextNode(mark.textContent || ''));
+                  parent?.normalize();
+                });
+                searchHighlightDismissArmed = false;
+                clearTimeout(searchHighlightArmTimer);
+              }
+              window.__clearReaderSearchHighlight = clearReaderSearchHighlight;
+
+              window.__highlightReaderSearch = function(block, query, matchIndex) {
+                clearReaderSearchHighlight();
+
+                if (!block || !query) return null;
+                const blockText = block.textContent || '';
+                let start = Number(matchIndex);
+                if (!Number.isFinite(start) || start < 0) {
+                  start = blockText.toLocaleLowerCase().indexOf(
+                    String(query).toLocaleLowerCase()
+                  );
+                }
+                if (start < 0) return null;
+                const end = Math.min(blockText.length, start + String(query).length);
+                if (end <= start) return null;
+
+                const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+                const portions = [];
+                let offset = 0;
+                let node = walker.nextNode();
+                while (node) {
+                  const length = (node.textContent || '').length;
+                  const portionStart = Math.max(0, start - offset);
+                  const portionEnd = Math.min(length, end - offset);
+                  if (portionStart < portionEnd) {
+                    portions.push({ node: node, start: portionStart, end: portionEnd });
+                  }
+                  offset += length;
+                  if (offset >= end) break;
+                  node = walker.nextNode();
+                }
+
+                let firstMarker = null;
+                portions.reverse().forEach(function(portion) {
+                  const range = document.createRange();
+                  range.setStart(portion.node, portion.start);
+                  range.setEnd(portion.node, portion.end);
+                  const marker = document.createElement('mark');
+                  marker.className = 'reader-search-highlight';
+                  range.surroundContents(marker);
+                  firstMarker = marker;
+                });
+                searchHighlightArmTimer = setTimeout(function() {
+                  searchHighlightDismissArmed = true;
+                }, 450);
+                return firstMarker;
+              };
+
+              // --------------------------------
+              // WORD-ACCURATE LINE GUIDE
+              // --------------------------------
+
+              let readerGuideMode = null;
+              let currentGuideDocumentTop = null;
+              let currentGuideLeft = null;
+              const lineGuide = document.getElementById('reader-line-guide');
+              const wordGuide = document.getElementById('reader-word-guide');
+              let currentWordNode = null;
+              let currentWordStart = -1;
+              let currentWordEnd = -1;
+
+              function isGuideTextNode(node) {
+                return Boolean(
+                  node &&
+                  (node.textContent || '').trim() &&
+                  !node.parentElement?.closest('.page-divider')
+                );
+              }
+
+              function wordMatches(node) {
+                return Array.from((node.textContent || '').matchAll(/\\S+/g));
+              }
+
+              function wordRange(node, match) {
+                const range = document.createRange();
+                range.setStart(node, match.index);
+                range.setEnd(node, match.index + match[0].length);
+                return range;
+              }
+
+              function drawWordGuide(node, match) {
+                if (!wordGuide || !node || !match) return false;
+                const range = wordRange(node, match);
+                const rect = Array.from(range.getClientRects()).find(function(item) {
+                  return item.width > 0 && item.height > 0;
+                });
+                if (!rect) return false;
+                currentWordNode = node;
+                currentWordStart = match.index;
+                currentWordEnd = match.index + match[0].length;
+                wordGuide.style.display = 'block';
+                wordGuide.style.left = Math.max(0, rect.left - 3) + 'px';
+                wordGuide.style.top = Math.max(0, rect.top - 2) + 'px';
+                wordGuide.style.width = Math.max(1, rect.width + 6) + 'px';
+                wordGuide.style.height = Math.max(1, rect.height + 4) + 'px';
+                return true;
+              }
+
+              function initializeWordGuide() {
+                let block = null;
+                for (let y = 12; y < window.innerHeight - 72 && !block; y += 24) {
+                  block = document.elementFromPoint(window.innerWidth / 2, y)
+                    ?.closest?.('[data-reader-block]') || null;
+                }
+                if (!block) return;
+                const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+                let node = walker.nextNode();
+                while (node) {
+                  if (isGuideTextNode(node)) {
+                    const matches = wordMatches(node);
+                    const match = matches.find(function(item) {
+                      const rect = wordRange(node, item).getBoundingClientRect();
+                      return rect.bottom >= 12 && rect.top <= window.innerHeight - 72;
+                    });
+                    if (match && drawWordGuide(node, match)) return;
+                  }
+                  node = walker.nextNode();
+                }
+              }
+
+              function adjacentWord(direction) {
+                if (!currentWordNode || !readerPages) return null;
+                const matches = wordMatches(currentWordNode);
+                const currentIndex = matches.findIndex(function(match) {
+                  return match.index === currentWordStart;
+                });
+                const sameNodeMatch = matches[currentIndex + direction];
+                if (sameNodeMatch) {
+                  return { node: currentWordNode, match: sameNodeMatch };
+                }
+
+                const walker = document.createTreeWalker(
+                  readerPages,
+                  NodeFilter.SHOW_TEXT,
+                  {
+                    acceptNode: function(node) {
+                      return isGuideTextNode(node)
+                        ? NodeFilter.FILTER_ACCEPT
+                        : NodeFilter.FILTER_REJECT;
+                    }
+                  }
+                );
+                walker.currentNode = currentWordNode;
+                let node = direction < 0 ? walker.previousNode() : walker.nextNode();
+                while (node) {
+                  const nodeMatches = wordMatches(node);
+                  if (nodeMatches.length) {
+                    return {
+                      node: node,
+                      match: direction < 0
+                        ? nodeMatches[nodeMatches.length - 1]
+                        : nodeMatches[0]
+                    };
+                  }
+                  node = direction < 0 ? walker.previousNode() : walker.nextNode();
+                }
+                return null;
+              }
+
+              function moveWordGuide(direction) {
+                if (!currentWordNode) {
+                  initializeWordGuide();
+                  return;
+                }
+                const target = adjacentWord(direction);
+                if (!target) return;
+                const targetRect = wordRange(target.node, target.match).getBoundingClientRect();
+                const topLimit = 12;
+                const bottomLimit = window.innerHeight - 76;
+                if (targetRect.top >= topLimit && targetRect.bottom <= bottomLimit) {
+                  drawWordGuide(target.node, target.match);
+                  return;
+                }
+                const currentRange = document.createRange();
+                currentRange.setStart(currentWordNode, currentWordStart);
+                currentRange.setEnd(currentWordNode, currentWordEnd);
+                const currentRect = currentRange.getBoundingClientRect();
+                const scrollDistance = direction < 0
+                  ? Math.min(0, currentRect.bottom - bottomLimit)
+                  : Math.max(0, currentRect.top - 16);
+                window.scrollBy({ top: scrollDistance, left: 0, behavior: 'smooth' });
+              }
+
+              function redrawWordGuide() {
+                if (!currentWordNode || currentWordStart < 0) return;
+                const match = wordMatches(currentWordNode).find(function(item) {
+                  return item.index === currentWordStart;
+                });
+                if (match) drawWordGuide(currentWordNode, match);
+              }
+
+              function collectReaderLines() {
+                if (!readerPages) return [];
+                const lines = [];
+                const walker = document.createTreeWalker(
+                  readerPages,
+                  NodeFilter.SHOW_TEXT,
+                  {
+                    acceptNode: function(node) {
+                      return (
+                        (node.textContent || '').trim() &&
+                        !node.parentElement?.closest('.page-divider')
+                      )
+                        ? NodeFilter.FILTER_ACCEPT
+                        : NodeFilter.FILTER_REJECT;
+                    }
+                  }
+                );
+                let node = walker.nextNode();
+
+                while (node) {
+                  const range = document.createRange();
+                  range.selectNodeContents(node);
+                  Array.from(range.getClientRects()).forEach(function(rect) {
+                    if (
+                      rect.width < 1 ||
+                      rect.height < 1 ||
+                      rect.bottom < -4 ||
+                      rect.top > window.innerHeight + 4
+                    ) return;
+
+                    let line = lines.find(function(candidate) {
+                      return Math.abs(candidate.top - rect.top) < 2.5;
+                    });
+                    if (!line) {
+                      line = {
+                        left: rect.left,
+                        right: rect.right,
+                        top: rect.top,
+                        bottom: rect.bottom
+                      };
+                      lines.push(line);
+                    } else {
+                      line.left = Math.min(line.left, rect.left);
+                      line.right = Math.max(line.right, rect.right);
+                      line.top = Math.min(line.top, rect.top);
+                      line.bottom = Math.max(line.bottom, rect.bottom);
+                    }
+                  });
+                  node = walker.nextNode();
+                }
+
+                return lines
+                  .map(function(line) {
+                    return {
+                      left: line.left,
+                      right: line.right,
+                      top: line.top,
+                      bottom: line.bottom,
+                      documentTop: line.top + window.scrollY
+                    };
+                  })
+                  .sort(function(a, b) { return a.top - b.top; });
+              }
+
+              function collectGuideItems() {
+                return collectReaderLines();
+              }
+
+              function drawLineGuide(line) {
+                if (!lineGuide || !line) return;
+                currentGuideDocumentTop = line.documentTop;
+                currentGuideLeft = line.left;
+                lineGuide.style.display = 'block';
+                lineGuide.style.left = Math.max(0, line.left - 3) + 'px';
+                lineGuide.style.top = Math.max(0, line.top - 2) + 'px';
+                lineGuide.style.width = Math.max(1, line.right - line.left + 6) + 'px';
+                lineGuide.style.height = Math.max(1, line.bottom - line.top + 4) + 'px';
+              }
+
+              function closestCurrentLine(lines) {
+                if (
+                  currentGuideDocumentTop === null ||
+                  currentGuideLeft === null
+                ) return null;
+                return lines.reduce(function(closest, line) {
+                  if (!closest) return line;
+                  const lineDistance =
+                    Math.abs(line.documentTop - currentGuideDocumentTop) * 1000 +
+                    Math.abs(line.left - currentGuideLeft);
+                  const closestDistance =
+                    Math.abs(closest.documentTop - currentGuideDocumentTop) * 1000 +
+                    Math.abs(closest.left - currentGuideLeft);
+                  return lineDistance < closestDistance
+                      ? line
+                      : closest;
+                }, null);
+              }
+
+              function initializeLineGuide() {
+                const firstLine = collectGuideItems().find(function(line) {
+                  return line.top >= 12 && line.bottom <= window.innerHeight - 72;
+                });
+                if (firstLine) drawLineGuide(firstLine);
+              }
+
+              window.__setReaderGuideMode = function(mode) {
+                readerGuideMode = mode === 'line' || mode === 'word' ? mode : null;
+                currentGuideDocumentTop = null;
+                currentGuideLeft = null;
+                currentWordNode = null;
+                currentWordStart = -1;
+                currentWordEnd = -1;
+                if (lineGuide) lineGuide.style.display = 'none';
+                if (wordGuide) wordGuide.style.display = 'none';
+                if (!readerGuideMode) {
+                  return;
+                }
+                requestAnimationFrame(function() {
+                  requestAnimationFrame(
+                    readerGuideMode === 'word'
+                      ? initializeWordGuide
+                      : initializeLineGuide
+                  );
+                });
+              };
+
+              window.__moveReaderGuide = function(direction) {
+                if (readerGuideMode === 'word') {
+                  moveWordGuide(direction < 0 ? -1 : 1);
+                  return;
+                }
+                window.__moveLineGuide?.(direction < 0 ? -1 : 1);
+              };
+
+              window.__moveLineGuide = function(direction) {
+                if (readerGuideMode !== 'line') return;
+                const lines = collectGuideItems();
+                if (!lines.length || currentGuideDocumentTop === null) {
+                  initializeLineGuide();
+                  return;
+                }
+
+                const currentLine = closestCurrentLine(lines);
+                if (!currentLine) return;
+                const currentIndex = lines.indexOf(currentLine);
+                const nextLine = lines[currentIndex + (direction < 0 ? -1 : 1)];
+                const topLimit = 12;
+                const bottomLimit = window.innerHeight - 76;
+
+                if (
+                  nextLine &&
+                  nextLine.top >= topLimit &&
+                  nextLine.bottom <= bottomLimit
+                ) {
+                  drawLineGuide(nextLine);
+                  return;
+                }
+
+                const scrollDistance = direction < 0
+                  ? Math.min(0, currentLine.bottom - bottomLimit)
+                  : Math.max(0, currentLine.top - 16);
+                window.scrollBy({ top: scrollDistance, left: 0, behavior: 'smooth' });
+              };
+
+              let lineGuideRedrawFrame = null;
+              function redrawLineGuideDuringScroll() {
+                if (readerGuideMode === 'word') {
+                  redrawWordGuide();
+                  return;
+                }
+                if (readerGuideMode !== 'line' || currentGuideDocumentTop === null) return;
+                if (lineGuideRedrawFrame) cancelAnimationFrame(lineGuideRedrawFrame);
+                lineGuideRedrawFrame = requestAnimationFrame(function() {
+                  const currentLine = closestCurrentLine(collectGuideItems());
+                  if (currentLine) drawLineGuide(currentLine);
+                  lineGuideRedrawFrame = null;
+                });
+              }
+
               // --------------------------------
               // PAGINATED READER
               // --------------------------------
@@ -1656,7 +2171,21 @@ const textColor =
               window.__applyReaderTransition = applyReaderTransition;
 
               window.addEventListener('resize', function() {
-                setTimeout(refreshReaderPages, 50);
+                setTimeout(function() {
+                  refreshReaderPages();
+                  if (readerGuideMode) {
+                    if (readerGuideMode === 'word') {
+                      currentWordNode = null;
+                      currentWordStart = -1;
+                      currentWordEnd = -1;
+                      initializeWordGuide();
+                    } else {
+                      currentGuideDocumentTop = null;
+                      currentGuideLeft = null;
+                      initializeLineGuide();
+                    }
+                  }
+                }, 50);
               });
               // --------------------------------
               // SCROLL HANDLING
@@ -1668,6 +2197,12 @@ const textColor =
               window.addEventListener(
                 'scroll',
                 function() {
+
+                  redrawLineGuideDuringScroll();
+
+                  if (searchHighlightDismissArmed) {
+                    clearReaderSearchHighlight();
+                  }
 
                   if (window.__showReaderSwitchHighlight) {
                     window.__showReaderSwitchHighlight = false;
@@ -1818,7 +2353,7 @@ const textColor =
         {/* ANIMATED READER TOOLBAR */}
         {/* ========================= */}
 
-        {!isLandscape && (
+        {!isLandscape && !readerGuideMode && (
   <Animated.View
     style={{
       transform: [
@@ -1835,6 +2370,33 @@ const textColor =
     />
   </Animated.View>
 )}
+
+        {readerGuideMode && (
+          <View
+            pointerEvents="box-none"
+            style={StyleSheet.absoluteFill}
+          >
+            <Pressable
+              accessibilityLabel="Move reading line guide. Tap upper half for up, lower half for down"
+              accessibilityRole="button"
+              onPress={(event) => {
+                moveLineGuide(
+                  event.nativeEvent.pageY < windowHeight / 2 ? -1 : 1
+                );
+              }}
+              style={StyleSheet.absoluteFill}
+            />
+            <Pressable
+              accessibilityLabel="Close line guide"
+              accessibilityRole="button"
+              hitSlop={12}
+              onPress={closeReaderGuide}
+              style={styles.lineGuideClose}
+            >
+              <Text style={styles.lineGuideCloseText}>×</Text>
+            </Pressable>
+          </View>
+        )}
         {/* ========================= */}
         {/* BOTTOM SHEET */}
         {/* ========================= */}
@@ -1866,3 +2428,28 @@ const textColor =
 };
 
 export default ReaderView;
+
+const styles = StyleSheet.create({
+  lineGuideClose: {
+    position: "absolute",
+    bottom: 24,
+    alignSelf: "center",
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 24,
+    backgroundColor: "rgba(15, 23, 42, 0.92)",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  lineGuideCloseText: {
+    color: "#ffffff",
+    fontSize: 32,
+    fontWeight: "300",
+    lineHeight: 34,
+  },
+});

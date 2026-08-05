@@ -110,6 +110,7 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
   const appendedBlockCount = useRef(initialBlocks.length);
   const sentBlockIds = useRef(new Set(initialBlocks.map((block) => block.id)));
   const lastSourcePageRef = useRef(1);
+  const [currentSourcePage, setCurrentSourcePage] = useState(1);
   const recoveryPageRef = useRef<number | null>(null);
   const [webViewReady, setWebViewReady] = useState(false);
   const [loadedThroughPage, setLoadedThroughPage] = useState(Math.min(300, pageCount));
@@ -1096,6 +1097,7 @@ const textColor =
 
         if (typeof data.sourcePage === "number") {
           lastSourcePageRef.current = data.sourcePage;
+          setCurrentSourcePage(data.sourcePage);
           onPageChange?.(data.sourcePage);
           onPaginationChange?.(data.sourcePage, pageCount);
         }
@@ -1158,6 +1160,7 @@ const textColor =
 
       if (data.type === "sourcePage" && typeof data.page === "number") {
         lastSourcePageRef.current = data.page;
+        setCurrentSourcePage(data.page);
         onPageChange?.(data.page);
         onPaginationChange?.(data.page, pageCount);
         return;
@@ -1261,7 +1264,14 @@ const textColor =
         );
 
       case "ai":
-        return <AI selectedText={selectedAIText} />;
+        return (
+          <AI
+            selectedText={selectedAIText}
+            currentPage={currentSourcePage}
+            pageCount={pageCount}
+            blocks={blocks}
+          />
+        );
 
       case "settings":
         return <Settings />;
@@ -2366,7 +2376,7 @@ const textColor =
         <BottomSheetPortal
           snapPoints={[
             "40%",
-            "65%",
+            "82%",
           ]}
           backdropComponent={
             BottomSheetBackdrop

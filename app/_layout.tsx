@@ -1,5 +1,6 @@
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { migrateDatabase } from "@/database/migrations";
+import { AuthProvider, useAuth } from '@/providers/AuthProvider';
 import { Lato_400Regular, Lato_700Bold, useFonts } from "@expo-google-fonts/lato";
 import { Stack } from "expo-router";
 import { SQLiteProvider } from "expo-sqlite";
@@ -32,12 +33,40 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <GluestackUIProvider>
-          <SQLiteProvider databaseName="bic_reader.db" onInit={migrateDatabase}>
-            <Stack screenOptions={{ headerShown: false }} />
-          </SQLiteProvider>
+          <AuthProvider>
+            <SQLiteProvider databaseName="bic_reader.db" onInit={migrateDatabase}>
+              <RootNavigator />
+            </SQLiteProvider>
+          </AuthProvider>
         </GluestackUIProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
    
+}
+
+function RootNavigator() {
+  const { isLoading, session } = useAuth();
+
+  if (isLoading) {
+    return null;
+  }
+
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="auth" />
+      <Stack.Protected guard={!session}>
+        <Stack.Screen name="(auth)" />
+      </Stack.Protected>
+      <Stack.Protected guard={!!session}>
+        <Stack.Screen
+          name="HomePage"
+          options={{ orientation: "portrait" }}
+        />
+        <Stack.Screen name="Profile" />
+        <Stack.Screen name="Reader" />
+      </Stack.Protected>
+    </Stack>
+  );
 }

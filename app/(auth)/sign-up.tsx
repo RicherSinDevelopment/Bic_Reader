@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
+import * as Linking from 'expo-linking';
 import { Link, useRouter } from 'expo-router';
-import { Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react-native';
+import { Eye, EyeOff, LockKeyhole, Mail, UserRound } from 'lucide-react-native';
 import { useState } from 'react';
 import {
   Image,
@@ -17,23 +18,31 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 const logo = require('../../assets/images/Bicreaderlogo-large.png');
 
-export default function SignIn() {
+export default function SignUp() {
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const router = useRouter();
 
-  const canSubmit = email.trim().length > 0 && password.length > 0 && !isSubmitting;
+  const canSubmit =
+    name.trim().length > 0 && email.trim().length > 0 && password.length >= 8 && !isSubmitting;
 
-  const handleSignIn = async () => {
+  const handleSignUp = async () => {
     setErrorMessage(null);
+    setSuccessMessage(null);
     setIsSubmitting(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
+      options: {
+        emailRedirectTo: Linking.createURL('auth/callback'),
+        data: { full_name: name.trim() },
+      },
     });
 
     setIsSubmitting(false);
@@ -43,7 +52,12 @@ export default function SignIn() {
       return;
     }
 
-    router.replace('/HomePage');
+    if (data.session) {
+      router.replace('/HomePage');
+      return;
+    }
+
+    setSuccessMessage('Account created. Check your email to confirm your address, then sign in.');
   };
 
   return (
@@ -65,12 +79,29 @@ export default function SignIn() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.title}>Welcome back</Text>
+            <Text style={styles.title}>Create your account</Text>
             <Text style={styles.subtitle}>
-              Sign in to continue reading, learning, and exploring.
+              Build your library and keep your reading journey in one place.
             </Text>
 
             <View style={styles.form}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Full name</Text>
+                <View style={styles.inputShell}>
+                  <UserRound color="#737270" size={20} strokeWidth={1.8} />
+                  <TextInput
+                    autoCapitalize="words"
+                    autoComplete="name"
+                    onChangeText={setName}
+                    placeholder="Your name"
+                    placeholderTextColor="#9E9C93"
+                    returnKeyType="next"
+                    style={styles.input}
+                    value={name}
+                  />
+                </View>
+              </View>
+
               <View style={styles.fieldGroup}>
                 <Text style={styles.label}>Email address</Text>
                 <View style={styles.inputShell}>
@@ -91,21 +122,14 @@ export default function SignIn() {
               </View>
 
               <View style={styles.fieldGroup}>
-                <View style={styles.labelRow}>
-                  <Text style={styles.label}>Password</Text>
-                  <Link href="/(auth)/forgot-password" asChild>
-                    <Pressable hitSlop={10}>
-                      <Text style={styles.forgotPassword}>Forgot password?</Text>
-                    </Pressable>
-                  </Link>
-                </View>
+                <Text style={styles.label}>Password</Text>
                 <View style={styles.inputShell}>
                   <LockKeyhole color="#737270" size={20} strokeWidth={1.8} />
                   <TextInput
                     autoCapitalize="none"
-                    autoComplete="current-password"
+                    autoComplete="new-password"
                     onChangeText={setPassword}
-                    placeholder="Enter your password"
+                    placeholder="At least 8 characters"
                     placeholderTextColor="#9E9C93"
                     returnKeyType="done"
                     secureTextEntry={!showPassword}
@@ -124,12 +148,13 @@ export default function SignIn() {
                     )}
                   </Pressable>
                 </View>
+                <Text style={styles.helperText}>Use 8 or more characters.</Text>
               </View>
 
               <Pressable
                 accessibilityRole="button"
                 disabled={!canSubmit}
-                onPress={() => void handleSignIn()}
+                onPress={() => void handleSignUp()}
                 style={({ pressed }) => [
                   styles.primaryButton,
                   !canSubmit && styles.primaryButtonDisabled,
@@ -137,7 +162,7 @@ export default function SignIn() {
                 ]}
               >
                 <Text style={styles.primaryButtonText}>
-                  {isSubmitting ? 'Signing in…' : 'Sign in'}
+                  {isSubmitting ? 'Creating account…' : 'Create account'}
                 </Text>
               </Pressable>
               {errorMessage ? (
@@ -145,13 +170,14 @@ export default function SignIn() {
                   {errorMessage}
                 </Text>
               ) : null}
+              {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
             </View>
 
             <View style={styles.switchRow}>
-              <Text style={styles.switchText}>New to Bic Reader?</Text>
-              <Link href="/(auth)/sign-up" asChild>
+              <Text style={styles.switchText}>Already have an account?</Text>
+              <Link href="/(auth)/sign-in" asChild>
                 <Pressable hitSlop={8}>
-                  <Text style={styles.switchLink}>Create an account</Text>
+                  <Text style={styles.switchLink}>Sign in</Text>
                 </Pressable>
               </Link>
             </View>
@@ -175,19 +201,19 @@ const styles = StyleSheet.create({
   decorativeCircle: {
     position: 'absolute',
     top: -120,
-    right: -105,
+    left: -110,
     width: 300,
     height: 300,
     borderRadius: 150,
     backgroundColor: '#EAF3DE',
   },
-  header: { alignItems: 'center', marginBottom: 24 },
-  logo: { width: 72, height: 72, borderRadius: 20 },
+  header: { alignItems: 'center', marginBottom: 20 },
+  logo: { width: 64, height: 64, borderRadius: 18 },
   brand: {
-    marginTop: 8,
+    marginTop: 7,
     color: '#2E5A0D',
     fontFamily: 'Lato_700Bold',
-    fontSize: 17,
+    fontSize: 16,
     letterSpacing: 0.2,
   },
   card: {
@@ -208,8 +234,8 @@ const styles = StyleSheet.create({
   title: {
     color: '#2C2C2A',
     fontFamily: 'Lato_700Bold',
-    fontSize: 30,
-    lineHeight: 36,
+    fontSize: 28,
+    lineHeight: 34,
   },
   subtitle: {
     marginTop: 8,
@@ -218,13 +244,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
   },
-  form: { gap: 18, marginTop: 28 },
+  form: { gap: 16, marginTop: 24 },
   fieldGroup: { gap: 8 },
-  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   label: { color: '#444441', fontFamily: 'Lato_700Bold', fontSize: 14 },
-  forgotPassword: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 13 },
   inputShell: {
-    height: 56,
+    height: 54,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -241,11 +265,12 @@ const styles = StyleSheet.create({
     fontFamily: 'Lato_400Regular',
     fontSize: 16,
   },
+  helperText: { color: '#888780', fontFamily: 'Lato_400Regular', fontSize: 12 },
   primaryButton: {
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 4,
+    marginTop: 2,
     borderRadius: 16,
     backgroundColor: '#4F7D1A',
   },
@@ -263,13 +288,20 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: 'center',
   },
+  successText: {
+    color: '#2E5A0D',
+    fontFamily: 'Lato_400Regular',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
   switchRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
-    marginTop: 26,
+    marginTop: 24,
   },
   switchText: { color: '#737270', fontFamily: 'Lato_400Regular', fontSize: 14 },
   switchLink: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 14 },

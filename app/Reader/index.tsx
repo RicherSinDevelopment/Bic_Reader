@@ -4,6 +4,7 @@ import ReaderView from "@/components/ReaderView";
 import ReaderSearchButton from "@/components/ReaderSearchButton";
 import ThreeLinesButton, { type ReaderChapter } from "@/components/threelinesbutton";
 import { Box } from "@/components/ui/box";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Text } from "@/components/ui/text";
 import {
   Tabs,
@@ -34,7 +35,14 @@ import {
   type ExtractedPdfDocument,
 } from "@/modules/bic-pdf-reader";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Animated, View } from "react-native";
+import { ActivityIndicator, Animated, StyleSheet, View } from "react-native";
+import Reanimated, {
+  Easing,
+  ReduceMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 
 function isVisibleReaderBlock(block: ExtractedPdfBlock) {
   if (block.hiddenInReader) return false;
@@ -54,6 +62,47 @@ function firstMissingPageIndex(document: ExtractedPdfDocument | null | undefined
   return document.pageCount;
 }
 
+const FIRST_READER_PAGE_BATCH = 1;
+const WARM_READER_PAGE_COUNT = 5;
+const BACKGROUND_READER_PAGE_BATCH = 16;
+
+function BookPageSkeleton() {
+  const lineWidths = [
+    "w-full", "w-[94%]", "w-[98%]", "w-[88%]", "w-full", "w-[92%]",
+    "w-[96%]", "w-[84%]", "w-full", "w-[90%]", "w-[97%]", "w-[72%]",
+  ];
+
+  return (
+    <View className="flex-1 bg-white px-6 py-8">
+        <Skeleton
+          speed={2}
+          startColor="bg-[#E7E3D8]"
+          className="mb-8 h-7 w-[58%] rounded-md"
+        />
+        <View className="gap-4">
+          {lineWidths.map((width, index) => (
+            <Skeleton
+              key={`${width}-${index}`}
+              speed={2}
+              startColor="bg-[#E7E3D8]"
+              className={`h-3.5 rounded-full ${width}`}
+            />
+          ))}
+        </View>
+        <View className="mt-10 gap-4">
+          {lineWidths.slice(0, 7).map((width, index) => (
+            <Skeleton
+              key={`second-${width}-${index}`}
+              speed={2}
+              startColor="bg-[#E7E3D8]"
+              className={`h-3.5 rounded-full ${width}`}
+            />
+          ))}
+        </View>
+    </View>
+  );
+}
+
 export default function ReaderScreen() {
   const { pdfId } = useLocalSearchParams<{ pdfId?: string }>();
   const db = useSQLiteContext();
@@ -70,6 +119,9 @@ export default function ReaderScreen() {
   const [readerLoading, setReaderLoading] = useState(true);
   const [readerError, setReaderError] = useState<string | null>(null);
   const [readerPageCount, setReaderPageCount] = useState(0);
+  const [readerContentReady, setReaderContentReady] = useState(false);
+  const readerContentOpacity = useSharedValue(0);
+  const readerSkeletonOpacity = useSharedValue(1);
   const [readerCurrentPage, setReaderCurrentPage] = useState(1);
   const [readerDisplayCurrentPage, setReaderDisplayCurrentPage] = useState(1);
   const [readerDisplayPageCount, setReaderDisplayPageCount] = useState(0);
@@ -91,6 +143,26 @@ export default function ReaderScreen() {
   );
 
   useScreenRotation(setIsLandscape);
+
+  useEffect(() => {
+    readerContentOpacity.value = withTiming(readerContentReady ? 1 : 0, {
+      duration: readerContentReady ? 180 : 0,
+      easing: Easing.out(Easing.cubic),
+      reduceMotion: ReduceMotion.System,
+    });
+    readerSkeletonOpacity.value = withTiming(readerContentReady ? 0 : 1, {
+      duration: readerContentReady ? 140 : 0,
+      easing: Easing.out(Easing.quad),
+      reduceMotion: ReduceMotion.System,
+    });
+  }, [readerContentOpacity, readerContentReady, readerSkeletonOpacity]);
+
+  const readerContentStyle = useAnimatedStyle(() => ({
+    opacity: readerContentOpacity.value,
+  }));
+  const readerSkeletonStyle = useAnimatedStyle(() => ({
+    opacity: readerSkeletonOpacity.value,
+  }));
 
   useEffect(() => {
     let cancelled = false;
@@ -176,7 +248,17 @@ export default function ReaderScreen() {
             const firstPage = requestIsMissing ? requestedPage - 1 : nextPage;
             if (requestIsMissing) requestedExtractionPage.current = null;
 
-            const chunk = await extractPdfDocumentRange(pdf.uri, firstPage, 16);
+            const extractedPageCount = document?.pages.length ?? 0;
+            const batchSize = extractedPageCount === 0 && firstPage === 0
+              ? FIRST_READER_PAGE_BATCH
+              : firstPage < WARM_READER_PAGE_COUNT
+                ? WARM_READER_PAGE_COUNT - firstPage
+                : BACKGROUND_READER_PAGE_BATCH;
+            const chunk = await extractPdfDocumentRange(
+              pdf.uri,
+              firstPage,
+              batchSize,
+            );
             const pagesByNumber = new Map(
               document?.pages.map((page) => [page.page, page]) ?? [],
             );
@@ -201,7 +283,7 @@ export default function ReaderScreen() {
           if (!cancelled) setReaderLoading(false);
         }
       })();
-    }, 150);
+    }, 0);
 
     return () => {
       cancelled = true;
@@ -392,11 +474,16 @@ export default function ReaderScreen() {
 
       <View className="flex-1 overflow-hidden">
         <View
-          pointerEvents={activeTab === "original" ? "auto" : "none"}
+          pointerEvents={
+            activeTab === "original" ||
+              (activeTab === "reader" && readerBlocks.length === 0)
+              ? "auto"
+              : "none"
+          }
           style={{
             position: "absolute",
             inset: 0,
-            opacity: activeTab === "original" ? 1 : 0,
+            opacity: 1,
           }}
         >
           <OriginalPDF
@@ -410,24 +497,30 @@ export default function ReaderScreen() {
         </View>
 
         <View
-          pointerEvents={activeTab === "reader" ? "auto" : "none"}
+          pointerEvents={
+            activeTab === "reader" && readerContentReady ? "auto" : "none"
+          }
           style={{ position: "absolute", inset: 0, opacity: activeTab === "reader" ? 1 : 0 }}
         >
           {readerBlocks.length > 0 ? (
-            <ReaderView
-              isLandscape={isLandscape}
-              blocks={readerBlocks}
-              pageCount={readerPageCount}
-              destination={readerDestination}
-              onPageChange={setReaderCurrentPage}
-              onPaginationChange={handleReaderPagination}
-              onSwitchAnchorChange={reportVisibleBlock}
-              showSwitchHighlight={hasVisitedOriginal && activeTab === "reader"}
-            />
+            <Reanimated.View
+              style={[{ flex: 1 }, readerContentStyle]}
+            >
+              <ReaderView
+                isLandscape={isLandscape}
+                blocks={readerBlocks}
+                pageCount={readerPageCount}
+                destination={readerDestination}
+                onPageChange={setReaderCurrentPage}
+                onPaginationChange={handleReaderPagination}
+                onSwitchAnchorChange={reportVisibleBlock}
+                showSwitchHighlight={hasVisitedOriginal && activeTab === "reader"}
+                onReady={() => setReaderContentReady(true)}
+              />
+            </Reanimated.View>
           ) : readerLoading ? (
-            <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8">
-              <ActivityIndicator size="large" color="#8fb996" />
-              <Text className="mt-4 text-center text-sm text-black/60">
+            <View className="flex-1 bg-transparent">
+              <Text className="hidden">
                 Preparing a comfortable reading version…
               </Text>
             </View>
@@ -447,6 +540,14 @@ export default function ReaderScreen() {
             </View>
           ) : (
             <View className="flex-1 bg-[#F7F5EC]" />
+          )}
+          {!readerError && (
+            <Reanimated.View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, readerSkeletonStyle]}
+            >
+              <BookPageSkeleton />
+            </Reanimated.View>
           )}
         </View>
       </View>

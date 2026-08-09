@@ -8,6 +8,8 @@ import React from "react";
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 
 const fontOptions = [
+  { label: 'Source Sans 3', value: 'SourceSans3_400Regular' },
+  { label: 'Lato Bold', value: 'Lato_700Bold' },
   { label: 'Arial', value: 'Arial, sans-serif' },
   { label: 'Helvetica', value: 'Helvetica, Arial, sans-serif' },
   { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
@@ -37,7 +39,7 @@ function FontFamilyPicker() {
   const fontFamily = useReaderSettingsStore((state) => state.fontFamily);
   const setFontFamily = useReaderSettingsStore((state) => state.setFontFamily);
   const selectedLabel =
-    fontOptions.find((option) => option.value === fontFamily)?.label ?? 'Arial';
+    fontOptions.find((option) => option.value === fontFamily)?.label ?? 'Source Sans 3';
 
   return (
     <>

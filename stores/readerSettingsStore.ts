@@ -46,8 +46,8 @@ type ReaderSettingsState = {
 
 export const useReaderSettingsStore =
   create<ReaderSettingsState>((set) => ({
-    fontFamily: 'Arial, sans-serif',
-    fontSize: 18,
+    fontFamily: 'SourceSans3_400Regular',
+    fontSize: 22,
     lineHeight: 1.72,
     letterSpacing: 0,
     wordSpacing: 0,

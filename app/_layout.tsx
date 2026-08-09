@@ -2,6 +2,7 @@ import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { migrateDatabase } from "@/database/migrations";
 import { AuthProvider, useAuth } from '@/providers/AuthProvider';
 import { Lato_400Regular, Lato_700Bold, useFonts } from "@expo-google-fonts/lato";
+import { SourceSans3_400Regular } from "@expo-google-fonts/source-sans-3/400Regular";
 import { Stack } from "expo-router";
 import { SQLiteProvider } from "expo-sqlite";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -23,6 +24,7 @@ export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     Lato_400Regular,
     Lato_700Bold,
+    SourceSans3_400Regular,
   });
 
   if (!fontsLoaded) {

@@ -33,6 +33,10 @@ import { useReaderSettingsStore } from '@/stores/readerSettingsStore';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
+import { Lato_700Bold } from "@expo-google-fonts/lato";
+import { SourceSans3_400Regular } from "@expo-google-fonts/source-sans-3/400Regular";
+import { useAssets } from "expo-asset";
+import * as FileSystem from "expo-file-system/legacy";
 
 type ReaderViewProps = {
   isLandscape: boolean;
@@ -49,6 +53,7 @@ type ReaderViewProps = {
   onPaginationChange?: (currentPage: number, totalPages: number) => void;
   onSwitchAnchorChange?: (blockId: string, word: string, wordIndex: number) => void;
   showSwitchHighlight?: boolean;
+  onReady?: () => void;
 };
 
 const readerMenuItems = [
@@ -97,14 +102,17 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
     </section>`).join("\n");
 }
 
-const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange, onPaginationChange, onSwitchAnchorChange, showSwitchHighlight = false }: ReaderViewProps) => {
+const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange, onPaginationChange, onSwitchAnchorChange, showSwitchHighlight = false, onReady }: ReaderViewProps) => {
   const { height: windowHeight } = useWindowDimensions();
+  const [fontAssets] = useAssets([Lato_700Bold, SourceSans3_400Regular]);
+  const [latoBoldBase64, setLatoBoldBase64] = useState<string | null>(null);
+  const [sourceSansBase64, setSourceSansBase64] = useState<string | null>(null);
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
   const [readerText, setReaderText] = useState("");
   const [initialBlocks] = useState(() => {
     const firstPage = blocks[0]?.page ?? 1;
-    return blocks.filter((block) => block.page < firstPage + 12);
+    return blocks.filter((block) => block.page < firstPage + 5);
   });
   const readerMarkup = useMemo(() => blocksToMarkup(initialBlocks), [initialBlocks]);
   const appendedBlockCount = useRef(initialBlocks.length);
@@ -117,6 +125,28 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
   const [appendPass, setAppendPass] = useState(0);
   const [highlightPickerVisible, setHighlightPickerVisible] = useState(false);
   const [selectedAIText, setSelectedAIText] = useState("");
+
+  useEffect(() => {
+    const latoUri = fontAssets?.[0]?.localUri;
+    const sourceSansUri = fontAssets?.[1]?.localUri;
+    if (!latoUri || !sourceSansUri) return;
+    let cancelled = false;
+    void Promise.all([
+      FileSystem.readAsStringAsync(latoUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      }),
+      FileSystem.readAsStringAsync(sourceSansUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      }),
+    ]).then(([latoBase64, sourceBase64]) => {
+      if (cancelled) return;
+      setLatoBoldBase64(latoBase64);
+      setSourceSansBase64(sourceBase64);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fontAssets]);
 
   // Bottom Sheet reference
   const bottomSheetRef =
@@ -363,6 +393,7 @@ const textColor =
 
   const handleReaderLoadEnd = useCallback(() => {
     setWebViewReady(true);
+    onReady?.();
     sendReaderSettings();
     syncPageTransition();
     webViewRef.current?.postMessage(JSON.stringify({
@@ -387,7 +418,7 @@ const textColor =
         }));
       }, 0);
     }
-  }, [guideBackgroundDimming, readerGuideMode, sendReaderSettings, showSwitchHighlight, syncPageTransition]);
+  }, [guideBackgroundDimming, onReady, readerGuideMode, sendReaderSettings, showSwitchHighlight, syncPageTransition]);
   // Toolbar animation
   const [toolbarTranslateY] = useState(() => new Animated.Value(0));
 
@@ -421,6 +452,22 @@ const textColor =
 
         <style>
 
+          @font-face {
+            font-family: 'LatoReaderBold';
+            src: url('data:font/ttf;base64,${latoBoldBase64 ?? ""}') format('truetype');
+            font-style: normal;
+            font-weight: 700;
+            font-display: block;
+          }
+
+          @font-face {
+            font-family: 'SourceSansReader';
+            src: url('data:font/ttf;base64,${sourceSansBase64 ?? ""}') format('truetype');
+            font-style: normal;
+            font-weight: 400;
+            font-display: block;
+          }
+
           * {
             box-sizing: border-box;
             -webkit-tap-highlight-color: transparent;
@@ -446,7 +493,7 @@ const textColor =
 
             color: #1e293b;
 
-            font-family: Arial, sans-serif;
+            font-family: 'SourceSansReader', Arial, sans-serif;
 
             font-size: 18px;
 
@@ -902,8 +949,11 @@ const textColor =
         )?.closest?.('[data-reader-block]');
         const anchorTop = anchorElement?.getBoundingClientRect().top || 0;
 
-        document.body.style.fontFamily =
-          message.fontFamily;
+        document.body.style.fontFamily = message.fontFamily === 'Lato_700Bold'
+          ? 'LatoReaderBold'
+          : message.fontFamily === 'SourceSans3_400Regular'
+            ? 'SourceSansReader'
+            : message.fontFamily;
 
         document.body.style.fontSize =
           message.fontSize + 'px';
@@ -1024,7 +1074,7 @@ const textColor =
       </body>
 
     </html>
-  `, [readerMarkup]);
+  `, [latoBoldBase64, readerMarkup, sourceSansBase64]);
 
   const webViewSource = useMemo(() => ({ html: htmlContent }), [htmlContent]);
 
@@ -1281,6 +1331,10 @@ const textColor =
     }
 
   };
+
+  if (!latoBoldBase64 || !sourceSansBase64) {
+    return <View style={{ flex: 1, backgroundColor }} />;
+  }
 
   return (
     <BottomSheet

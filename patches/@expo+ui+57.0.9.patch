@@ -1,0 +1,7 @@
+diff --git a/node_modules/@expo/ui/swift-ui/index.js b/node_modules/@expo/ui/swift-ui/index.js
+index 3c6747b..e1c53c3 100644
+--- a/node_modules/@expo/ui/swift-ui/index.js
++++ b/node_modules/@expo/ui/swift-ui/index.js
+@@ -1 +1 @@
+-export * from '../src/swift-ui';
++export * from '../src/swift-ui/index.tsx';

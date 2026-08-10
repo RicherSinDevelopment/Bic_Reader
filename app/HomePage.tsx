@@ -63,12 +63,21 @@ const HomePage = () => {
     <View className="flex-row items-center justify-between">
 
       {/* App Title */}
-      <Text className="text-3xl font-lato-bold text-black">
-        Bic Reader
+      <Text
+        className="text-black"
+        style={{
+          fontFamily: "Lato_700Bold",
+          fontSize: 38,
+          lineHeight: 44,
+          letterSpacing: -0.8,
+        }}
+      >
+        <Text style={{ color: "#22C55E" }}>Bic</Text>
+        <Text> Reader</Text>
       </Text>
 
       {/* Search + Settings */}
-      <View className="flex-row items-center gap-3">
+      <View className="flex-row items-center gap-4">
         <SearchButton pdfs={sortedPdfs} />
         <SettingsButton />
       </View>

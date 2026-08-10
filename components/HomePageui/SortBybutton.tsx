@@ -13,8 +13,8 @@ type SortButtonProps = {
 const sortOptions: { label: string; value: PdfSortOption }[] = [
   { label: "Newest", value: "newest" },
   { label: "Oldest", value: "oldest" },
-  { label: "Closest to finishing", value: "closest" },
-  { label: "Furthest from finishing", value: "furthest" },
+  { label: "Most Read", value: "closest" },
+  { label: "Least Read", value: "furthest" },
 ];
 
 export default function SortButton({ value, onValueChange }: SortButtonProps) {

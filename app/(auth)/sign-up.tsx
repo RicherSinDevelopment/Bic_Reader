@@ -16,6 +16,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
+
 const logo = require('../../assets/images/Bicreaderlogo-large.png');
 
 export default function SignUp() {
@@ -172,6 +174,8 @@ export default function SignUp() {
               ) : null}
               {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
             </View>
+
+            <SocialAuthButtons disabled={isSubmitting} onError={setErrorMessage} />
 
             <View style={styles.switchRow}>
               <Text style={styles.switchText}>Already have an account?</Text>

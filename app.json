@@ -9,6 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
+      "usesAppleSignIn": true,
       "bundleIdentifier": "com.bicreader.app",
       "icon": "./assets/images/Bicreaderlogo-large.png",
       "infoPlist": {
@@ -44,6 +45,7 @@
         }
       ],
       "expo-font",
+      "expo-apple-authentication",
       "expo-sqlite",
       "expo-asset",
       "expo-image",

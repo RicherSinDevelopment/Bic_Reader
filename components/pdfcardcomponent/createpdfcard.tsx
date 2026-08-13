@@ -27,7 +27,11 @@ interface PdfCoverCardProps {
 }
 
 function deriveFileName(path: string) {
-  const withoutExt = path.split("/").pop()?.replace(/\.pdf$/i, "") ?? "Document";
+  const withoutExt =
+    path
+      .split("/")
+      .pop()
+      ?.replace(/\.pdf$/i, "") ?? "Document";
   return withoutExt;
 }
 
@@ -92,11 +96,14 @@ export default function PdfCoverCard({
         className="h-28 flex-row items-center rounded-2xl border border-black/5 bg-white p-3 shadow-sm active:opacity-80"
       >
         <View className="min-w-0 flex-1 px-1 pr-5">
-          <Text numberOfLines={2} className="font-lato-bold text-base text-black">
+          <Text
+            numberOfLines={2}
+            className="font-lato-bold text-base text-black"
+          >
             {displayName}
           </Text>
           <Text className="mt-2 text-sm text-gray-400">
-            {clampedPercent}%  {formatDateOpened(dateOpened)}
+            {clampedPercent}% {formatDateOpened(dateOpened)}
           </Text>
         </View>
 
@@ -159,20 +166,17 @@ export default function PdfCoverCard({
       {/* Meta row: name, completion %, date opened */}
       <View className="mt-2 flex-row items-start">
         <View className="min-w-0 flex-1">
-        <Text
-          numberOfLines={1}
-          className="font-lato-bold text-black text-sm"
-        >
-          {displayName}
-        </Text>
-        <View className="flex-row items-center justify-between mt-0.5">
-          <Text className="text-gray-400 text-xs uppercase">
-            {clampedPercent}%
+          <Text numberOfLines={1} className="font-lato-bold text-black text-sm">
+            {displayName}
           </Text>
-          <Text className="text-gray-400 text-xs">
-            {formatDateOpened(dateOpened)}
-          </Text>
-        </View>
+          <View className="flex-row items-center justify-between mt-0.5">
+            <Text className="text-gray-400 text-xs uppercase">
+              {clampedPercent}%
+            </Text>
+            <Text className="text-gray-400 text-xs">
+              {formatDateOpened(dateOpened)}
+            </Text>
+          </View>
         </View>
 
         {onDelete && onRename && (

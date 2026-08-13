@@ -1,6 +1,6 @@
+import ThreeDotsButton from "@/components/pdfcardcomponent/Threedotsbutton";
 import { Progress, ProgressFilledTrack } from "@/components/ui/progress";
 import { Text } from "@/components/ui/text";
-import ThreeDotsButton from "@/components/pdfcardcomponent/Threedotsbutton";
 import * as FileSystem from "expo-file-system/legacy";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, View } from "react-native";
@@ -24,7 +24,11 @@ interface PdfCoverCardProps {
 }
 
 function deriveFileName(path: string) {
-  const withoutExt = path.split("/").pop()?.replace(/\.pdf$/i, "") ?? "Document";
+  const withoutExt =
+    path
+      .split("/")
+      .pop()
+      ?.replace(/\.pdf$/i, "") ?? "Document";
   return withoutExt;
 }
 
@@ -183,7 +187,10 @@ export default function PdfCoverCard({
     return (
       <View className="h-28 flex-row items-center rounded-2xl border border-black/5 bg-white p-3 shadow-sm">
         <View className="min-w-0 flex-1 px-1 pr-5">
-          <Text numberOfLines={2} className="font-lato-bold text-base text-black">
+          <Text
+            numberOfLines={2}
+            className="font-lato-bold text-base text-black"
+          >
             {displayName}
           </Text>
           <Text className="mt-2 text-sm text-gray-400">

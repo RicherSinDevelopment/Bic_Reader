@@ -121,7 +121,6 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
   const [currentSourcePage, setCurrentSourcePage] = useState(1);
   const recoveryPageRef = useRef<number | null>(null);
   const [webViewReady, setWebViewReady] = useState(false);
-  const [loadedThroughPage, setLoadedThroughPage] = useState(Math.min(300, pageCount));
   const [appendPass, setAppendPass] = useState(0);
   const [highlightPickerVisible, setHighlightPickerVisible] = useState(false);
   const [selectedAIText, setSelectedAIText] = useState("");
@@ -162,9 +161,7 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
 
   useEffect(() => {
     if (!webViewReady) return;
-    const remaining = blocks.filter(
-      (block) => block.page <= loadedThroughPage && !sentBlockIds.current.has(block.id),
-    );
+    const remaining = blocks.filter((block) => !sentBlockIds.current.has(block.id));
     const destinationBlocks = destination
       ? remaining.filter((block) => destination.blockId
           ? block.id === destination.blockId
@@ -177,15 +174,12 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
       (highest, block) => Math.max(highest, block.page),
       0,
     );
-    const hasMore = loadedThroughPage < pageCount || highestAvailablePage < loadedThroughPage;
-    const currentSegmentReady =
-      highestAvailablePage >= loadedThroughPage && remaining.length <= appended.length;
+    const hasMore = highestAvailablePage < pageCount || remaining.length > appended.length;
     if (!appended.length) {
       webViewRef.current?.postMessage(JSON.stringify({
         type: "appendBlocks",
         html: "",
         hasMore,
-        currentSegmentReady,
       }));
       return;
     }
@@ -193,7 +187,6 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
       type: "appendBlocks",
       html: blocksToMarkup(appended),
       hasMore,
-      currentSegmentReady,
     }));
     appended.forEach((block) => sentBlockIds.current.add(block.id));
     appendedBlockCount.current = blocks.length;
@@ -201,7 +194,7 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
       const timer = setTimeout(() => setAppendPass((value) => value + 1), 45);
       return () => clearTimeout(timer);
     }
-  }, [appendPass, blocks, destination, loadedThroughPage, pageCount, webViewReady]);
+  }, [appendPass, blocks, destination, pageCount, webViewReady]);
 
   useEffect(() => {
     if (!webViewReady || !destination) return;
@@ -209,13 +202,6 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
       type: "goToSourcePage",
       ...destination,
     }));
-    const timer = setTimeout(() => {
-      setLoadedThroughPage((current) => Math.min(
-        pageCount,
-        Math.max(current, Math.ceil(destination.page / 300) * 300),
-      ));
-    }, 0);
-    return () => clearTimeout(timer);
   }, [destination, pageCount, webViewReady]);
   const transition = useReaderSettingsStore((state) => state.transition);
   const { isPaged, syncPageTransition } = usePageTransition({
@@ -288,6 +274,10 @@ const bold = useReaderSettingsStore(
   (state) => state.bold
 );
 
+const automaticHyphenation = useReaderSettingsStore(
+  (state) => state.automaticHyphenation
+);
+
 const backgroundColor = useReaderSettingsStore(
   (state) => state.backgroundColor
 );
@@ -357,11 +347,12 @@ const textColor =
       letterSpacing: letterSpacing,
       wordSpacing: wordSpacing,
       bold: bold,
+      automaticHyphenation: automaticHyphenation,
       backgroundColor: backgroundColor,
       textColor: textColor,
     })
     );
-  }, [fontFamily, fontSize, lineHeight, letterSpacing, wordSpacing, bold, backgroundColor, textColor]);
+  }, [fontFamily, fontSize, lineHeight, letterSpacing, wordSpacing, bold, automaticHyphenation, backgroundColor, textColor]);
 
   useEffect(() => {
     sendReaderSettings();
@@ -441,7 +432,7 @@ const textColor =
   const htmlContent = useMemo(() => `
     <!DOCTYPE html>
 
-    <html>
+    <html lang="en">
 
       <head>
 
@@ -598,20 +589,6 @@ const textColor =
             font-size: 13px;
             text-align: center;
           }
-          #reader-loader-top {
-            display: none;
-            position: fixed;
-            top: 8px;
-            left: 50%;
-            z-index: 20;
-            transform: translateX(-50%);
-            padding: 18px 12px;
-            border-radius: 16px;
-            background: rgba(248, 250, 252, 0.94);
-            color: rgba(71, 85, 105, 0.7);
-            font-size: 13px;
-            text-align: center;
-          }
           body.reader-paged #reader-loader { display: none; }
           .tts-word-active {
             background-color: #fde047;
@@ -688,7 +665,6 @@ const textColor =
 
         <div id="reader-line-guide" aria-hidden="true"></div>
         <div id="reader-word-guide" aria-hidden="true"></div>
-        <div id="reader-loader-top">Loading previous pages…</div>
         <main id="reader-pages">
           ${readerMarkup}
         </main>
@@ -714,19 +690,12 @@ const textColor =
             container.insertBefore(section, next || null);
           });
         }
-        window.__readerMoreRequested = false;
-        window.__readerPreviousRequested = false;
         window.__readerHasMore = Boolean(message.hasMore);
-        window.__readerCanLoadNextSegment = Boolean(message.currentSegmentReady);
         const loader = document.getElementById('reader-loader');
-        const previousLoader = document.getElementById('reader-loader-top');
-        if (previousLoader) previousLoader.style.display = 'none';
         if (loader) {
           loader.textContent = !window.__readerHasMore
             ? 'End of book'
-            : window.__readerCanLoadNextSegment
-              ? 'Scroll down to load the next 300 pages'
-              : 'Loading this section…';
+            : 'Preparing the rest of the book…';
         }
         if (
           window.__readerTransition !== 'scroll' &&
@@ -969,6 +938,11 @@ const textColor =
 
         document.body.style.fontWeight =
           message.bold ? 'bold' : 'normal';
+
+        document.body.style.hyphens =
+          message.automaticHyphenation ? 'auto' : 'manual';
+        document.body.style.webkitHyphens =
+          message.automaticHyphenation ? 'auto' : 'manual';
 
         document.body.style.backgroundColor =
           message.backgroundColor;
@@ -1216,16 +1190,6 @@ const textColor =
         return;
       }
 
-
-      if (data.type === "requestMoreBlocks") {
-        setLoadedThroughPage((current) => Math.min(pageCount, current + 300));
-        return;
-      }
-
-      if (data.type === "requestPreviousBlocks") {
-        setAppendPass((value) => value + 1);
-        return;
-      }
 
       if (data.type === "askAI") {
         setSelectedAIText(typeof data.text === "string" ? data.text.trim() : "");
@@ -1515,9 +1479,6 @@ const textColor =
 
               window.__readerInitialized = true;
               window.__readerHasMore = true;
-              window.__readerMoreRequested = false;
-              window.__readerCanLoadNextSegment = false;
-              window.__readerPreviousRequested = false;
               window.__showReaderSwitchHighlight = false;
               const paragraphs = Array.from(
                 document.querySelectorAll('[data-reader-block]')
@@ -2176,19 +2137,6 @@ const textColor =
               window.__refreshReaderPages = refreshReaderPages;
               window.__goToReaderPage = goToReaderPage;
               window.__navigateReaderPage = function(direction) {
-                if (
-                  direction > 0 &&
-                  currentPage >= pageCount - 1 &&
-                  window.__readerHasMore &&
-                  window.__readerCanLoadNextSegment &&
-                  !window.__readerMoreRequested
-                ) {
-                  window.__readerMoreRequested = true;
-                  window.ReactNativeWebView.postMessage(JSON.stringify({
-                    type: 'requestMoreBlocks'
-                  }));
-                  return;
-                }
                 goToReaderPage(
                   currentPage + (direction > 0 ? 1 : -1)
                 );
@@ -2217,7 +2165,6 @@ const textColor =
               // --------------------------------
 
               let scrollTimer = null;
-              let lastWebScrollY = window.scrollY;
 
               window.addEventListener(
                 'scroll',
@@ -2254,50 +2201,6 @@ const textColor =
                         );
 
                         reportSwitchAnchor();
-
-                        const currentWebScrollY = window.scrollY;
-                        const scrollingUp = currentWebScrollY < lastWebScrollY;
-                        lastWebScrollY = currentWebScrollY;
-                        if (scrollingUp && !window.__readerPreviousRequested) {
-                          const visibleSection = document.elementFromPoint(
-                            window.innerWidth / 2,
-                            window.innerHeight * 0.25
-                          )?.closest?.('[data-source-page-section]');
-                          const previousSection = visibleSection?.previousElementSibling;
-                          const visibleSourcePage = Number(
-                            visibleSection?.dataset.sourcePageSection
-                          );
-                          const previousSourcePage = Number(
-                            previousSection?.dataset?.sourcePageSection
-                          );
-                          if (
-                            visibleSourcePage > 1 &&
-                            previousSourcePage > 0 &&
-                            visibleSourcePage - previousSourcePage > 1
-                          ) {
-                            window.__readerPreviousRequested = true;
-                            const previousLoader = document.getElementById('reader-loader-top');
-                            if (previousLoader) previousLoader.style.display = 'block';
-                            window.ReactNativeWebView.postMessage(JSON.stringify({
-                              type: 'requestPreviousBlocks'
-                            }));
-                          }
-                        }
-
-                        if (
-                          window.__readerHasMore &&
-                          window.__readerCanLoadNextSegment &&
-                          !window.__readerMoreRequested &&
-                          window.scrollY + window.innerHeight >=
-                            document.documentElement.scrollHeight - window.innerHeight * 2.5
-                        ) {
-                          window.__readerMoreRequested = true;
-                          const loader = document.getElementById('reader-loader');
-                          if (loader) loader.textContent = 'Loading more pages…';
-                          window.ReactNativeWebView.postMessage(JSON.stringify({
-                            type: 'requestMoreBlocks'
-                          }));
-                        }
 
                         scrollTimer = null;
 

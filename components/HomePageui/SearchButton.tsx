@@ -1,4 +1,4 @@
-import PdfCoverCard from '@/components/pdfcardcomponent/createpdfcard';
+import PdfCoverCard from "@/components/pdfcardcomponent/createpdfcard";
 import {
   BottomSheet,
   BottomSheetBackdrop,
@@ -8,14 +8,15 @@ import {
   BottomSheetPortal,
   BottomSheetTextInput,
   type BottomSheetRef,
-} from '@/components/ui/bottomsheet';
-import { Button } from '@/components/ui/button';
-import { Icon, SearchIcon } from '@/components/ui/icon';
-import type { PdfLibraryItem } from '@/hooks/displaypdfs';
-import { useRouter } from 'expo-router';
-import React, { useMemo, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+} from "@/components/ui/bottomsheet";
+import { Button } from "@/components/ui/button";
+import { Icon, SearchIcon } from "@/components/ui/icon";
+import { homepageDepth } from "@/components/HomePageui/depthStyles";
+import type { PdfLibraryItem } from "@/hooks/displaypdfs";
+import { useRouter } from "expo-router";
+import React, { useMemo, useRef, useState } from "react";
+import { Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type SearchButtonProps = {
   pdfs: PdfLibraryItem[];
@@ -24,7 +25,7 @@ type SearchButtonProps = {
 export default function SearchButton({ pdfs }: SearchButtonProps) {
   const bottomSheetRef = useRef<BottomSheetRef>(null);
   const router = useRouter();
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const insets = useSafeAreaInsets();
 
   const matchingPdfs = useMemo(() => {
@@ -33,7 +34,7 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
     if (!normalizedQuery) return pdfs;
 
     return pdfs.filter((pdf) =>
-      pdf.name.toLocaleLowerCase().includes(normalizedQuery)
+      pdf.name.toLocaleLowerCase().includes(normalizedQuery),
     );
   }, [pdfs, query]);
 
@@ -43,19 +44,20 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
         accessibilityLabel="Search PDFs"
         variant="outline"
         size="sm"
-        className="h-12 w-12 rounded-xl p-3"
+        className="h-12 w-12 rounded-xl border-black/10 bg-white p-3 active:translate-y-0.5"
+        style={homepageDepth.control}
         onPress={() => bottomSheetRef.current?.open(0)}
       >
         <Icon as={SearchIcon} size="md" />
       </Button>
 
       <BottomSheetPortal
-        snapPoints={['90%']}
+        snapPoints={["90%"]}
         backdropComponent={BottomSheetBackdrop}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
         topInset={insets.top}
-        backgroundStyle={{ backgroundColor: '#F7F5EC' }}
+        backgroundStyle={{ backgroundColor: "#F7F5EC" }}
       >
         <BottomSheetDragIndicator />
         <BottomSheetContent className="flex-1 bg-[#F7F5EC] px-3 pb-0 pt-3">
@@ -81,12 +83,16 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
             keyExtractor={(item: PdfLibraryItem) => item.id}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator
-            contentContainerStyle={{ paddingBottom: 32, paddingTop: 16, flexGrow: 1 }}
+            contentContainerStyle={{
+              paddingBottom: 32,
+              paddingTop: 16,
+              flexGrow: 1,
+            }}
             ItemSeparatorComponent={() => <View className="h-3" />}
             ListEmptyComponent={
               <View className="flex-1 items-center justify-center pb-24">
                 <Text className="font-lato-bold text-base text-black/50">
-                  {pdfs.length === 0 ? 'No PDFs yet' : 'No matching PDFs'}
+                  {pdfs.length === 0 ? "No PDFs yet" : "No matching PDFs"}
                 </Text>
               </View>
             }

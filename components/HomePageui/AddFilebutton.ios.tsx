@@ -6,15 +6,13 @@ import {
   disabled,
   font,
   frame,
+  shadow,
   tint,
 } from "@expo/ui/swift-ui/modifiers";
 import * as Haptics from "expo-haptics";
 import { useState } from "react";
 
-import {
-  type PickedPdf,
-  useDocumentPicker,
-} from "@/hooks/useDocumentPicker";
+import { type PickedPdf, useDocumentPicker } from "@/hooks/useDocumentPicker";
 
 type AddButtonProps = {
   onPdfPicked: (pdf: PickedPdf) => void | Promise<void>;
@@ -56,6 +54,8 @@ export default function AddButton({ onPdfPicked }: AddButtonProps) {
           buttonBorderShape("roundedRectangle", 12),
           controlSize("large"),
           tint("#4ADE80"),
+          shadow({ color: "#176C3440", radius: 15, x: 0, y: 9 }),
+          shadow({ color: "#FFFFFF80", radius: 1, x: -1, y: -1 }),
           disabled(isPicking),
         ]}
       >

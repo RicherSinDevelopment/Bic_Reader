@@ -4,6 +4,7 @@ import {
   buttonStyle,
   controlSize,
   labelStyle,
+  shadow,
 } from "@expo/ui/swift-ui/modifiers";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -27,6 +28,8 @@ export default function SettingsButton() {
           buttonBorderShape("roundedRectangle", 12),
           controlSize("regular"),
           labelStyle("iconOnly"),
+          shadow({ color: "#173A212E", radius: 9, x: 0, y: 5 }),
+          shadow({ color: "#FFFFFF70", radius: 1, x: -1, y: -1 }),
         ]}
       />
     </Host>

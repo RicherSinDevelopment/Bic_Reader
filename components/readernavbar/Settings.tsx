@@ -27,6 +27,12 @@ export default function Settings() {
     (state) => state.toggleDisableRotation
   );
   const transition = useReaderSettingsStore((state) => state.transition);
+  const automaticHyphenation = useReaderSettingsStore(
+    (state) => state.automaticHyphenation
+  );
+  const setAutomaticHyphenation = useReaderSettingsStore(
+    (state) => state.setAutomaticHyphenation
+  );
   const lineGuideEnabled = useReaderSettingsStore(
     (state) => state.lineGuideEnabled
   );
@@ -68,6 +74,27 @@ export default function Settings() {
               false: "#d4d4d4",
               true: "#525252",
             }}
+            thumbColor="#fafafa"
+            ios_backgroundColor="#d4d4d4"
+          />
+        </Center>
+      </View>
+
+      <View className="mt-4 flex-row items-center justify-between">
+        <View className="mr-4 flex-1">
+          <Text className="text-m text-slate-600">Automatic hyphenation:</Text>
+          <Text className="mt-1 text-xs text-slate-500">
+            Break long words at natural points when space is tight.
+          </Text>
+        </View>
+        <Center>
+          <Switch
+            accessibilityLabel="Automatic hyphenation"
+            size="md"
+            value={automaticHyphenation}
+            onValueChange={setAutomaticHyphenation}
+            isDisabled={false}
+            trackColor={{ false: "#d4d4d4", true: "#525252" }}
             thumbColor="#fafafa"
             ios_backgroundColor="#d4d4d4"
           />

@@ -1,14 +1,6 @@
 import React, { useState } from "react";
-import {
-  Animated,
-  Pressable,
-  StyleSheet,
-  View,
-} from "react-native";
-import {
-  GlassView,
-  isGlassEffectAPIAvailable,
-} from "expo-glass-effect";
+import { Animated, Pressable, StyleSheet, View } from "react-native";
+import { GlassView, isGlassEffectAPIAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
 
@@ -39,9 +31,7 @@ const COLUMN_OPTIONS = [
   },
 ] as const;
 
-export default function PdfLayoutTabs({
-  onColumnsChange,
-}: PdfLayoutTabsProps) {
+export default function PdfLayoutTabs({ onColumnsChange }: PdfLayoutTabsProps) {
   const [selectedColumns, setSelectedColumns] = useState<1 | 2 | 3>(1);
   const [indicatorX] = useState(() => new Animated.Value(0));
   const canUseGlass = isGlassEffectAPIAvailable();
@@ -65,71 +55,83 @@ export default function PdfLayoutTabs({
   };
 
   return (
-    <View style={styles.container}>
-      {canUseGlass ? (
-        <GlassView
-          glassEffectStyle="regular"
-          isInteractive
-          style={StyleSheet.absoluteFill}
-        />
-      ) : (
-        <View style={[StyleSheet.absoluteFill, styles.fallbackBackground]} />
-      )}
-
-      {canUseGlass ? (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.indicator,
-            { transform: [{ translateX: indicatorX }] },
-          ]}
-        >
+    <View style={styles.depthShell}>
+      <View style={styles.container}>
+        {canUseGlass ? (
           <GlassView
-            pointerEvents="none"
             glassEffectStyle="regular"
-            tintColor="#4ADE80"
+            isInteractive
             style={StyleSheet.absoluteFill}
           />
-        </Animated.View>
-      ) : (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.indicator,
-            styles.fallbackIndicator,
-            { transform: [{ translateX: indicatorX }] },
-          ]}
-        />
-      )}
+        ) : (
+          <View style={[StyleSheet.absoluteFill, styles.fallbackBackground]} />
+        )}
 
-      <View style={styles.buttons}>
-        {COLUMN_OPTIONS.map((option) => {
-          const isSelected = option.columns === selectedColumns;
+        {canUseGlass ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.indicator,
+              { transform: [{ translateX: indicatorX }] },
+            ]}
+          >
+            <GlassView
+              pointerEvents="none"
+              glassEffectStyle="regular"
+              tintColor="#4ADE80"
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+        ) : (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.indicator,
+              styles.fallbackIndicator,
+              { transform: [{ translateX: indicatorX }] },
+            ]}
+          />
+        )}
 
-          return (
-            <Pressable
-              key={option.columns}
-              accessibilityLabel={option.label}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: isSelected }}
-              onPress={() => selectColumns(option.columns)}
-              style={styles.button}
-            >
-              <SymbolView
-                name={option.icon}
-                size={20}
-                weight={isSelected ? "semibold" : "regular"}
-                tintColor={isSelected ? "#07120A" : "rgba(0, 0, 0, 0.58)"}
-              />
-            </Pressable>
-          );
-        })}
+        <View style={styles.buttons}>
+          {COLUMN_OPTIONS.map((option) => {
+            const isSelected = option.columns === selectedColumns;
+
+            return (
+              <Pressable
+                key={option.columns}
+                accessibilityLabel={option.label}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isSelected }}
+                onPress={() => selectColumns(option.columns)}
+                style={styles.button}
+              >
+                <SymbolView
+                  name={option.icon}
+                  size={20}
+                  weight={isSelected ? "semibold" : "regular"}
+                  tintColor={isSelected ? "#07120A" : "rgba(0, 0, 0, 0.58)"}
+                />
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  depthShell: {
+    width: CONTROL_WIDTH,
+    height: CONTROL_HEIGHT,
+    borderRadius: 14,
+    shadowColor: "#173A21",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.14,
+    shadowRadius: 9,
+    elevation: 5,
+  },
   container: {
     width: CONTROL_WIDTH,
     height: CONTROL_HEIGHT,
@@ -139,7 +141,7 @@ const styles = StyleSheet.create({
   fallbackBackground: {
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(0, 0, 0, 0.16)",
+    borderColor: "rgba(0, 0, 0, 0.1)",
     backgroundColor: "rgba(255, 255, 255, 0.84)",
   },
   indicator: {

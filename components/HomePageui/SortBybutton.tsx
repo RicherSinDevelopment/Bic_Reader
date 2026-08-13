@@ -1,5 +1,6 @@
 import { ChevronDownIcon, Icon } from "@/components/ui/icon";
 import { Check } from "lucide-react-native";
+import { homepageDepth } from "@/components/HomePageui/depthStyles";
 import React, { useRef, useState } from "react";
 import { Dimensions, Modal, Pressable, Text, View } from "react-native";
 
@@ -45,7 +46,8 @@ export default function SortButton({ value, onValueChange }: SortButtonProps) {
         accessibilityLabel={`Sort PDFs by ${selectedLabel}`}
         accessibilityRole="button"
         onPress={openMenu}
-        className="h-10 max-w-full flex-row items-center gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5"
+        className="h-10 max-w-full flex-row items-center gap-2 rounded-md border border-black/10 bg-white px-3 active:translate-y-0.5 active:bg-black/5"
+        style={homepageDepth.control}
       >
         <Text
           numberOfLines={1}

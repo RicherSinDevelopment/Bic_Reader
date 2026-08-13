@@ -3,11 +3,9 @@ import { View } from "react-native";
 
 import { Button, ButtonSpinner, ButtonText } from "@/components/ui/button";
 import { AddIcon, Icon } from "@/components/ui/icon";
+import { homepageDepth } from "@/components/HomePageui/depthStyles";
 
-import {
-  type PickedPdf,
-  useDocumentPicker,
-} from "@/hooks/useDocumentPicker";
+import { type PickedPdf, useDocumentPicker } from "@/hooks/useDocumentPicker";
 
 type AddButtonProps = {
   onPdfPicked: (pdf: PickedPdf) => void | Promise<void>;
@@ -40,23 +38,18 @@ export default function AddButton({ onPdfPicked }: AddButtonProps) {
   };
 
   return (
-    <View>
-
+    <View style={homepageDepth.primary}>
       <Button
         variant="default"
         size="lg"
         onPress={handlePickPdf}
         isDisabled={isPicking}
-        className="h-14 px-5 rounded-xl flex-row items-center justify-center bg-green-400"
+        className="h-14 flex-row items-center justify-center rounded-xl bg-green-400 px-5 active:translate-y-0.5"
       >
         {isPicking ? (
           <ButtonSpinner color="#000000" />
         ) : (
-          <Icon
-            as={AddIcon}
-            size="md"
-            className="mr-2"
-          />
+          <Icon as={AddIcon} size="md" className="mr-2" />
         )}
 
         <ButtonText

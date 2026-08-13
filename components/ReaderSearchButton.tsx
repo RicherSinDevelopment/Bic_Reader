@@ -1,5 +1,5 @@
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
-import { Button } from "@/components/ui/button";
+import ReaderGlassIconButton from "@/components/readerui/ReaderGlassIconButton";
 import {
   Drawer,
   DrawerBackdrop,
@@ -23,7 +23,13 @@ type SearchResult = {
 
 type Props = {
   blocks: ExtractedPdfBlock[];
-  onSelectResult: (page: number, blockId: string, query: string, matchIndex: number) => void;
+  grouped?: boolean;
+  onSelectResult: (
+    page: number,
+    blockId: string,
+    query: string,
+    matchIndex: number,
+  ) => void;
 };
 
 function resultSnippet(text: string, query: string) {
@@ -33,7 +39,11 @@ function resultSnippet(text: string, query: string) {
   return `${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`;
 }
 
-export default function ReaderSearchButton({ blocks, onSelectResult }: Props) {
+export default function ReaderSearchButton({
+  blocks,
+  grouped = false,
+  onSelectResult,
+}: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase());
@@ -65,17 +75,20 @@ export default function ReaderSearchButton({ blocks, onSelectResult }: Props) {
 
   return (
     <>
-      <Button
+      <ReaderGlassIconButton
         accessibilityLabel="Search in book"
-        variant="outline"
-        size="sm"
-        className="h-12 w-12 rounded-xl p-3"
+        grouped={grouped}
         onPress={() => setIsOpen(true)}
       >
-        <Icon as={SearchIcon} size="md" />
-      </Button>
+        <Icon as={SearchIcon} size="lg" className="text-[#242424]" />
+      </ReaderGlassIconButton>
 
-      <Drawer isOpen={isOpen} size="lg" anchor="right" onClose={() => setIsOpen(false)}>
+      <Drawer
+        isOpen={isOpen}
+        size="lg"
+        anchor="right"
+        onClose={() => setIsOpen(false)}
+      >
         <DrawerBackdrop />
         <DrawerContent className="pt-safe">
           <DrawerHeader>
@@ -119,11 +132,13 @@ export default function ReaderSearchButton({ blocks, onSelectResult }: Props) {
             removeClippedSubviews
             contentContainerStyle={styles.results}
             ItemSeparatorComponent={() => <View style={styles.separator} />}
-            ListEmptyComponent={deferredQuery ? (
-              <Text className="py-8 text-center text-sm text-black/45">
-                No matches found
-              </Text>
-            ) : null}
+            ListEmptyComponent={
+              deferredQuery ? (
+                <Text className="py-8 text-center text-sm text-black/45">
+                  No matches found
+                </Text>
+              ) : null
+            }
             renderItem={({ item }) => (
               <Pressable
                 accessibilityRole="button"
@@ -135,14 +150,22 @@ export default function ReaderSearchButton({ blocks, onSelectResult }: Props) {
                       item.page,
                       item.blockId,
                       deferredQuery,
-                      item.matchIndex
-                    )
+                      item.matchIndex,
+                    ),
                   );
                 }}
-                style={({ pressed }) => [styles.result, pressed && styles.pressed]}
+                style={({ pressed }) => [
+                  styles.result,
+                  pressed && styles.pressed,
+                ]}
               >
-                <Text className="text-xs font-semibold text-[#719b79]">Page {item.page}</Text>
-                <Text className="mt-1 text-sm leading-5 text-black/75" numberOfLines={3}>
+                <Text className="text-xs font-semibold text-[#719b79]">
+                  Page {item.page}
+                </Text>
+                <Text
+                  className="mt-1 text-sm leading-5 text-black/75"
+                  numberOfLines={3}
+                >
                   {item.snippet}
                 </Text>
               </Pressable>
@@ -155,7 +178,17 @@ export default function ReaderSearchButton({ blocks, onSelectResult }: Props) {
 }
 
 const styles = StyleSheet.create({
-  searchBox: { height: 52, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: "#dbe2ea", borderRadius: 14, backgroundColor: "#ffffff", paddingHorizontal: 14 },
+  searchBox: {
+    height: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#dbe2ea",
+    borderRadius: 14,
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 14,
+  },
   input: { flex: 1, height: "100%", color: "#0f172a", fontSize: 16 },
   results: { paddingBottom: 32 },
   result: { borderRadius: 12, paddingHorizontal: 10, paddingVertical: 12 },

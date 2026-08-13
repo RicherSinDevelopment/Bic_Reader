@@ -9,6 +9,7 @@ type ReaderSettingsState = {
   letterSpacing: number;
   wordSpacing: number;
   bold: boolean;
+  automaticHyphenation: boolean;
   disableRotation: boolean;
   lineGuideEnabled: boolean;
   wordGuideEnabled: boolean;
@@ -33,6 +34,7 @@ type ReaderSettingsState = {
   decreaseWordSpacing: () => void;
 
   toggleBold: () => void;
+  setAutomaticHyphenation: (enabled: boolean) => void;
   toggleDisableRotation: () => void;
   setLineGuideEnabled: (enabled: boolean) => void;
   setWordGuideEnabled: (enabled: boolean) => void;
@@ -52,6 +54,7 @@ export const useReaderSettingsStore =
     letterSpacing: 0,
     wordSpacing: 0,
     bold: false,
+    automaticHyphenation: true,
     disableRotation: false,
     lineGuideEnabled: false,
     wordGuideEnabled: false,
@@ -126,6 +129,8 @@ export const useReaderSettingsStore =
       set((state) => ({
         bold: !state.bold,
       })),
+
+    setAutomaticHyphenation: (enabled) => set({ automaticHyphenation: enabled }),
 
     toggleDisableRotation: () =>
       set((state) => ({

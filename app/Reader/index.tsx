@@ -2,17 +2,15 @@ import BackButton from "@/components/Backbutton";
 import OriginalPDF, { type PdfOutlineItem } from "@/components/OriginalPDF";
 import ReaderView from "@/components/ReaderView";
 import ReaderSearchButton from "@/components/ReaderSearchButton";
-import ThreeLinesButton, { type ReaderChapter } from "@/components/threelinesbutton";
+import ReaderModeTabs, {
+  type ReaderMode,
+} from "@/components/readerui/ReaderModeTabs";
+import ThreeLinesButton, {
+  type ReaderChapter,
+} from "@/components/threelinesbutton";
 import { Box } from "@/components/ui/box";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Text } from "@/components/ui/text";
-import {
-  Tabs,
-  TabsIndicator,
-  TabsList,
-  TabsTrigger,
-  TabsTriggerText,
-} from "@/components/ui/tabs";
 import {
   getPdfById,
   markPdfOpened,
@@ -47,13 +45,16 @@ import Reanimated, {
 function isVisibleReaderBlock(block: ExtractedPdfBlock) {
   if (block.hiddenInReader) return false;
   const normalized = block.text.toLowerCase();
-  const isPrepressMarker = normalized.includes(".qxp")
-    || normalized.startsWith("aronson rdg_")
-    || (normalized.includes("_ch") && normalized.includes(" page "));
+  const isPrepressMarker =
+    normalized.includes(".qxp") ||
+    normalized.startsWith("aronson rdg_") ||
+    (normalized.includes("_ch") && normalized.includes(" page "));
   return !isPrepressMarker;
 }
 
-function firstMissingPageIndex(document: ExtractedPdfDocument | null | undefined) {
+function firstMissingPageIndex(
+  document: ExtractedPdfDocument | null | undefined,
+) {
   if (!document) return 0;
   const loaded = new Set(document.pages.map((page) => page.page));
   for (let page = 1; page <= document.pageCount; page += 1) {
@@ -68,37 +69,47 @@ const BACKGROUND_READER_PAGE_BATCH = 16;
 
 function BookPageSkeleton() {
   const lineWidths = [
-    "w-full", "w-[94%]", "w-[98%]", "w-[88%]", "w-full", "w-[92%]",
-    "w-[96%]", "w-[84%]", "w-full", "w-[90%]", "w-[97%]", "w-[72%]",
+    "w-full",
+    "w-[94%]",
+    "w-[98%]",
+    "w-[88%]",
+    "w-full",
+    "w-[92%]",
+    "w-[96%]",
+    "w-[84%]",
+    "w-full",
+    "w-[90%]",
+    "w-[97%]",
+    "w-[72%]",
   ];
 
   return (
     <View className="flex-1 bg-white px-6 py-8">
-        <Skeleton
-          speed={2}
-          startColor="bg-[#E7E3D8]"
-          className="mb-8 h-7 w-[58%] rounded-md"
-        />
-        <View className="gap-4">
-          {lineWidths.map((width, index) => (
-            <Skeleton
-              key={`${width}-${index}`}
-              speed={2}
-              startColor="bg-[#E7E3D8]"
-              className={`h-3.5 rounded-full ${width}`}
-            />
-          ))}
-        </View>
-        <View className="mt-10 gap-4">
-          {lineWidths.slice(0, 7).map((width, index) => (
-            <Skeleton
-              key={`second-${width}-${index}`}
-              speed={2}
-              startColor="bg-[#E7E3D8]"
-              className={`h-3.5 rounded-full ${width}`}
-            />
-          ))}
-        </View>
+      <Skeleton
+        speed={2}
+        startColor="bg-[#E7E3D8]"
+        className="mb-8 h-7 w-[58%] rounded-md"
+      />
+      <View className="gap-4">
+        {lineWidths.map((width, index) => (
+          <Skeleton
+            key={`${width}-${index}`}
+            speed={2}
+            startColor="bg-[#E7E3D8]"
+            className={`h-3.5 rounded-full ${width}`}
+          />
+        ))}
+      </View>
+      <View className="mt-10 gap-4">
+        {lineWidths.slice(0, 7).map((width, index) => (
+          <Skeleton
+            key={`second-${width}-${index}`}
+            speed={2}
+            startColor="bg-[#E7E3D8]"
+            className={`h-3.5 rounded-full ${width}`}
+          />
+        ))}
+      </View>
     </View>
   );
 }
@@ -110,17 +121,18 @@ export default function ReaderScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [headerVisibility] = useState(() => new Animated.Value(1));
-  const [activeTab, setActiveTab] = useState("reader");
+  const [activeTab, setActiveTab] = useState<ReaderMode>("reader");
   const [hasVisitedOriginal, setHasVisitedOriginal] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isLandscape, setIsLandscape] = useState(false);
   const [readerBlocks, setReaderBlocks] = useState<ExtractedPdfBlock[]>([]);
-  const [readerPageSizes, setReaderPageSizes] = useState<Record<number, PdfPageSize>>({});
+  const [readerPageSizes, setReaderPageSizes] = useState<
+    Record<number, PdfPageSize>
+  >({});
   const [readerLoading, setReaderLoading] = useState(true);
   const [readerError, setReaderError] = useState<string | null>(null);
   const [readerPageCount, setReaderPageCount] = useState(0);
   const [readerContentReady, setReaderContentReady] = useState(false);
-  const readerContentOpacity = useSharedValue(0);
   const readerSkeletonOpacity = useSharedValue(1);
   const [readerCurrentPage, setReaderCurrentPage] = useState(1);
   const [readerDisplayCurrentPage, setReaderDisplayCurrentPage] = useState(1);
@@ -137,29 +149,19 @@ export default function ReaderScreen() {
   } | null>(null);
   const readerExtractionStarted = React.useRef(false);
   const requestedExtractionPage = React.useRef<number | null>(null);
-  const { reportVisibleBlock, target: switchHighlightTarget } = useSwitchHighlight(
-    readerBlocks,
-    readerPageSizes,
-  );
+  const { reportVisibleBlock, target: switchHighlightTarget } =
+    useSwitchHighlight(readerBlocks, readerPageSizes);
 
   useScreenRotation(setIsLandscape);
 
   useEffect(() => {
-    readerContentOpacity.value = withTiming(readerContentReady ? 1 : 0, {
-      duration: readerContentReady ? 180 : 0,
-      easing: Easing.out(Easing.cubic),
-      reduceMotion: ReduceMotion.System,
-    });
     readerSkeletonOpacity.value = withTiming(readerContentReady ? 0 : 1, {
       duration: readerContentReady ? 140 : 0,
       easing: Easing.out(Easing.quad),
       reduceMotion: ReduceMotion.System,
     });
-  }, [readerContentOpacity, readerContentReady, readerSkeletonOpacity]);
+  }, [readerContentReady, readerSkeletonOpacity]);
 
-  const readerContentStyle = useAnimatedStyle(() => ({
-    opacity: readerContentOpacity.value,
-  }));
   const readerSkeletonStyle = useAnimatedStyle(() => ({
     opacity: readerSkeletonOpacity.value,
   }));
@@ -222,16 +224,23 @@ export default function ReaderScreen() {
 
           const publish = (value: ExtractedPdfDocument) => {
             if (!cancelled) {
-              setReaderBlocks(value.pages.flatMap((page) =>
-                page.blocks.filter(isVisibleReaderBlock),
-              ));
+              setReaderBlocks(
+                value.pages.flatMap((page) =>
+                  page.blocks.filter(isVisibleReaderBlock),
+                ),
+              );
               setReaderPageCount(value.pageCount);
-              setReaderPageSizes(Object.fromEntries(
-                value.pages.map((page) => [page.page, {
-                  width: page.width,
-                  height: page.height,
-                }]),
-              ));
+              setReaderPageSizes(
+                Object.fromEntries(
+                  value.pages.map((page) => [
+                    page.page,
+                    {
+                      width: page.width,
+                      height: page.height,
+                    },
+                  ]),
+                ),
+              );
               setReaderLoading(false);
             }
           };
@@ -243,17 +252,19 @@ export default function ReaderScreen() {
 
           while (!cancelled && nextPage < pageCount) {
             const requestedPage = requestedExtractionPage.current;
-            const requestIsMissing = requestedPage !== null &&
+            const requestIsMissing =
+              requestedPage !== null &&
               !document?.pages.some((page) => page.page === requestedPage);
             const firstPage = requestIsMissing ? requestedPage - 1 : nextPage;
             if (requestIsMissing) requestedExtractionPage.current = null;
 
             const extractedPageCount = document?.pages.length ?? 0;
-            const batchSize = extractedPageCount === 0 && firstPage === 0
-              ? FIRST_READER_PAGE_BATCH
-              : firstPage < WARM_READER_PAGE_COUNT
-                ? WARM_READER_PAGE_COUNT - firstPage
-                : BACKGROUND_READER_PAGE_BATCH;
+            const batchSize =
+              extractedPageCount === 0 && firstPage === 0
+                ? FIRST_READER_PAGE_BATCH
+                : firstPage < WARM_READER_PAGE_COUNT
+                  ? WARM_READER_PAGE_COUNT - firstPage
+                  : BACKGROUND_READER_PAGE_BATCH;
             const chunk = await extractPdfDocumentRange(
               pdf.uri,
               firstPage,
@@ -265,7 +276,9 @@ export default function ReaderScreen() {
             chunk.pages.forEach((page) => pagesByNumber.set(page.page, page));
             document = {
               pageCount: chunk.pageCount,
-              pages: Array.from(pagesByNumber.values()).sort((a, b) => a.page - b.page),
+              pages: Array.from(pagesByNumber.values()).sort(
+                (a, b) => a.page - b.page,
+              ),
             };
             pageCount = document.pageCount;
             nextPage = firstMissingPageIndex(document);
@@ -277,7 +290,11 @@ export default function ReaderScreen() {
           }
         } catch (error) {
           if (!cancelled) {
-            setReaderError(error instanceof Error ? error.message : "Unable to create Reader Mode.");
+            setReaderError(
+              error instanceof Error
+                ? error.message
+                : "Unable to create Reader Mode.",
+            );
           }
         } finally {
           if (!cancelled) setReaderLoading(false);
@@ -302,7 +319,7 @@ export default function ReaderScreen() {
     return () => animation.stop();
   }, [headerVisibility, isLandscape]);
 
-  const handleTabChange = (value: string) => {
+  const handleTabChange = (value: ReaderMode) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (value === "original") setHasVisitedOriginal(true);
     setActiveTab(value);
@@ -320,7 +337,10 @@ export default function ReaderScreen() {
   );
 
   const readerChapters = useMemo<ReaderChapter[]>(() => {
-    const convert = (items: PdfOutlineItem[], path = "outline"): ReaderChapter[] =>
+    const convert = (
+      items: PdfOutlineItem[],
+      path = "outline",
+    ): ReaderChapter[] =>
       items.map((item, index) => ({
         id: `${path}-${index}-${item.page}`,
         title: item.title,
@@ -334,37 +354,46 @@ export default function ReaderScreen() {
     setPdfOutline(outline);
   }, []);
 
-  const handleReaderPagination = useCallback((current: number, total: number) => {
-    setReaderDisplayCurrentPage(current);
-    setReaderDisplayPageCount(total);
-  }, []);
+  const handleReaderPagination = useCallback(
+    (current: number, total: number) => {
+      setReaderDisplayCurrentPage(current);
+      setReaderDisplayPageCount(total);
+    },
+    [],
+  );
 
-  const visiblePage = activeTab === "original"
-    ? originalCurrentPage
-    : readerDisplayCurrentPage;
-  const visiblePageCount = activeTab === "original"
-    ? (originalPageCount || pdf?.totalPages || readerPageCount)
-    : (readerDisplayPageCount || readerPageCount);
-  const navigationCurrentPage = activeTab === "original"
-    ? originalCurrentPage
-    : readerCurrentPage;
+  const visiblePage =
+    activeTab === "original" ? originalCurrentPage : readerDisplayCurrentPage;
+  const visiblePageCount =
+    activeTab === "original"
+      ? originalPageCount || pdf?.totalPages || readerPageCount
+      : readerDisplayPageCount || readerPageCount;
+  const navigationCurrentPage =
+    activeTab === "original" ? originalCurrentPage : readerCurrentPage;
+  const readingProgress =
+    visiblePageCount > 0
+      ? Math.max(0, Math.min(1, visiblePage / visiblePageCount))
+      : 0;
 
-  const goToReaderPage = useCallback((
-    page: number,
-    blockId?: string,
-    searchQuery?: string,
-    searchMatchIndex?: number,
-  ) => {
-    requestedExtractionPage.current = page;
-    setActiveTab("reader");
-    setReaderDestination({
-      page,
-      blockId,
-      searchQuery,
-      searchMatchIndex,
-      nonce: Date.now(),
-    });
-  }, []);
+  const goToReaderPage = useCallback(
+    (
+      page: number,
+      blockId?: string,
+      searchQuery?: string,
+      searchMatchIndex?: number,
+    ) => {
+      requestedExtractionPage.current = page;
+      setActiveTab("reader");
+      setReaderDestination({
+        page,
+        blockId,
+        searchQuery,
+        searchMatchIndex,
+        nonce: Date.now(),
+      });
+    },
+    [],
+  );
 
   if (isLoading) {
     return (
@@ -397,25 +426,22 @@ export default function ReaderScreen() {
         accessibilityElementsHidden={isLandscape}
         importantForAccessibility={isLandscape ? "no-hide-descendants" : "auto"}
         style={{
-          height: headerHeight
-            ? headerVisibility.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, headerHeight],
-              })
-            : undefined,
+          position: "absolute",
+          top: 0,
+          right: 0,
+          left: 0,
+          zIndex: 50,
+          height: isLandscape ? 0 : headerHeight || undefined,
           overflow: "hidden",
-          transform: [
-            {
-              translateY: headerVisibility.interpolate({
-                inputRange: [0, 1],
-                outputRange: [-Math.max(headerHeight, 120), 0],
-              }),
-            },
-          ],
+          backgroundColor: "#ffffff",
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: "#deddd7",
+          transform: [{ translateY: isLandscape ? -Math.max(headerHeight, 120) : 0 }],
         }}
       >
-        <View
-          className="pb-4 pt-12"
+        <Animated.View
+          className="pb-3 pt-12"
+          style={{ minHeight: 148 }}
           onLayout={(event) => {
             const measuredHeight = event.nativeEvent.layout.height;
 
@@ -424,20 +450,15 @@ export default function ReaderScreen() {
             }
           }}
         >
-          <Tabs
-            value={activeTab}
-            onValueChange={handleTabChange}
-            variant="filled"
-            className="w-full"
-          >
-            <Box className="relative w-full items-center">
-              <Box className="absolute left-2 top-1/2 -translate-y-1/2">
-                <BackButton />
-              </Box>
+          <View className="relative h-14 w-full items-center justify-center px-5">
+            <View className="absolute left-4 top-1/2 -translate-y-1/2">
+              <BackButton />
+            </View>
 
-              <Box className="absolute right-2 top-1/2 -translate-y-1/2 flex-row gap-2">
+            <View className="absolute right-4 top-1/2 -translate-y-1/2 flex-row">
                 <ReaderSearchButton
                   blocks={readerBlocks}
+                  grouped
                   onSelectResult={(page, blockId, query, matchIndex) =>
                     goToReaderPage(page, blockId, query, matchIndex)
                   }
@@ -445,45 +466,58 @@ export default function ReaderScreen() {
                 <ThreeLinesButton
                   chapters={readerChapters}
                   currentPage={navigationCurrentPage}
+                  grouped
                   totalPages={visiblePageCount}
                   onGoToPage={(page) => goToReaderPage(page)}
-                  onGoToChapter={(chapter) => goToReaderPage(chapter.page, chapter.blockId)}
+                  onGoToChapter={(chapter) =>
+                    goToReaderPage(chapter.page, chapter.blockId)
+                  }
                 />
-              </Box>
+            </View>
 
-              <TabsList className="rounded-xl p-2">
-                <TabsTrigger value="reader" className="px-6 py-3">
-                  <TabsTriggerText>Reader</TabsTriggerText>
-                </TabsTrigger>
-
-                <TabsTrigger value="original" className="px-6 py-3">
-                  <TabsTriggerText>Original</TabsTriggerText>
-                </TabsTrigger>
-
-                <TabsIndicator />
-              </TabsList>
-            </Box>
-          </Tabs>
+            <ReaderModeTabs value={activeTab} onValueChange={handleTabChange} />
+          </View>
           {visiblePageCount > 0 && (
-            <Text className="mt-2 text-center font-lato-bold text-xs text-black/55">
-              {visiblePage} of {visiblePageCount}
-            </Text>
+            <View className="absolute bottom-3 left-0 right-0 flex-row items-center px-5">
+              <Text
+                className="mr-4 flex-1 font-lato-bold text-xs text-[#83877e]"
+                numberOfLines={1}
+              >
+                {pdf.name}
+              </Text>
+              <View
+                accessible
+                accessibilityLabel={`${Math.round(readingProgress * 100)} percent read`}
+                className="mr-3 h-1.5 w-24 overflow-hidden rounded-full bg-[#e9ebe8]"
+              >
+                <View
+                  className="h-full rounded-full bg-[#4f936b]"
+                  style={{ width: `${readingProgress * 100}%` }}
+                />
+              </View>
+              <Text className="min-w-14 text-right font-lato-bold text-xs text-[#6d716a]">
+                {visiblePage}/{visiblePageCount}
+              </Text>
+            </View>
           )}
-        </View>
+        </Animated.View>
       </Animated.View>
 
       <View className="flex-1 overflow-hidden">
-        <View
+        <Animated.View
           pointerEvents={
             activeTab === "original" ||
-              (activeTab === "reader" && readerBlocks.length === 0)
+            (activeTab === "reader" && readerBlocks.length === 0)
               ? "auto"
               : "none"
           }
           style={{
             position: "absolute",
-            inset: 0,
-            opacity: 1,
+            top: isLandscape ? 0 : headerHeight,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            zIndex: activeTab === "original" ? 2 : 0,
           }}
         >
           <OriginalPDF
@@ -492,20 +526,27 @@ export default function ReaderScreen() {
             initialPage={pdf.currentPage || 1}
             onPageChanged={handlePageChanged}
             onOutlineChanged={handleOutlineChanged}
-            highlightTarget={activeTab === "original" ? switchHighlightTarget : null}
+            highlightTarget={
+              activeTab === "original" ? switchHighlightTarget : null
+            }
           />
-        </View>
+        </Animated.View>
 
-        <View
+        <Animated.View
           pointerEvents={
             activeTab === "reader" && readerContentReady ? "auto" : "none"
           }
-          style={{ position: "absolute", inset: 0, opacity: activeTab === "reader" ? 1 : 0 }}
+          style={{
+            position: "absolute",
+            top: isLandscape ? 0 : headerHeight,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            zIndex: activeTab === "reader" ? 2 : 0,
+          }}
         >
           {readerBlocks.length > 0 ? (
-            <Reanimated.View
-              style={[{ flex: 1 }, readerContentStyle]}
-            >
+            <View style={{ flex: 1 }}>
               <ReaderView
                 isLandscape={isLandscape}
                 blocks={readerBlocks}
@@ -514,10 +555,12 @@ export default function ReaderScreen() {
                 onPageChange={setReaderCurrentPage}
                 onPaginationChange={handleReaderPagination}
                 onSwitchAnchorChange={reportVisibleBlock}
-                showSwitchHighlight={hasVisitedOriginal && activeTab === "reader"}
+                showSwitchHighlight={
+                  hasVisitedOriginal && activeTab === "reader"
+                }
                 onReady={() => setReaderContentReady(true)}
               />
-            </Reanimated.View>
+            </View>
           ) : readerLoading ? (
             <View className="flex-1 bg-transparent">
               <Text className="hidden">
@@ -534,7 +577,8 @@ export default function ReaderScreen() {
               </Text>
               {!isPdfEngineLinked && (
                 <Text className="mt-3 text-center text-xs text-black/40">
-                  Install the iOS development build containing the Rust extraction engine.
+                  Install the iOS development build containing the Rust
+                  extraction engine.
                 </Text>
               )}
             </View>
@@ -549,7 +593,7 @@ export default function ReaderScreen() {
               <BookPageSkeleton />
             </Reanimated.View>
           )}
-        </View>
+        </Animated.View>
       </View>
     </Box>
   );

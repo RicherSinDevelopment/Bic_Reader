@@ -3,8 +3,10 @@ import { migrateDatabase } from "@/database/migrations";
 import { AuthProvider, useAuth } from '@/providers/AuthProvider';
 import { Lato_400Regular, Lato_700Bold, useFonts } from "@expo-google-fonts/lato";
 import { SourceSans3_400Regular } from "@expo-google-fonts/source-sans-3/400Regular";
-import { Stack } from "expo-router";
+import { Redirect, Stack, useSegments } from "expo-router";
 import { SQLiteProvider } from "expo-sqlite";
+import { ActivityIndicator, View } from "react-native";
+import { Suspense } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
   configureReanimatedLogger,
@@ -21,24 +23,29 @@ configureReanimatedLogger({
 });
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  // Start loading fonts without blocking the auth provider and router. Waiting
+  // here previously delayed session restoration and left the app empty during
+  // every development reload.
+  useFonts({
     Lato_400Regular,
     Lato_700Bold,
     SourceSans3_400Regular,
   });
-
-  if (!fontsLoaded) {
-    return null;
-  }
   
  return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <GluestackUIProvider>
           <AuthProvider>
-            <SQLiteProvider databaseName="bic_reader.db" onInit={migrateDatabase}>
-              <RootNavigator />
-            </SQLiteProvider>
+            <Suspense fallback={<StartupLoadingScreen />}>
+              <SQLiteProvider
+                databaseName="bic_reader.db"
+                onInit={migrateDatabase}
+                useSuspense
+              >
+                <RootNavigator />
+              </SQLiteProvider>
+            </Suspense>
           </AuthProvider>
         </GluestackUIProvider>
       </SafeAreaProvider>
@@ -47,11 +54,34 @@ export default function RootLayout() {
    
 }
 
+function StartupLoadingScreen() {
+  return (
+    <View
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "#F7F5EF",
+      }}
+    >
+      <ActivityIndicator color="#4F7D1A" size="large" />
+    </View>
+  );
+}
+
 function RootNavigator() {
   const { isLoading, session } = useAuth();
+  const segments = useSegments();
 
   if (isLoading) {
-    return null;
+    return <StartupLoadingScreen />;
+  }
+
+  // A development reload can restore the last deep-link route even after the
+  // password recovery is finished. Resolve that stale route here, before the
+  // reset screen mounts, so authenticated users return directly to the app.
+  if (session && segments[0] === "auth" && segments[1] === "reset-password") {
+    return <Redirect href="/HomePage" />;
   }
 
   return (

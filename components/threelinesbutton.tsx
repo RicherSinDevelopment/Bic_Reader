@@ -45,17 +45,13 @@ export default function ThreeLinesButton({
   const [expandedChapterIds, setExpandedChapterIds] = React.useState<string[]>(
     [],
   );
+  const updatePageInput = (value: string) => {
+    const digits = value.replace(/\D/g, "");
+    setPageInput(digits);
 
-  const goToPage = () => {
-    const requested = Number.parseInt(pageInput, 10);
-    if (!Number.isFinite(requested) || totalPages < 1) {
-      setPageInput(String(currentPage));
-      return;
-    }
-    const page = Math.max(1, Math.min(requested, totalPages));
-    setPageInput(String(page));
-    setShowDrawer(false);
-    requestAnimationFrame(() => onGoToPage?.(page));
+    const page = Number.parseInt(digits, 10);
+    if (!Number.isFinite(page) || page < 1 || page > totalPages) return;
+    onGoToPage?.(page);
   };
 
   const outlineRows = React.useMemo<OutlineRow[]>(() => {
@@ -157,23 +153,13 @@ export default function ThreeLinesButton({
               <View style={styles.pageRow}>
                 <TextInput
                   value={pageInput}
-                  onChangeText={setPageInput}
-                  onSubmitEditing={goToPage}
+                  onChangeText={updatePageInput}
                   keyboardType="number-pad"
-                  returnKeyType="go"
                   selectTextOnFocus
                   accessibilityLabel="Page number"
                   style={styles.pageInput}
                 />
                 <Text className="text-base text-black/60">of {totalPages}</Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Go to page ${pageInput}`}
-                  onPress={goToPage}
-                  style={styles.goButton}
-                >
-                  <ChevronRight size={20} color="#ffffff" />
-                </Pressable>
               </View>
             </View>
           )}
@@ -224,15 +210,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 16,
     color: "#0f172a",
-  },
-  goButton: {
-    marginLeft: "auto",
-    width: 42,
-    height: 42,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 10,
-    backgroundColor: "#719b79",
   },
   chapterList: { paddingHorizontal: 12, paddingBottom: 24 },
   chapter: {

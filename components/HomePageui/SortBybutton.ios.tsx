@@ -2,13 +2,11 @@ import React from "react";
 import { Host, HStack, Image, Menu, Text, Toggle } from "@expo/ui/swift-ui";
 import {
   allowsTightening,
-  buttonBorderShape,
   buttonStyle,
   controlSize,
   font,
   frame,
   lineLimit,
-  minimumScaleFactor,
   shadow,
 } from "@expo/ui/swift-ui/modifiers";
 import * as Haptics from "expo-haptics";
@@ -65,7 +63,6 @@ export default function SortButton({ value, onValueChange }: SortButtonProps) {
                 font({ size: 16, weight: "semibold" }),
                 lineLimit(1),
                 allowsTightening(true),
-                minimumScaleFactor(0.85),
               ]}
             >
               Sort by: {selectedLabel}
@@ -74,7 +71,6 @@ export default function SortButton({ value, onValueChange }: SortButtonProps) {
         }
         modifiers={[
           buttonStyle("glass"),
-          buttonBorderShape("roundedRectangle", 10),
           controlSize("regular"),
           shadow({ color: "#173A212E", radius: 9, x: 0, y: 5 }),
           shadow({ color: "#FFFFFF70", radius: 1, x: -1, y: -1 }),

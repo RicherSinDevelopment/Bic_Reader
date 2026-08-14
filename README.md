@@ -1,4 +1,31 @@
-# Welcome to your Expo app 👋
+# Bic Reader
+
+This branch targets Expo SDK 54 so it can be built with Xcode 26.1.
+
+## Build the iOS development client locally
+
+On macOS, install Xcode command-line tools, CocoaPods, Node.js 20.19 or newer,
+and Rust. Then run these commands from the repository root:
+
+```bash
+npm install
+source "$HOME/.cargo/env"
+bash pdf_reader/scripts/build-ios.sh
+npx expo prebuild --clean --platform ios
+npx pod-install
+npx expo run:ios --device
+```
+
+The Rust build step creates the Bic PDF Reader and Pdfium XCFrameworks used by
+the local Expo module. Copy `.env.local` to the Mac before starting Metro; never
+commit that file. The first device build may require selecting the Apple
+Developer team under Signing & Capabilities in the generated Xcode workspace.
+
+After the development client is installed, JavaScript-only development uses:
+
+```bash
+npx expo start --dev-client
+```
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 

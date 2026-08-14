@@ -2,7 +2,7 @@ Pod::Spec.new do |s|
   s.name = 'BicPdfReader'
   s.version = '0.1.0'
   s.summary = 'Semantic PDF extraction for Bic Reader'
-  s.description = 'Expo SDK 57 bridge to the Bic Reader Rust extraction engine.'
+  s.description = 'Expo bridge to the Bic Reader Rust extraction engine.'
   s.license = { :type => 'Proprietary' }
   s.author = 'Bic Reader'
   s.homepage = 'https://example.invalid/bic-reader'

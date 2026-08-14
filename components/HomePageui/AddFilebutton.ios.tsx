@@ -1,6 +1,5 @@
 import { Button, Host, HStack, Image, Text } from "@expo/ui/swift-ui";
 import {
-  buttonBorderShape,
   buttonStyle,
   controlSize,
   disabled,
@@ -51,7 +50,6 @@ export default function AddButton({ onPdfPicked }: AddButtonProps) {
         onPress={handlePickPdf}
         modifiers={[
           buttonStyle("glassProminent"),
-          buttonBorderShape("roundedRectangle", 12),
           controlSize("large"),
           tint("#4ADE80"),
           shadow({ color: "#176C3440", radius: 15, x: 0, y: 9 }),

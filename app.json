@@ -48,9 +48,7 @@
       "expo-apple-authentication",
       "expo-sqlite",
       "expo-asset",
-      "expo-image",
-      "expo-web-browser",
-      "expo-status-bar"
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

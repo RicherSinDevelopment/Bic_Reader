@@ -1,9 +1,7 @@
 import { Button, Host, HStack, Image, Text } from "@expo/ui/swift-ui";
 import {
   buttonStyle,
-  controlSize,
   disabled,
-  font,
   frame,
   shadow,
   tint,
@@ -48,9 +46,9 @@ export default function AddButton({ onPdfPicked }: AddButtonProps) {
     <Host style={{ width: "100%", height: 48 }}>
       <Button
         onPress={handlePickPdf}
+        controlSize="large"
         modifiers={[
           buttonStyle("glassProminent"),
-          controlSize("large"),
           tint("#4ADE80"),
           shadow({ color: "#176C3440", radius: 15, x: 0, y: 9 }),
           shadow({ color: "#FFFFFF80", radius: 1, x: -1, y: -1 }),
@@ -72,7 +70,7 @@ export default function AddButton({ onPdfPicked }: AddButtonProps) {
             systemName={isPicking ? "hourglass" : "plus.circle.fill"}
             size={20}
           />
-          <Text modifiers={[font({ size: 17, weight: "semibold" })]}>
+          <Text size={17} weight="semibold">
             {isPicking ? "Adding PDF" : "Add PDF"}
           </Text>
         </HStack>

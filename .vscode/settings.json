@@ -1,4 +1,7 @@
 {
+  "terminal.integrated.env.osx": {
+    "PATH": "/Users/alialmahdi/.nvm/versions/node/v22.23.2/bin:${env:PATH}"
+  },
   "editor.codeActionsOnSave": {
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",

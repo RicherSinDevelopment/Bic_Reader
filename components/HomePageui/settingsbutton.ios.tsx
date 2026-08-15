@@ -1,8 +1,7 @@
 import { Button, Host } from "@expo/ui/swift-ui";
 import {
+  accessibilityLabel,
   buttonStyle,
-  controlSize,
-  labelStyle,
   shadow,
 } from "@expo/ui/swift-ui/modifiers";
 import * as Haptics from "expo-haptics";
@@ -19,13 +18,12 @@ export default function SettingsButton() {
   return (
     <Host style={{ width: 40, height: 40 }}>
       <Button
-        label="Open account settings"
         systemImage="gearshape.fill"
+        controlSize="regular"
         onPress={openSettings}
         modifiers={[
           buttonStyle("glass"),
-          controlSize("regular"),
-          labelStyle("iconOnly"),
+          accessibilityLabel("Open account settings"),
           shadow({ color: "#173A212E", radius: 9, x: 0, y: 5 }),
           shadow({ color: "#FFFFFF70", radius: 1, x: -1, y: -1 }),
         ]}

@@ -1,12 +1,15 @@
 import React from "react";
-import { Host, HStack, Image, Menu, Text, Toggle } from "@expo/ui/swift-ui";
 import {
-  allowsTightening,
+  Button,
+  ContextMenu,
+  Host,
+  HStack,
+  Image,
+  Text,
+} from "@expo/ui/swift-ui";
+import {
   buttonStyle,
-  controlSize,
-  font,
   frame,
-  lineLimit,
   shadow,
 } from "@expo/ui/swift-ui/modifiers";
 import * as Haptics from "expo-haptics";
@@ -21,7 +24,7 @@ type SortButtonProps = {
 const sortOptions: {
   label: string;
   value: PdfSortOption;
-  systemImage: React.ComponentProps<typeof Toggle>["systemImage"];
+  systemImage: React.ComponentProps<typeof Button>["systemImage"];
 }[] = [
   { label: "Newest", value: "newest", systemImage: "calendar.badge.clock" },
   { label: "Oldest", value: "oldest", systemImage: "calendar" },
@@ -48,8 +51,29 @@ export default function SortButton({ value, onValueChange }: SortButtonProps) {
 
   return (
     <Host matchContents>
-      <Menu
-        label={
+      <ContextMenu
+        activationMethod="singlePress"
+        modifiers={[
+          buttonStyle("glass"),
+          shadow({ color: "#173A212E", radius: 9, x: 0, y: 5 }),
+          shadow({ color: "#FFFFFF70", radius: 1, x: -1, y: -1 }),
+        ]}
+      >
+        <ContextMenu.Items>
+          {sortOptions.map((option) => (
+            <Button
+              key={option.value}
+              systemImage={
+                option.value === value ? "checkmark" : option.systemImage
+              }
+              onPress={() => selectOption(option.value)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </ContextMenu.Items>
+
+        <ContextMenu.Trigger>
           <HStack
             spacing={7}
             alignment="center"
@@ -58,34 +82,12 @@ export default function SortButton({ value, onValueChange }: SortButtonProps) {
             ]}
           >
             <Image systemName="arrow.up.arrow.down" size={16} />
-            <Text
-              modifiers={[
-                font({ size: 16, weight: "semibold" }),
-                lineLimit(1),
-                allowsTightening(true),
-              ]}
-            >
-              Sort by: {selectedLabel}
+            <Text size={16} weight="semibold" lineLimit={1}>
+              {`Sort by: ${selectedLabel}`}
             </Text>
           </HStack>
-        }
-        modifiers={[
-          buttonStyle("glass"),
-          controlSize("regular"),
-          shadow({ color: "#173A212E", radius: 9, x: 0, y: 5 }),
-          shadow({ color: "#FFFFFF70", radius: 1, x: -1, y: -1 }),
-        ]}
-      >
-        {sortOptions.map((option) => (
-          <Toggle
-            key={option.value}
-            label={option.label}
-            systemImage={option.systemImage}
-            isOn={option.value === value}
-            onIsOnChange={() => selectOption(option.value)}
-          />
-        ))}
-      </Menu>
+        </ContextMenu.Trigger>
+      </ContextMenu>
     </Host>
   );
 }

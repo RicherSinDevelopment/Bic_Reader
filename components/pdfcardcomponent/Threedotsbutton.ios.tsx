@@ -1,10 +1,8 @@
 import React, { useState } from "react";
-import { Button, Host, Image, Menu } from "@expo/ui/swift-ui";
+import { Button, ContextMenu, Host, Image } from "@expo/ui/swift-ui";
 import {
   accessibilityLabel,
-  buttonStyle,
   frame,
-  labelStyle,
   rotationEffect,
 } from "@expo/ui/swift-ui/modifiers";
 import * as Haptics from "expo-haptics";
@@ -71,8 +69,21 @@ export default function ThreeDotsButton({
   return (
     <>
       <Host style={{ width: 24, height: 32 }}>
-        <Menu
-          label={
+        <ContextMenu activationMethod="singlePress">
+          <ContextMenu.Items>
+            <Button systemImage="pencil" onPress={openRenameDialog}>
+              Rename
+            </Button>
+            <Button
+              systemImage="trash"
+              role="destructive"
+              onPress={confirmDelete}
+            >
+              Delete
+            </Button>
+          </ContextMenu.Items>
+
+          <ContextMenu.Trigger>
             <Image
               systemName="ellipsis"
               size={18}
@@ -80,27 +91,11 @@ export default function ThreeDotsButton({
               modifiers={[
                 rotationEffect(90),
                 frame({ width: 24, height: 32, alignment: "center" }),
+                accessibilityLabel(`More options for ${fileName}`),
               ]}
             />
-          }
-          modifiers={[
-            buttonStyle("plain"),
-            labelStyle("iconOnly"),
-            accessibilityLabel(`More options for ${fileName}`),
-          ]}
-        >
-          <Button
-            label="Rename"
-            systemImage="pencil"
-            onPress={openRenameDialog}
-          />
-          <Button
-            label="Delete"
-            systemImage="trash"
-            role="destructive"
-            onPress={confirmDelete}
-          />
-        </Menu>
+          </ContextMenu.Trigger>
+        </ContextMenu>
       </Host>
 
       <Modal

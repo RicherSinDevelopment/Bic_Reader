@@ -13,9 +13,8 @@ import { Icon, SearchIcon } from "@/components/ui/icon";
 import type { PdfLibraryItem } from "@/hooks/displaypdfs";
 import { Button, Host } from "@expo/ui/swift-ui";
 import {
+  accessibilityLabel,
   buttonStyle,
-  controlSize,
-  labelStyle,
   shadow,
 } from "@expo/ui/swift-ui/modifiers";
 import * as Haptics from "expo-haptics";
@@ -53,13 +52,12 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
     <BottomSheet ref={bottomSheetRef}>
       <Host style={{ width: 40, height: 40 }}>
         <Button
-          label="Search PDFs"
           systemImage="magnifyingglass"
+          controlSize="regular"
           onPress={openSearch}
           modifiers={[
             buttonStyle("glass"),
-            controlSize("regular"),
-            labelStyle("iconOnly"),
+            accessibilityLabel("Search PDFs"),
             shadow({ color: "#173A212E", radius: 9, x: 0, y: 5 }),
             shadow({ color: "#FFFFFF70", radius: 1, x: -1, y: -1 }),
           ]}

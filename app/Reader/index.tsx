@@ -1,6 +1,7 @@
 import BackButton from "@/components/Backbutton";
 import OriginalPDF, { type PdfOutlineItem } from "@/components/OriginalPDF";
 import ReaderView from "@/components/ReaderView";
+import type { TranslationLanguage } from "@/components/readernavbar/TTS";
 import ReaderSearchButton from "@/components/ReaderSearchButton";
 import ReaderModeTabs, {
   type ReaderMode,
@@ -41,6 +42,10 @@ import Reanimated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
+import {
+  translateAnchorText,
+  translatePdfBlocks,
+} from "@/services/translationService";
 
 function isVisibleReaderBlock(block: ExtractedPdfBlock) {
   if (block.hiddenInReader) return false;
@@ -122,6 +127,11 @@ export default function ReaderScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [headerVisibility] = useState(() => new Animated.Value(1));
   const [activeTab, setActiveTab] = useState<ReaderMode>("reader");
+  const [translationLanguage, setTranslationLanguage] =
+    useState<TranslationLanguage>();
+  const [translatedBlocks, setTranslatedBlocks] = useState<ExtractedPdfBlock[]>([]);
+  const [translationLoading, setTranslationLoading] = useState(false);
+  const [translationError, setTranslationError] = useState<string | null>(null);
   const [hasVisitedOriginal, setHasVisitedOriginal] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isLandscape, setIsLandscape] = useState(false);
@@ -147,12 +157,118 @@ export default function ReaderScreen() {
     searchMatchIndex?: number;
     nonce: number;
   } | null>(null);
+  const [translatedDestination, setTranslatedDestination] = useState<{
+    page: number;
+    blockId?: string;
+    switchHighlightWordIndex?: number;
+    switchHighlightWordProgress?: number;
+    switchHighlightQuery?: string;
+    nonce: number;
+  } | null>(null);
   const readerExtractionStarted = React.useRef(false);
   const requestedExtractionPage = React.useRef<number | null>(null);
+  const translatedBlockCache = React.useRef(
+    new Map<string, ExtractedPdfBlock>(),
+  );
+  const translationQueue = React.useRef<Promise<void>>(Promise.resolve());
+  const activeTranslationLanguage = React.useRef<string | null>(null);
+  const translationSourceLanguage = React.useRef<string | undefined>(undefined);
   const { reportVisibleBlock, target: switchHighlightTarget } =
     useSwitchHighlight(readerBlocks, readerPageSizes);
 
   useScreenRotation(setIsLandscape);
+
+  activeTranslationLanguage.current = translationLanguage?.code ?? null;
+
+  useEffect(() => {
+    translationSourceLanguage.current = undefined;
+  }, [pdfId]);
+
+  useEffect(() => {
+    if (!translationLanguage) {
+      setTranslatedBlocks([]);
+      setTranslationLoading(false);
+      setTranslationError(null);
+      return;
+    }
+
+    const languageCode = translationLanguage.code;
+    const sourceBlocks = readerBlocks;
+    setTranslatedBlocks(
+      sourceBlocks.flatMap((block) => {
+        const translated = translatedBlockCache.current.get(
+          `${languageCode}:${block.id}`,
+        );
+        return translated ? [translated] : [];
+      }),
+    );
+    setTranslationLoading(true);
+    setTranslationError(null);
+
+    translationQueue.current = translationQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        const missingBlocks = sourceBlocks.filter(
+          (block) =>
+            !translatedBlockCache.current.has(`${languageCode}:${block.id}`),
+        );
+
+        if (missingBlocks.length > 0) {
+          await translatePdfBlocks(
+            missingBlocks,
+            languageCode,
+            (batch) => {
+              batch.forEach((block) => {
+                const sourceId = block.id.replace(
+                  `translated-${languageCode}-`,
+                  "",
+                );
+                translatedBlockCache.current.set(
+                  `${languageCode}:${sourceId}`,
+                  block,
+                );
+              });
+
+              if (activeTranslationLanguage.current === languageCode) {
+                setTranslatedBlocks(
+                  sourceBlocks.flatMap((block) => {
+                    const translated = translatedBlockCache.current.get(
+                      `${languageCode}:${block.id}`,
+                    );
+                    return translated ? [translated] : [];
+                  }),
+                );
+              }
+            },
+            translationSourceLanguage.current,
+            (detectedLanguage) => {
+              translationSourceLanguage.current = detectedLanguage;
+            },
+          );
+        }
+
+        if (activeTranslationLanguage.current === languageCode) {
+          setTranslatedBlocks(
+            sourceBlocks.flatMap((block) => {
+              const translated = translatedBlockCache.current.get(
+                `${languageCode}:${block.id}`,
+              );
+              return translated ? [translated] : [];
+            }),
+          );
+          setTranslationLoading(false);
+        }
+      })
+      .catch((error) => {
+        if (activeTranslationLanguage.current !== languageCode) return;
+        setTranslationError(
+          error instanceof Error
+            ? error.message
+            : "Unable to translate this document.",
+        );
+        setTranslationLoading(false);
+      });
+  }, [readerBlocks, translationLanguage]);
 
   useEffect(() => {
     readerSkeletonOpacity.value = withTiming(readerContentReady ? 0 : 1, {
@@ -322,7 +438,53 @@ export default function ReaderScreen() {
   const handleTabChange = (value: ReaderMode) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (value === "original") setHasVisitedOriginal(true);
+    if (switchHighlightTarget && value === "translated" && translationLanguage) {
+      const destinationBase = {
+        page: switchHighlightTarget.page,
+        blockId: `translated-${translationLanguage.code}-${switchHighlightTarget.blockId}`,
+        switchHighlightWordIndex: switchHighlightTarget.wordIndex,
+        switchHighlightWordProgress:
+          switchHighlightTarget.sourceWordCount > 1
+            ? switchHighlightTarget.wordIndex /
+              (switchHighlightTarget.sourceWordCount - 1)
+            : 0,
+        nonce: Date.now(),
+      };
+      setTranslatedDestination(destinationBase);
+
+      const sourceLanguage = translationSourceLanguage.current;
+      if (!translationLoading && sourceLanguage && switchHighlightTarget.word) {
+        const sourceWord = switchHighlightTarget.word.replace(
+          /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,
+          "",
+        );
+        if (sourceWord) {
+          void translateAnchorText(
+            sourceWord,
+            translationLanguage.code,
+            sourceLanguage,
+          )
+            .then((translatedWord) => {
+              if (!translatedWord) return;
+              setTranslatedDestination({
+                ...destinationBase,
+                switchHighlightQuery: translatedWord,
+                nonce: Date.now(),
+              });
+            })
+            .catch(() => undefined);
+        }
+      }
+    }
     setActiveTab(value);
+  };
+
+  const handleTranslationLanguageChange = (language?: TranslationLanguage) => {
+    setTranslationLanguage(language);
+    if (!language && activeTab === "translated") {
+      setHasVisitedOriginal(true);
+      setActiveTab("original");
+    }
   };
 
   const handlePageChanged = useCallback(
@@ -374,6 +536,7 @@ export default function ReaderScreen() {
     visiblePageCount > 0
       ? Math.max(0, Math.min(1, visiblePage / visiblePageCount))
       : 0;
+  const displayPdfName = pdf?.name.replace(/\.pdf$/i, "") ?? "";
 
   const goToReaderPage = useCallback(
     (
@@ -445,7 +608,7 @@ export default function ReaderScreen() {
           onLayout={(event) => {
             const measuredHeight = event.nativeEvent.layout.height;
 
-            if (measuredHeight > headerHeight) {
+            if (Math.abs(measuredHeight - headerHeight) > 0.5) {
               setHeaderHeight(measuredHeight);
             }
           }}
@@ -475,7 +638,19 @@ export default function ReaderScreen() {
                 />
             </View>
 
-            <ReaderModeTabs value={activeTab} onValueChange={handleTabChange} />
+            <View
+              style={
+                translationLanguage
+                  ? { transform: [{ translateX: -12 }] }
+                  : undefined
+              }
+            >
+              <ReaderModeTabs
+                value={activeTab}
+                onValueChange={handleTabChange}
+                showTranslated={Boolean(translationLanguage)}
+              />
+            </View>
           </View>
           {visiblePageCount > 0 && (
             <View className="absolute bottom-3 left-0 right-0 flex-row items-center px-5">
@@ -483,7 +658,7 @@ export default function ReaderScreen() {
                 className="mr-4 flex-1 font-lato-bold text-xs text-[#83877e]"
                 numberOfLines={1}
               >
-                {pdf.name}
+                {displayPdfName}
               </Text>
               <View
                 accessible
@@ -533,6 +708,59 @@ export default function ReaderScreen() {
         </Animated.View>
 
         <Animated.View
+          pointerEvents={activeTab === "translated" ? "auto" : "none"}
+          style={{
+            position: "absolute",
+            top: isLandscape ? 0 : headerHeight,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            zIndex: activeTab === "translated" ? 2 : 0,
+          }}
+        >
+          {translatedBlocks.length > 0 ? (
+            <ReaderView
+              key={`translated-${translationLanguage?.code ?? "unknown"}`}
+              isActive={activeTab === "translated"}
+              isLandscape={isLandscape}
+              blocks={translatedBlocks}
+              pageCount={readerPageCount}
+              destination={translatedDestination}
+              onPageChange={setReaderCurrentPage}
+              onPaginationChange={handleReaderPagination}
+              showSwitchHighlight={activeTab === "translated"}
+              translationLanguage={translationLanguage}
+              onTranslationLanguageChange={handleTranslationLanguageChange}
+              useTranslatedTextDirection
+            />
+          ) : translationError ? (
+            <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8">
+              <Text className="text-center font-lato-bold text-lg text-black">
+                Translation unavailable
+              </Text>
+              <Text className="mt-2 text-center text-sm text-black/50">
+                {translationError}
+              </Text>
+            </View>
+          ) : (
+            <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8">
+              <ActivityIndicator size="large" color="#8fb996" />
+              <Text className="mt-4 text-center font-lato-bold text-base text-black">
+                Preparing {translationLanguage?.label} translation…
+              </Text>
+              <Text className="mt-2 text-center text-sm text-black/50">
+                iOS may ask to download the required language models.
+              </Text>
+            </View>
+          )}
+          {translationLoading && translatedBlocks.length > 0 && (
+            <View className="absolute right-4 top-4 rounded-full bg-white/90 p-2 shadow-sm">
+              <ActivityIndicator size="small" color="#4f936b" />
+            </View>
+          )}
+        </Animated.View>
+
+        <Animated.View
           pointerEvents={
             activeTab === "reader" && readerContentReady ? "auto" : "none"
           }
@@ -548,6 +776,7 @@ export default function ReaderScreen() {
           {readerBlocks.length > 0 ? (
             <View style={{ flex: 1 }}>
               <ReaderView
+                isActive={activeTab === "reader"}
                 isLandscape={isLandscape}
                 blocks={readerBlocks}
                 pageCount={readerPageCount}
@@ -559,6 +788,8 @@ export default function ReaderScreen() {
                   hasVisitedOriginal && activeTab === "reader"
                 }
                 onReady={() => setReaderContentReady(true)}
+                translationLanguage={translationLanguage}
+                onTranslationLanguageChange={handleTranslationLanguageChange}
               />
             </View>
           ) : readerLoading ? (

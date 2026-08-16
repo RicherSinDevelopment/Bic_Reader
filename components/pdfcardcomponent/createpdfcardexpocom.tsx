@@ -32,6 +32,10 @@ function deriveFileName(path: string) {
   return withoutExt;
 }
 
+function stripPdfExtension(name: string) {
+  return name.replace(/\.pdf$/i, "");
+}
+
 function formatDateOpened(date: Date | string) {
   const d = typeof date === "string" ? new Date(date) : date;
   return d.toLocaleDateString(undefined, {
@@ -134,7 +138,9 @@ export default function PdfCoverCard({
     };
   }, [pdfPath]);
 
-  const displayName = fileName ?? deriveFileName(pdfPath);
+  const displayName = fileName
+    ? stripPdfExtension(fileName)
+    : deriveFileName(pdfPath);
   const clampedPercent = Math.max(0, Math.min(100, completionPercentage));
 
   const coverPreview = (

@@ -83,7 +83,15 @@ const backgroundColors = [
 const CIRCLE_SIZE = 40;
 const CIRCLE_RING_SIZE = 2;
 
-export default function BackgroundSettings() {
+type BackgroundSettingsProps = {
+  onSelectedTypeChange?: (
+    type: "presets" | "font" | "background",
+  ) => void;
+};
+
+export default function BackgroundSettings({
+  onSelectedTypeChange,
+}: BackgroundSettingsProps) {
 
   // Controls which tab is selected
   const [selectedType, setSelectedType] =
@@ -160,6 +168,7 @@ export default function BackgroundSettings() {
             value === "background"
           ) {
             setSelectedType(value);
+            onSelectedTypeChange?.(value);
           }
 
         }}
@@ -347,4 +356,3 @@ export default function BackgroundSettings() {
     </View>
   );
 }
-

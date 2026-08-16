@@ -23,6 +23,7 @@
     "@gorhom/bottom-sheet": "^5.2.14",
     "@legendapp/motion": "^2.4.0",
     "@supabase/supabase-js": "^2.109.0",
+    "@bsky.app/expo-translate-text": "^0.2.9",
     "babel-preset-expo": "~54.0.10",
     "expo": "~54.0.34",
     "expo-apple-authentication": "~8.0.8",

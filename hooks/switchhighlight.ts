@@ -6,6 +6,8 @@ export type PdfPageSize = { width: number; height: number };
 export type SwitchHighlightTarget = {
   blockId: string;
   word: string;
+  wordIndex: number;
+  sourceWordCount: number;
   page: number;
   sourceBounds: ExtractedPdfBlock["sourceBounds"];
   pageSize: PdfPageSize;
@@ -37,6 +39,8 @@ export function useSwitchHighlight(
     return {
       blockId: block.id,
       word: anchor?.word || block.text.trim().split(/\s+/, 1)[0] || "",
+      wordIndex: anchor?.wordIndex ?? 0,
+      sourceWordCount: block.text.trim().split(/\s+/).filter(Boolean).length,
       page: block.page,
       sourceBounds: exactWordBounds ? {
         left: exactWordBounds[0],

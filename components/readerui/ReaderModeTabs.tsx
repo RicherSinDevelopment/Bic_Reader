@@ -1,35 +1,63 @@
 import React, { useEffect, useState } from "react";
-import { Animated, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Animated,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
-export type ReaderMode = "reader" | "original";
+export type ReaderMode = "reader" | "translated" | "original";
 
 type ReaderModeTabsProps = {
   value: ReaderMode;
   onValueChange: (value: ReaderMode) => void;
+  showTranslated?: boolean;
 };
 
-const CONTROL_WIDTH = 156;
+const TWO_TAB_WIDTH = 156;
 const CONTROL_HEIGHT = 44;
 const CONTROL_PADDING = 3;
-const SEGMENT_WIDTH = (CONTROL_WIDTH - CONTROL_PADDING * 2) / 2;
 const SEGMENT_HEIGHT = CONTROL_HEIGHT - CONTROL_PADDING * 2;
+const SEGMENT_WIDTH = (TWO_TAB_WIDTH - CONTROL_PADDING * 2) / 2;
+const TRANSLATED_SEGMENT_WIDTH = 100;
+const THREE_TAB_WIDTH =
+  SEGMENT_WIDTH * 2 + TRANSLATED_SEGMENT_WIDTH + CONTROL_PADDING * 2;
 
-const READER_MODES = [
+const READER_MODES: { value: ReaderMode; label: string }[] = [
   { value: "reader", label: "Reader" },
+  { value: "translated", label: "Translated" },
   { value: "original", label: "Original" },
-] as const;
+];
 
 export default function ReaderModeTabs({
   value,
   onValueChange,
+  showTranslated = false,
 }: ReaderModeTabsProps) {
+  const modes = showTranslated
+    ? READER_MODES
+    : READER_MODES.filter((mode) => mode.value !== "translated");
+  const controlWidth = showTranslated ? THREE_TAB_WIDTH : TWO_TAB_WIDTH;
+  const modeWidths = modes.map((mode) =>
+    mode.value === "translated" ? TRANSLATED_SEGMENT_WIDTH : SEGMENT_WIDTH,
+  );
+  const selectedIndex = Math.max(
+    0,
+    modes.findIndex((mode) => mode.value === value),
+  );
+  const selectedOffset = modeWidths
+    .slice(0, selectedIndex)
+    .reduce((total, width) => total + width, 0);
+  const selectedWidth = modeWidths[selectedIndex] ?? SEGMENT_WIDTH;
   const [indicatorX] = useState(
-    () => new Animated.Value(value === "original" ? SEGMENT_WIDTH : 0),
+    () => new Animated.Value(selectedOffset),
   );
 
   useEffect(() => {
     const animation = Animated.spring(indicatorX, {
-      toValue: value === "original" ? SEGMENT_WIDTH : 0,
+      toValue: selectedOffset,
       damping: 25,
       stiffness: 300,
       mass: 0.75,
@@ -38,17 +66,20 @@ export default function ReaderModeTabs({
 
     animation.start();
     return () => animation.stop();
-  }, [indicatorX, value]);
+  }, [indicatorX, selectedOffset]);
 
   return (
-    <View style={styles.surface}>
+    <View style={[styles.surface, { width: controlWidth }]}>
       <Animated.View
         pointerEvents="none"
-        style={[styles.indicator, { transform: [{ translateX: indicatorX }] }]}
+        style={[
+          styles.indicator,
+          { width: selectedWidth, transform: [{ translateX: indicatorX }] },
+        ]}
       />
 
       <View style={styles.buttons}>
-        {READER_MODES.map((mode) => {
+        {modes.map((mode, index) => {
           const isSelected = value === mode.value;
 
           return (
@@ -62,10 +93,17 @@ export default function ReaderModeTabs({
               }}
               style={({ pressed }) => [
                 styles.button,
+                { width: modeWidths[index] },
                 pressed && styles.pressedButton,
               ]}
             >
-              <Text style={[styles.label, isSelected && styles.selectedLabel]}>
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.label,
+                  isSelected && styles.selectedLabel,
+                ]}
+              >
                 {mode.label}
               </Text>
             </Pressable>
@@ -78,7 +116,6 @@ export default function ReaderModeTabs({
 
 const styles = StyleSheet.create({
   surface: {
-    width: CONTROL_WIDTH,
     height: CONTROL_HEIGHT,
     borderRadius: 15,
     backgroundColor: "#eeece3",
@@ -88,7 +125,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: CONTROL_PADDING,
     left: CONTROL_PADDING,
-    width: SEGMENT_WIDTH,
     height: SEGMENT_HEIGHT,
     borderRadius: 12,
     backgroundColor: "#171914",
@@ -105,7 +141,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
   },
   button: {
-    width: SEGMENT_WIDTH,
     height: SEGMENT_HEIGHT,
     alignItems: "center",
     justifyContent: "center",

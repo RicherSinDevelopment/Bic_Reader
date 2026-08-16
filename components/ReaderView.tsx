@@ -7,7 +7,9 @@ import AI from "@/components/readernavbar/AI";
 import BackgroundSettings from "@/components/readernavbar/BackgroundSettings";
 import FontSettings from "@/components/readernavbar/FontSettings";
 import Settings from "@/components/readernavbar/Settings";
-import TTS from "@/components/readernavbar/TTS";
+import TTS, {
+  type TranslationLanguage,
+} from "@/components/readernavbar/TTS";
 import { usePageTransition } from "@/hooks/pagetransition";
 import {
   BottomSheet,
@@ -33,12 +35,18 @@ import { useReaderSettingsStore } from '@/stores/readerSettingsStore';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
+import {
+  appleSpeech,
+  clearAppleSpeechSleepTimer,
+  isAppleSpeechAvailable,
+} from "@/services/appleSpeechService";
 import { Lato_700Bold } from "@expo-google-fonts/lato";
 import { SourceSans3_400Regular } from "@expo-google-fonts/source-sans-3/400Regular";
 import { useAssets } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
 
 type ReaderViewProps = {
+  isActive?: boolean;
   isLandscape: boolean;
   blocks: ExtractedPdfBlock[];
   pageCount: number;
@@ -47,6 +55,9 @@ type ReaderViewProps = {
     blockId?: string;
     searchQuery?: string;
     searchMatchIndex?: number;
+    switchHighlightWordIndex?: number;
+    switchHighlightWordProgress?: number;
+    switchHighlightQuery?: string;
     nonce: number;
   } | null;
   onPageChange?: (page: number) => void;
@@ -54,6 +65,9 @@ type ReaderViewProps = {
   onSwitchAnchorChange?: (blockId: string, word: string, wordIndex: number) => void;
   showSwitchHighlight?: boolean;
   onReady?: () => void;
+  translationLanguage?: TranslationLanguage;
+  onTranslationLanguageChange?: (language?: TranslationLanguage) => void;
+  useTranslatedTextDirection?: boolean;
 };
 
 const readerMenuItems = [
@@ -69,6 +83,8 @@ const highlightColors = [
   "#86efac",
   "#fdba74",
 ];
+
+const rightToLeftLanguageCodes = new Set(["ar", "fa", "he", "ur"]);
 
 function escapeHtml(value: string) {
   return value
@@ -102,14 +118,44 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
     </section>`).join("\n");
 }
 
-const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange, onPaginationChange, onSwitchAnchorChange, showSwitchHighlight = false, onReady }: ReaderViewProps) => {
+const ReaderView = ({
+  isActive = true,
+  isLandscape,
+  blocks,
+  pageCount,
+  destination,
+  onPageChange,
+  onPaginationChange,
+  onSwitchAnchorChange,
+  showSwitchHighlight = false,
+  onReady,
+  translationLanguage,
+  onTranslationLanguageChange,
+  useTranslatedTextDirection = false,
+}: ReaderViewProps) => {
   const { height: windowHeight } = useWindowDimensions();
   const [fontAssets] = useAssets([Lato_700Bold, SourceSans3_400Regular]);
   const [latoBoldBase64, setLatoBoldBase64] = useState<string | null>(null);
   const [sourceSansBase64, setSourceSansBase64] = useState<string | null>(null);
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
+  const [backgroundSettingsTab, setBackgroundSettingsTab] = useState<
+    "presets" | "font" | "background"
+  >("presets");
   const [readerText, setReaderText] = useState("");
+  const [ttsStartOffset, setTtsStartOffset] = useState(0);
+  const speechStartOffsetRef = useRef(0);
+  const readerLanguageCode = useTranslatedTextDirection
+    ? translationLanguage?.code ?? "en"
+    : "en";
+  const readerDirection = useTranslatedTextDirection &&
+    rightToLeftLanguageCodes.has(readerLanguageCode)
+    ? "rtl"
+    : "ltr";
+  const ttsText = useMemo(
+    () => readerText.trim() || blocks.map((block) => block.text).join("\n\n"),
+    [blocks, readerText],
+  );
   const [initialBlocks] = useState(() => {
     const firstPage = blocks[0]?.page ?? 1;
     return blocks.filter((block) => block.page < firstPage + 5);
@@ -229,6 +275,31 @@ const ReaderView = ({ isLandscape, blocks, pageCount, destination, onPageChange,
       })
     );
   }, []);
+
+  useEffect(() => {
+    if (!isAppleSpeechAvailable || !isActive) return;
+
+    const subscriptions = [
+      appleSpeech.addListener("speechBoundary", (event) => {
+        highlightSpokenWord(
+          speechStartOffsetRef.current + event.charIndex,
+          event.charLength,
+        );
+      }),
+      appleSpeech.addListener("speechFinished", () => {
+        clearAppleSpeechSleepTimer();
+        clearSpokenWordHighlight();
+      }),
+      appleSpeech.addListener("speechStopped", () => {
+        clearAppleSpeechSleepTimer();
+        clearSpokenWordHighlight();
+      }),
+    ];
+
+    return () => {
+      subscriptions.forEach((subscription) => subscription.remove());
+    };
+  }, [clearSpokenWordHighlight, highlightSpokenWord, isActive]);
 
   const handleCustomMenuSelection = useCallback(
     (event: { nativeEvent: { key: string; selectedText?: string } }) => {
@@ -432,7 +503,7 @@ const textColor =
   const htmlContent = useMemo(() => `
     <!DOCTYPE html>
 
-    <html lang="en">
+    <html lang="${readerLanguageCode}" dir="${readerDirection}">
 
       <head>
 
@@ -510,6 +581,22 @@ const textColor =
              * Prevent accidental horizontal scrolling.
              */
             overflow-x: hidden;
+          }
+
+          html[dir="rtl"] body {
+            direction: rtl;
+            text-align: right;
+          }
+
+          html[dir="rtl"] [data-reader-block] {
+            direction: rtl;
+            text-align: right;
+            unicode-bidi: plaintext;
+          }
+
+          html[dir="rtl"] li {
+            margin-right: 1.2em;
+            margin-left: 0;
           }
 
           html.reader-paged,
@@ -752,6 +839,7 @@ const textColor =
           type: 'readerText',
           text: allText
         }));
+        window.__reportSwitchAnchor?.();
         return;
       }
 
@@ -790,6 +878,20 @@ const textColor =
         } else if (window.__goToElementPage) {
           window.__goToElementPage(destinationTarget);
         }
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            window.__reportSwitchAnchor?.();
+          });
+        });
+        setTimeout(function() {
+          window.__reportSwitchAnchor?.();
+          window.__highlightSwitchWordAtIndex?.(
+            resolvedTarget,
+            pending.switchHighlightWordIndex,
+            pending.switchHighlightWordProgress,
+            pending.switchHighlightQuery
+          );
+        }, 100);
       };
       if (message.type === 'goToSourcePage') {
         window.__pendingSourceDestination = message;
@@ -806,11 +908,16 @@ const textColor =
          const readerBlocks = Array.from(
            document.querySelectorAll('[data-reader-block]')
          );
-         const targetBlock = readerBlocks.find(function(block) {
+         let targetBlock = readerBlocks.find(function(block) {
            const start = Number(block.dataset.ttsStart);
            const end = Number(block.dataset.ttsEnd);
            return message.charIndex >= start && message.charIndex < end;
          });
+         if (!targetBlock) {
+           targetBlock = readerBlocks.find(function(block) {
+             return Number(block.dataset.ttsStart) >= message.charIndex;
+           }) || readerBlocks[readerBlocks.length - 1];
+         }
 
          if (targetBlock && window.__activeTtsBlock !== targetBlock) {
            if (window.__activeTtsBlock) {
@@ -857,12 +964,17 @@ const textColor =
          const words = targetBlock
            ? Array.from(targetBlock.querySelectorAll('[data-tts-start]'))
            : [];
-        const activeWord = words.find(function(word) {
+        let activeWord = words.find(function(word) {
           const start = Number(word.dataset.ttsStart);
           const end = Number(word.dataset.ttsEnd);
 
           return message.charIndex >= start && message.charIndex < end;
         });
+        if (!activeWord && words.length) {
+          activeWord = words.find(function(word) {
+            return Number(word.dataset.ttsStart) >= message.charIndex;
+          }) || words[words.length - 1];
+        }
 
         document
           .querySelector('.tts-word-active')
@@ -891,12 +1003,17 @@ const textColor =
               bounds.top < window.innerHeight * 0.12;
 
             if (isNearBottom || isAboveView) {
-              window.scrollTo({
-                top:
-                  window.scrollY +
-                  bounds.top -
-                  window.innerHeight * 0.3,
-                behavior: 'smooth'
+              const nextScrollTop =
+                window.scrollY + bounds.top - window.innerHeight * 0.3;
+              if (window.__ttsScrollFrame) {
+                cancelAnimationFrame(window.__ttsScrollFrame);
+              }
+              window.__ttsScrollFrame = requestAnimationFrame(function() {
+                window.scrollTo({
+                  top: nextScrollTop,
+                  behavior: 'auto'
+                });
+                window.__ttsScrollFrame = null;
               });
             }
           }
@@ -905,6 +1022,10 @@ const textColor =
       }
 
       if (message.type === 'ttsClearHighlight') {
+        if (window.__ttsScrollFrame) {
+          cancelAnimationFrame(window.__ttsScrollFrame);
+          window.__ttsScrollFrame = null;
+        }
         document
           .querySelector('.tts-word-active')
           ?.classList.remove('tts-word-active');
@@ -1048,7 +1169,7 @@ const textColor =
       </body>
 
     </html>
-  `, [latoBoldBase64, readerMarkup, sourceSansBase64]);
+  `, [latoBoldBase64, readerDirection, readerLanguageCode, readerMarkup, sourceSansBase64]);
 
   const webViewSource = useMemo(() => ({ html: htmlContent }), [htmlContent]);
 
@@ -1199,6 +1320,9 @@ const textColor =
       }
 
       if (data.type === "switchAnchor" && typeof data.blockId === "string") {
+        if (typeof data.ttsOffset === "number") {
+          setTtsStartOffset(Math.max(0, data.ttsOffset));
+        }
         onSwitchAnchorChange?.(
           data.blockId,
           typeof data.word === "string" ? data.word : "",
@@ -1266,14 +1390,25 @@ const textColor =
         return <FontSettings />;
 
       case "background":
-        return <BackgroundSettings />;
+        return (
+          <BackgroundSettings
+            onSelectedTypeChange={setBackgroundSettingsTab}
+          />
+        );
 
       case "tts":
         return (
           <TTS
-            text={readerText}
-            onHighlightWord={highlightSpokenWord}
+            text={ttsText}
+            startOffset={ttsStartOffset}
+            onSpeechStartOffsetChange={(offset) => {
+              speechStartOffsetRef.current = offset;
+            }}
             onClearHighlight={clearSpokenWordHighlight}
+            translationLanguage={translationLanguage}
+            onTranslationLanguageChange={(language) =>
+              onTranslationLanguageChange?.(language)
+            }
           />
         );
 
@@ -1295,6 +1430,10 @@ const textColor =
     }
 
   };
+
+  const usesFixedSettingsSheet =
+    activeItem === "tts" ||
+    (activeItem === "background" && backgroundSettingsTab !== "presets");
 
   if (!latoBoldBase64 || !sourceSansBase64) {
     return <View style={{ flex: 1, backgroundColor }} />;
@@ -1531,18 +1670,80 @@ const textColor =
                 document.body.appendChild(marker);
               }
 
+              window.__highlightSwitchWordAtIndex = function(
+                block,
+                wordIndex,
+                wordProgress,
+                translatedQuery
+              ) {
+                if (!block) return;
+                const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+                const words = [];
+                let textNode = walker.nextNode();
+                while (textNode) {
+                  const text = textNode.textContent || '';
+                  Array.from(text.matchAll(/\S+/g)).forEach(function(match) {
+                    words.push({ node: textNode, match: match });
+                  });
+                  textNode = walker.nextNode();
+                }
+                if (!words.length) return;
+
+                function normalizeForMatch(value) {
+                  return String(value || '')
+                    .toLocaleLowerCase()
+                    .replace(/[\u064B-\u065F\u0670]/g, '')
+                    .replace(/[^\p{L}\p{N}]/gu, '');
+                }
+
+                const normalizedQuery = normalizeForMatch(translatedQuery);
+                let selected = normalizedQuery
+                  ? words.find(function(item) {
+                      const normalizedWord = normalizeForMatch(item.match[0]);
+                      return normalizedWord.includes(normalizedQuery) ||
+                        normalizedQuery.includes(normalizedWord);
+                    })
+                  : null;
+
+                if (!selected) {
+                  const progress = Number(wordProgress);
+                  const fallbackIndex = Number.isFinite(progress)
+                    ? Math.round(Math.max(0, Math.min(1, progress)) * (words.length - 1))
+                    : Math.max(
+                        0,
+                        Math.min(words.length - 1, Number(wordIndex) || 0)
+                      );
+                  selected = words[fallbackIndex];
+                }
+                if (!selected) return;
+
+                const range = document.createRange();
+                range.setStart(selected.node, selected.match.index);
+                range.setEnd(
+                  selected.node,
+                  selected.match.index + selected.match[0].length
+                );
+                drawReaderSwitchHighlight(range);
+              };
+
               function reportSwitchAnchor() {
                 let block = null;
                 for (let y = 12; y < window.innerHeight && !block; y += 36) {
-                  const hit = document.elementFromPoint(24, y) ||
-                    document.elementFromPoint(window.innerWidth / 2, y);
-                  block = hit?.closest?.('[data-reader-block]') || null;
+                  const edgeX = document.documentElement.dir === 'rtl'
+                    ? window.innerWidth - 24
+                    : 24;
+                  const edgeHit = document.elementFromPoint(edgeX, y);
+                  const centerHit = document.elementFromPoint(window.innerWidth / 2, y);
+                  block = edgeHit?.closest?.('[data-reader-block]') ||
+                    centerHit?.closest?.('[data-reader-block]') || null;
                 }
                 if (!block) return;
                 const blockRect = block.getBoundingClientRect();
                 const probeX = Math.max(8, Math.min(
                   window.innerWidth - 8,
-                  Math.max(0, blockRect.left) + 8
+                  document.documentElement.dir === 'rtl'
+                    ? blockRect.right - 8
+                    : Math.max(0, blockRect.left) + 8
                 ));
                 const probeY = Math.max(8, Math.min(
                   window.innerHeight - 8,
@@ -1563,6 +1764,7 @@ const textColor =
                 }
                 let highlightedWord = '';
                 let highlightedWordIndex = 0;
+                let highlightedCharacterOffset = 0;
                 let switchHighlightRange = null;
                 if (textNode) {
                   const text = textNode.textContent || '';
@@ -1574,6 +1776,7 @@ const textColor =
                     const prefix = document.createRange();
                     prefix.selectNodeContents(block);
                     prefix.setEnd(textNode, match.index);
+                    highlightedCharacterOffset = prefix.toString().length;
                     highlightedWordIndex = (prefix.toString().match(/\\S+/g) || []).length;
                     highlightedWord = match[0];
                     switchHighlightRange = document.createRange();
@@ -1593,7 +1796,10 @@ const textColor =
                     type: 'switchAnchor',
                     blockId: blockId,
                     word: highlightedWord,
-                    wordIndex: highlightedWordIndex
+                    wordIndex: highlightedWordIndex,
+                    ttsOffset:
+                      Number(block.dataset.ttsStart || 0) +
+                      highlightedCharacterOffset
                   }));
                 }
               }
@@ -2331,10 +2537,11 @@ const textColor =
         {/* ========================= */}
 
         <BottomSheetPortal
-          snapPoints={[
-            "40%",
-            "82%",
-          ]}
+          snapPoints={
+            usesFixedSettingsSheet
+              ? ["40%"]
+              : ["40%", "82%"]
+          }
           backdropComponent={
             BottomSheetBackdrop
           }

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Bic_Reader",
+    "name": "Bic Reader",
     "slug": "Bic_Reader",
     "version": "1.0.0",
     "orientation": "default",
@@ -48,7 +48,15 @@
       "expo-apple-authentication",
       "expo-sqlite",
       "expo-asset",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.4"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

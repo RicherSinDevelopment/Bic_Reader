@@ -1,8 +1,8 @@
 diff --git a/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js
-index 43fea3b..4271514 100644
+index 43fea3b..8c52bcd 100644
 --- a/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js
 +++ b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js
-@@ -35,14 +35,23 @@
+@@ -35,14 +35,25 @@
   |}>;
  
   interface NativeCommands {
@@ -18,6 +18,8 @@ index 43fea3b..4271514 100644
 +    top: Float,
 +    right: Float,
 +    bottom: Float,
++    pageWidth: Float,
++    pageHeight: Float,
 +  ) => void;
 +  +clearNativeHighlight: (viewRef: React.ElementRef<ComponentType>) => void;
  }
@@ -29,7 +31,7 @@ index 43fea3b..4271514 100644
  
   export default codegenNativeComponent<NativeProps>('RNPDFPdfView');
 diff --git a/node_modules/react-native-pdf/index.d.ts b/node_modules/react-native-pdf/index.d.ts
-index cfcea72..c5a9bbf 100644
+index cfcea72..c84509f 100644
 --- a/node_modules/react-native-pdf/index.d.ts
 +++ b/node_modules/react-native-pdf/index.d.ts
 @@ -66,7 +66,9 @@ export interface PdfProps {
@@ -38,23 +40,23 @@ index cfcea72..c5a9bbf 100644
  export interface PdfRef {
 -    setPage(pageNumber: number): void
 +    setPage(pageNumber: number): void;
-+    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number): void;
++    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number, pageWidth: number, pageHeight: number): void;
 +    clearHighlight(): void;
  }
  
  declare const Pdf: React.ForwardRefExoticComponent<PdfProps & React.RefAttributes<PdfRef>>
 diff --git a/node_modules/react-native-pdf/index.js b/node_modules/react-native-pdf/index.js
-index f807178..5502e30 100644
+index f807178..4284c01 100644
 --- a/node_modules/react-native-pdf/index.js
 +++ b/node_modules/react-native-pdf/index.js
 @@ -368,6 +368,18 @@ export default class Pdf extends Component {
          
      }
  
-+    setHighlight(pageNumber, left, top, right, bottom) {
++    setHighlight(pageNumber, left, top, right, bottom, pageWidth, pageHeight) {
 +        if (!this._root) return;
 +        PdfViewCommands.setNativeHighlight(
-+            this._root, pageNumber, left, top, right, bottom,
++            this._root, pageNumber, left, top, right, bottom, pageWidth, pageHeight,
 +        );
 +    }
 +
@@ -67,44 +69,50 @@ index f807178..5502e30 100644
          // Handle direct events for text selection/highlight
          if (event.nativeEvent.type) {
 diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
-index 723ca7b..e12236b 100644
+index 723ca7b..9ec3941 100644
 --- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
 +++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
-@@ -60,6 +60,13 @@ UIView
+@@ -60,6 +60,15 @@ UIView
  
  @property(nonatomic, copy) RCTBubblingEventBlock onTextSelectionChange;
  
 +- (void)setNativeHighlight:(NSInteger)page
-+                      left:(CGFloat)left
-+                       top:(CGFloat)top
-+                     right:(CGFloat)right
-+                    bottom:(CGFloat)bottom;
++                      left:(float)left
++                       top:(float)top
++                     right:(float)right
++                    bottom:(float)bottom
++                 pageWidth:(float)pageWidth
++                pageHeight:(float)pageHeight;
 +- (void)clearNativeHighlight;
 +
  @end
  
  #endif /* RNPDFPdfView_h */
 diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
-index de46c98..aad0b2a 100644
+index de46c98..37cdf89 100644
 --- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
 +++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
-@@ -75,6 +75,7 @@ const float MIN_SCALE = 1.0f;
+@@ -75,6 +75,9 @@ @implementation RNPDFPdfView
      UIPinchGestureRecognizer *_pinchRecognizer;
      UILongPressGestureRecognizer *_longPressRecognizer;
      UITapGestureRecognizer *_doubleTapEmptyRecognizer;
 +    PDFSelection *_switchHighlightSelection;
++    PDFAnnotation *_switchHighlightAnnotation;
++    PDFPage *_switchHighlightPage;
  }
  
  #ifdef RCT_NEW_ARCH_ENABLED
-@@ -234,6 +235,62 @@ using namespace facebook::react;
+@@ -234,6 +237,111 @@ - (void)setNativePage:(NSInteger)page
      [self didSetProps:[NSArray arrayWithObject:@"page"]];
  }
  
 +- (void)setNativeHighlight:(NSInteger)page
-+                      left:(CGFloat)left
-+                       top:(CGFloat)top
-+                     right:(CGFloat)right
-+                    bottom:(CGFloat)bottom
++                      left:(float)left
++                       top:(float)top
++                     right:(float)right
++                    bottom:(float)bottom
++                 pageWidth:(float)pageWidth
++                pageHeight:(float)pageHeight
 +{
 +    [self clearNativeHighlight];
 +    if (!_pdfDocument || page < 1 || page > (NSInteger)_pdfDocument.pageCount) {
@@ -117,41 +125,88 @@ index de46c98..aad0b2a 100644
 +
 +    PDFPage *pdfPage = [_pdfDocument pageAtIndex:page - 1];
 +    CGRect crop = [pdfPage boundsForBox:kPDFDisplayBoxCropBox];
++    if (pageWidth <= 0.0 || pageHeight <= 0.0 || CGRectIsEmpty(crop)) {
++        RLog(@"switch highlight rejected: invalid source/crop size source=%@ crop=%@",
++             NSStringFromCGSize(CGSizeMake(pageWidth, pageHeight)),
++             NSStringFromCGRect(crop));
++        return;
++    }
++
++    CGFloat scaleX = CGRectGetWidth(crop) / pageWidth;
++    CGFloat scaleY = CGRectGetHeight(crop) / pageHeight;
++    CGFloat clampedLeft = MIN(MAX(0.0, left), pageWidth);
++    CGFloat clampedRight = MIN(MAX(clampedLeft, right), pageWidth);
++    CGFloat clampedTop = MIN(MAX(0.0, top), pageHeight);
++    CGFloat clampedBottom = MIN(MAX(clampedTop, bottom), pageHeight);
 +    CGRect wordRect = CGRectMake(
-+        CGRectGetMinX(crop) + left,
-+        CGRectGetMinY(crop) + CGRectGetHeight(crop) - bottom,
-+        MAX(1.0, right - left),
-+        MAX(1.0, bottom - top)
++        CGRectGetMinX(crop) + clampedLeft * scaleX,
++        CGRectGetMaxY(crop) - clampedBottom * scaleY,
++        MAX(1.0, (clampedRight - clampedLeft) * scaleX),
++        MAX(1.0, (clampedBottom - clampedTop) * scaleY)
 +    );
-+    PDFSelection *selection = [pdfPage selectionForRect:CGRectInset(wordRect, -2.0, -2.0)];
++    wordRect = CGRectIntersection(wordRect, crop);
++    if (CGRectIsNull(wordRect) || CGRectIsEmpty(wordRect)) {
++        RLog(@"switch highlight rejected: mapped rect outside crop source=%@ crop=%@",
++             NSStringFromCGRect(CGRectMake(left, top, right - left, bottom - top)),
++             NSStringFromCGRect(crop));
++        return;
++    }
++
++    CGFloat selectionPadding = MAX(2.0, CGRectGetHeight(wordRect) * 0.25);
++    PDFSelection *selection = [pdfPage selectionForRect:CGRectInset(
++        wordRect, -selectionPadding, -selectionPadding
++    )];
 +    if (selection.string.length == 0) {
 +        selection = [pdfPage selectionForWordAtPoint:CGPointMake(
 +            CGRectGetMidX(wordRect), CGRectGetMidY(wordRect)
 +        )];
 +    }
-+    if (selection.string.length == 0) {
-+        RLog(@"switch highlight rejected: no PDFKit text at page=%ld rect=%@",
-+             (long)page, NSStringFromCGRect(wordRect));
-+        return;
++
++    CGRect highlightRect = wordRect;
++    if (selection.string.length > 0) {
++        CGRect selectedBounds = [selection boundsForPage:pdfPage];
++        if (!CGRectIsNull(selectedBounds) && !CGRectIsEmpty(selectedBounds)) {
++            CGRect clippedSelection = CGRectIntersection(selectedBounds, crop);
++            if (!CGRectIsNull(clippedSelection) && !CGRectIsEmpty(clippedSelection)) {
++                highlightRect = clippedSelection;
++            }
++        }
++        selection.color = [[UIColor systemYellowColor] colorWithAlphaComponent:0.50];
++        _switchHighlightSelection = selection;
 +    }
 +
-+    selection.color = [[UIColor systemYellowColor] colorWithAlphaComponent:0.58];
-+    _switchHighlightSelection = selection;
-+    _pdfView.highlightedSelections = @[selection];
-+    CGRect selectionRect = [selection boundsForPage:pdfPage];
-+    [_pdfView goToRect:CGRectInset(selectionRect, -8.0, -24.0) onPage:pdfPage];
++    PDFAnnotation *annotation = [[PDFAnnotation alloc]
++        initWithBounds:CGRectInset(highlightRect, -1.5, -1.0)
++        forType:PDFAnnotationSubtypeHighlight
++        withProperties:nil];
++    annotation.color = [[UIColor systemYellowColor] colorWithAlphaComponent:0.55];
++    annotation.shouldDisplay = YES;
++    annotation.shouldPrint = NO;
++    [pdfPage addAnnotation:annotation];
++    _switchHighlightAnnotation = annotation;
++    _switchHighlightPage = pdfPage;
++
++    [_pdfView goToRect:CGRectInset(highlightRect, -8.0, -24.0) onPage:pdfPage];
 +    [_pdfView setNeedsDisplay];
-+    RLog(@"switch highlight applied: page=%ld text=%@ rect=%@",
++    RLog(@"switch highlight applied: page=%ld text=%@ sourceSize=%@ rect=%@",
 +         (long)page,
-+         selection.string,
-+         NSStringFromCGRect(selectionRect));
++         selection.string ?: @"<no PDFKit text; rectangle fallback>",
++         NSStringFromCGSize(CGSizeMake(pageWidth, pageHeight)),
++         NSStringFromCGRect(highlightRect));
 +}
 +
 +- (void)clearNativeHighlight
 +{
++    BOOL hadHighlight = _switchHighlightSelection || _switchHighlightAnnotation;
++    if (_switchHighlightAnnotation && _switchHighlightPage) {
++        [_switchHighlightPage removeAnnotation:_switchHighlightAnnotation];
++    }
++    _switchHighlightAnnotation = nil;
++    _switchHighlightPage = nil;
 +    if (_switchHighlightSelection) {
-+        _pdfView.highlightedSelections = nil;
 +        _switchHighlightSelection = nil;
++    }
++    if (hadHighlight) {
 +        [_pdfView setNeedsDisplay];
 +    }
 +}

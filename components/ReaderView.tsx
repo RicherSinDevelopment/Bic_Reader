@@ -652,7 +652,15 @@ const textColor =
             opacity: 0.78;
             margin-bottom: 1em;
           }
-          .source-page { position: relative; }
+          .source-page {
+            position: relative;
+            content-visibility: auto;
+            contain-intrinsic-block-size: auto 900px;
+          }
+          body.reader-paged .source-page {
+            content-visibility: visible;
+            contain-intrinsic-block-size: none;
+          }
           .page-divider {
             display: flex;
             align-items: center;
@@ -1081,7 +1089,9 @@ const textColor =
 
         requestAnimationFrame(function() {
           requestAnimationFrame(function() {
-            window.__refreshReaderPages?.();
+            if (window.__readerTransition !== 'scroll') {
+              window.__refreshReaderPages?.();
+            }
             if (anchorElement) {
               if (window.__readerTransition === 'scroll') {
                 const nextTop = anchorElement.getBoundingClientRect().top;
@@ -1434,6 +1444,13 @@ const textColor =
   const usesFixedSettingsSheet =
     activeItem === "tts" ||
     (activeItem === "background" && backgroundSettingsTab !== "presets");
+
+  const bottomSheetSnapPoints =
+    activeItem === "font"
+      ? ["40%", "82%"]
+      : usesFixedSettingsSheet
+        ? ["40%"]
+        : ["40%", "82%"];
 
   if (!latoBoldBase64 || !sourceSansBase64) {
     return <View style={{ flex: 1, backgroundColor }} />;
@@ -2537,11 +2554,7 @@ const textColor =
         {/* ========================= */}
 
         <BottomSheetPortal
-          snapPoints={
-            usesFixedSettingsSheet
-              ? ["40%"]
-              : ["40%", "82%"]
-          }
+          snapPoints={bottomSheetSnapPoints}
           backdropComponent={
             BottomSheetBackdrop
           }

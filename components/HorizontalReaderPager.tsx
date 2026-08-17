@@ -1,5 +1,5 @@
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Text, useWindowDimensions, View } from "react-native";
 import PagerView from "react-native-pager-view";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -107,10 +107,9 @@ export default function HorizontalReaderPager({
 }: Props) {
   const pagerRef = useRef<PagerView>(null);
   const currentPageRef = useRef(0);
-  const warmingPagesRef = useRef(false);
-  const warmingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigatedDestinationNonceRef = useRef<number | null>(null);
   const [containerHeight, setContainerHeight] = useState(0);
+  const [visiblePage, setVisiblePage] = useState(0);
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<number | null>(null);
   const touchStart = useRef({ x: 0, y: 0, time: 0 });
   const { width, height: windowHeight } = useWindowDimensions();
@@ -134,34 +133,6 @@ export default function HorizontalReaderPager({
     ),
     [baseLineHeight, blocks, charactersPerLine, pageContentHeight]
   );
-  const [renderedPageCount, setRenderedPageCount] = useState(() =>
-    Math.min(16, pages.length)
-  );
-  const renderedPages = pages.slice(0, renderedPageCount);
-
-  const warmNextPages = useCallback(() => {
-    if (warmingPagesRef.current || renderedPageCount >= pages.length) return;
-    warmingPagesRef.current = true;
-    let added = 0;
-
-    const appendSmallChunk = () => {
-      setRenderedPageCount((current) => Math.min(pages.length, current + 2));
-      added += 2;
-      if (added < 16) {
-        warmingTimerRef.current = setTimeout(appendSmallChunk, 48);
-      } else {
-        warmingPagesRef.current = false;
-        warmingTimerRef.current = null;
-      }
-    };
-
-    warmingTimerRef.current = setTimeout(appendSmallChunk, 0);
-  }, [pages.length, renderedPageCount]);
-
-  useEffect(() => () => {
-    if (warmingTimerRef.current) clearTimeout(warmingTimerRef.current);
-  }, []);
-
   const destinationPage = useMemo(() => {
     if (!destination) return 0;
     const exactIndex = pages.findIndex((page) => page.some((segment) =>
@@ -179,22 +150,14 @@ export default function HorizontalReaderPager({
   useEffect(() => {
     if (!destination || !pages.length) return;
     currentPageRef.current = destinationPage;
-    const requiredPageCount = Math.min(
-      pages.length,
-      Math.max(16, destinationPage + 6)
-    );
-    const timer = setTimeout(() => {
-      setRenderedPageCount((current) => Math.max(current, requiredPageCount));
-    }, 0);
+    setVisiblePage(destinationPage);
     const sourcePage = pages[destinationPage]?.[0]?.sourcePage ?? destination.page;
     onPageChange?.(destinationPage + 1, pages.length, sourcePage);
-    return () => clearTimeout(timer);
   }, [destination, destinationPage, onPageChange, pages]);
 
   useEffect(() => {
     if (
       !destination ||
-      renderedPageCount <= destinationPage ||
       navigatedDestinationNonceRef.current === destination.nonce
     ) return;
     const timer = setTimeout(() => {
@@ -202,26 +165,20 @@ export default function HorizontalReaderPager({
       navigatedDestinationNonceRef.current = destination.nonce;
     }, 0);
     return () => clearTimeout(timer);
-  }, [destination, destinationPage, renderedPageCount]);
+  }, [destination, destinationPage]);
 
   useEffect(() => {
     if (pages.length) {
-      if (renderedPageCount === 0) {
-        const timer = setTimeout(
-          () => setRenderedPageCount(Math.min(16, pages.length)),
-          0
-        );
-        return () => clearTimeout(timer);
-      }
       const current = Math.min(currentPageRef.current, pages.length - 1);
       currentPageRef.current = current;
+      setVisiblePage(current);
       onPageChange?.(
         current + 1,
         pages.length,
         pages[current]?.[0]?.sourcePage ?? 1
       );
     }
-  }, [onPageChange, pages, renderedPageCount]);
+  }, [onPageChange, pages]);
 
   const renderSegment = (segment: Segment, index: number) => {
     const isSearchTarget = destination?.nonce !== dismissedSearchNonce &&
@@ -303,20 +260,15 @@ export default function HorizontalReaderPager({
         onPageSelected={(event) => {
           const position = event.nativeEvent.position;
           currentPageRef.current = position;
+          setVisiblePage(position);
           if (destination?.searchQuery && position !== destinationPage) {
             setDismissedSearchNonce(destination.nonce);
           }
           const sourcePage = pages[position]?.[0]?.sourcePage ?? 1;
           onPageChange?.(position + 1, pages.length, sourcePage);
-          if (
-            position >= renderedPageCount - 12 &&
-            renderedPageCount < pages.length
-          ) {
-            warmNextPages();
-          }
         }}
       >
-        {renderedPages.map((page, pageIndex) => (
+        {pages.map((page, pageIndex) => (
           <View
             key={`reader-page-${pageIndex}`}
             collapsable={false}
@@ -328,7 +280,9 @@ export default function HorizontalReaderPager({
               paddingBottom: 12 + insets.bottom,
             }}
           >
-            {page.map(renderSegment)}
+            {Math.abs(pageIndex - visiblePage) <= 2
+              ? page.map(renderSegment)
+              : null}
           </View>
         ))}
       </PagerView>

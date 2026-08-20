@@ -139,6 +139,7 @@ const ReaderView = ({
   const [sourceSansBase64, setSourceSansBase64] = useState<string | null>(null);
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
+  const [aiExpanded, setAiExpanded] = useState(false);
   const [backgroundSettingsTab, setBackgroundSettingsTab] = useState<
     "presets" | "font" | "background"
   >("presets");
@@ -1372,6 +1373,10 @@ const textColor =
      */
     setActiveItem(item);
 
+    if (item === "ai") {
+      setAiExpanded(false);
+    }
+
     if (item === "tts") {
       webViewRef.current?.postMessage(JSON.stringify({ type: "requestReaderText" }));
     }
@@ -1429,6 +1434,15 @@ const textColor =
             currentPage={currentSourcePage}
             pageCount={pageCount}
             blocks={blocks}
+            isExpanded={aiExpanded}
+            onComposerActive={(reason) => {
+              setAiExpanded(true);
+              if (reason === "suggestion") {
+                requestAnimationFrame(() => {
+                  bottomSheetRef.current?.snapToIndex(1);
+                });
+              }
+            }}
           />
         );
 
@@ -1446,7 +1460,9 @@ const textColor =
     (activeItem === "background" && backgroundSettingsTab !== "presets");
 
   const bottomSheetSnapPoints =
-    activeItem === "font"
+    activeItem === "ai"
+      ? ["40%", "90%"]
+      : activeItem === "font"
       ? ["40%", "82%"]
       : usesFixedSettingsSheet
         ? ["40%"]
@@ -2555,6 +2571,11 @@ const textColor =
 
         <BottomSheetPortal
           snapPoints={bottomSheetSnapPoints}
+          keyboardBehavior={activeItem === "ai" ? "extend" : undefined}
+          keyboardBlurBehavior={activeItem === "ai" ? "restore" : undefined}
+          android_keyboardInputMode={activeItem === "ai" ? "adjustResize" : undefined}
+          enableContentPanningGesture={activeItem !== "ai"}
+          enableHandlePanningGesture={activeItem !== "ai"}
           backdropComponent={
             BottomSheetBackdrop
           }
@@ -2562,7 +2583,10 @@ const textColor =
 
           <BottomSheetDragIndicator />
 
-          <BottomSheetContent>
+          <BottomSheetContent
+            className={activeItem === "ai" ? "flex-1 px-0 gap-0" : undefined}
+            style={activeItem === "ai" ? styles.aiSheetContent : undefined}
+          >
 
             {renderBottomSheetContent()}
 
@@ -2579,6 +2603,10 @@ const textColor =
 export default ReaderView;
 
 const styles = StyleSheet.create({
+  aiSheetContent: {
+    flex: 1,
+    paddingHorizontal: 0,
+  },
   lineGuideClose: {
     position: "absolute",
     bottom: 24,

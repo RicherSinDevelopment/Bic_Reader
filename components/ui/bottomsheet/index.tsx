@@ -275,6 +275,8 @@ export const BottomSheetPortal = ({
     memoizedSnapPoints && memoizedSnapPoints.length > 0
       ? Math.min(currentIndex, memoizedSnapPoints.length - 1)
       : currentIndex;
+  const requestedIndexRef = useRef(validIndex);
+  requestedIndexRef.current = validIndex;
 
   useEffect(() => {
     if (!isVisible || validIndex < 0) return;
@@ -282,11 +284,11 @@ export const BottomSheetPortal = ({
     // This effect runs after the portal and native sheet ref have committed,
     // so every press gets a reliable snap even on the first open.
     const animationFrame = requestAnimationFrame(() => {
-      bottomSheetRef.current?.snapToIndex(validIndex);
+      bottomSheetRef.current?.snapToIndex(requestedIndexRef.current);
     });
 
     return () => cancelAnimationFrame(animationFrame);
-  }, [bottomSheetRef, isVisible, openRequestId, validIndex]);
+  }, [bottomSheetRef, isVisible, openRequestId]);
 
   if (!isVisible) return null;
 

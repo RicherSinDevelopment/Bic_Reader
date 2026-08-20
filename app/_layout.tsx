@@ -1,6 +1,7 @@
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { migrateDatabase } from "@/database/migrations";
 import { AuthProvider, useAuth } from '@/providers/AuthProvider';
+import { RevenueCatProvider } from '@/providers/RevenueCatProvider';
 import { Lato_400Regular, Lato_700Bold, useFonts } from "@expo-google-fonts/lato";
 import { SourceSans3_400Regular } from "@expo-google-fonts/source-sans-3/400Regular";
 import { Redirect, Stack, useSegments } from "expo-router";
@@ -37,15 +38,17 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <GluestackUIProvider>
           <AuthProvider>
-            <Suspense fallback={<StartupLoadingScreen />}>
-              <SQLiteProvider
-                databaseName="bic_reader.db"
-                onInit={migrateDatabase}
-                useSuspense
-              >
-                <RootNavigator />
-              </SQLiteProvider>
-            </Suspense>
+            <RevenueCatProvider>
+              <Suspense fallback={<StartupLoadingScreen />}>
+                <SQLiteProvider
+                  databaseName="bic_reader.db"
+                  onInit={migrateDatabase}
+                  useSuspense
+                >
+                  <RootNavigator />
+                </SQLiteProvider>
+              </Suspense>
+            </RevenueCatProvider>
           </AuthProvider>
         </GluestackUIProvider>
       </SafeAreaProvider>

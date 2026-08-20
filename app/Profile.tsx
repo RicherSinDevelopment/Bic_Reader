@@ -1,4 +1,5 @@
 import { useAuth } from '@/providers/AuthProvider';
+import { useRevenueCat } from '@/providers/RevenueCatProvider';
 import { supabase } from '@/lib/supabase';
 import { usePdfLibrary } from '@/hooks/usePdfLibrary';
 import { useRouter } from 'expo-router';
@@ -10,6 +11,8 @@ import {
   Library,
   LogOut,
   Mail,
+  RefreshCw,
+  Sparkles,
   UserRound,
 } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
@@ -28,6 +31,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function Profile() {
   const { session, signOut } = useAuth();
+  const {
+    error: purchaseError,
+    isLoading: isSubscriptionLoading,
+    isPremium,
+    restorePurchases,
+    showPaywall,
+  } = useRevenueCat();
   const { pdfs, isLoading: isLibraryLoading } = usePdfLibrary();
   const router = useRouter();
   const [fullName, setFullName] = useState('');
@@ -202,6 +212,58 @@ export default function Profile() {
           </View>
 
           <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Membership</Text>
+            <View style={styles.membershipCard}>
+              <View style={styles.membershipHeading}>
+                <View style={styles.membershipIcon}>
+                  <Sparkles color="#4F7D1A" size={22} />
+                </View>
+                <View style={styles.membershipCopy}>
+                  <Text style={styles.membershipTitle}>
+                    {isSubscriptionLoading
+                      ? 'Checking membership…'
+                      : isPremium
+                        ? 'Premium'
+                        : 'Free plan'}
+                  </Text>
+                  <Text style={styles.membershipCaption}>
+                    {isPremium
+                      ? 'Your premium features are unlocked.'
+                      : 'Upgrade to unlock premium features.'}
+                  </Text>
+                </View>
+              </View>
+
+              {!isPremium ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isSubscriptionLoading}
+                  onPress={() => void showPaywall()}
+                  style={({ pressed }) => [
+                    styles.upgradeButton,
+                    isSubscriptionLoading && styles.saveButtonDisabled,
+                    pressed && !isSubscriptionLoading && styles.saveButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.saveButtonText}>Upgrade to Premium</Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable
+                accessibilityRole="button"
+                disabled={isSubscriptionLoading}
+                onPress={() => void restorePurchases()}
+                style={styles.restoreButton}
+              >
+                <RefreshCw color="#4F7D1A" size={17} />
+                <Text style={styles.restoreButtonText}>Restore purchases</Text>
+              </Pressable>
+
+              {purchaseError ? <Text style={styles.errorText}>{purchaseError}</Text> : null}
+            </View>
+          </View>
+
+          <View style={styles.section}>
             <View style={styles.sectionHeadingRow}>
               <View>
                 <Text style={styles.sectionTitle}>Reading activity</Text>
@@ -351,6 +413,43 @@ const styles = StyleSheet.create({
   saveButtonPressed: { backgroundColor: '#3B6D11' },
   saveButtonText: { color: '#FFFFFF', fontFamily: 'Lato_700Bold', fontSize: 15 },
   successText: { marginTop: 10, color: '#2E5A0D', fontFamily: 'Lato_400Regular', fontSize: 13, textAlign: 'center' },
+  membershipCard: {
+    marginTop: 12,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#DCE8CC',
+    borderRadius: 22,
+    backgroundColor: '#F9FDF4',
+  },
+  membershipHeading: { flexDirection: 'row', alignItems: 'center', gap: 13 },
+  membershipIcon: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    backgroundColor: '#EAF3DE',
+  },
+  membershipCopy: { flex: 1 },
+  membershipTitle: { color: '#2C2C2A', fontFamily: 'Lato_700Bold', fontSize: 17 },
+  membershipCaption: { marginTop: 3, color: '#737270', fontFamily: 'Lato_400Regular', fontSize: 13 },
+  upgradeButton: {
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+    borderRadius: 15,
+    backgroundColor: '#4F7D1A',
+  },
+  restoreButton: {
+    height: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 8,
+  },
+  restoreButtonText: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 14 },
   libraryLink: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 8 },
   libraryLinkText: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 14 },
   statsGrid: { flexDirection: 'row', gap: 10, marginTop: 12 },

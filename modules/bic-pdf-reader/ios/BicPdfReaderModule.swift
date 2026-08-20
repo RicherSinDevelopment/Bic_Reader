@@ -18,7 +18,10 @@ public final class BicPdfReaderModule: Module {
         throw ExtractionException("Rust returned no extraction result")
       }
       defer { bic_pdf_free_string(result) }
-      return String(cString: result)
+      return try AppleVisionOcr.fillScannedPages(
+        in: String(cString: result),
+        pdfPath: path
+      )
 #else
       throw ExtractionException("The Rust/PDFium iOS library has not been built. Run pdf_reader/scripts/build-ios.sh on macOS before the native build.")
 #endif
@@ -37,7 +40,10 @@ public final class BicPdfReaderModule: Module {
         throw ExtractionException("Rust returned no extraction result")
       }
       defer { bic_pdf_free_string(result) }
-      return String(cString: result)
+      return try AppleVisionOcr.fillScannedPages(
+        in: String(cString: result),
+        pdfPath: path
+      )
 #else
       throw ExtractionException("The Rust/PDFium iOS library has not been built. Run pdf_reader/scripts/build-ios.sh on macOS before the native build.")
 #endif

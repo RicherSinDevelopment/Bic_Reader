@@ -20,14 +20,14 @@ Pod::Spec.new do |s|
       'Frameworks/BicPdfReaderRust.xcframework',
       'Frameworks/Pdfium.xcframework'
     ]
-    s.frameworks = ['AVFoundation', 'CoreGraphics']
+    s.frameworks = ['AVFoundation', 'CoreGraphics', 'PDFKit', 'Vision']
     s.libraries = ['c++']
     s.pod_target_xcconfig = {
       'DEFINES_MODULE' => 'YES',
       'OTHER_SWIFT_FLAGS' => '$(inherited) -D BIC_PDF_RUST_LINKED'
     }
   else
-    s.frameworks = ['AVFoundation']
+    s.frameworks = ['AVFoundation', 'PDFKit', 'Vision']
     s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
   end
 end

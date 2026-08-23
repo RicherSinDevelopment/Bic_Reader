@@ -65,6 +65,11 @@ type ReaderViewProps = {
     switchHighlightQuery?: string;
     nonce: number;
   } | null;
+  stationarySwitchHighlight?: {
+    blockId: string;
+    offset: number;
+    nonce: number;
+  } | null;
   onPageChange?: (page: number) => void;
   onPaginationChange?: (currentPage: number, totalPages: number) => void;
   onPageMapChange?: (pageMap: Record<number, number>) => void;
@@ -131,6 +136,7 @@ const ReaderView = ({
   pageCount,
   sourcePageCount,
   destination,
+  stationarySwitchHighlight,
   onPageChange,
   onPaginationChange,
   onPageMapChange,
@@ -780,15 +786,7 @@ const textColor = isDark && !colorsCustomized
             opacity: 0.78;
             margin-bottom: 1em;
           }
-          .source-page {
-            position: relative;
-            content-visibility: auto;
-            contain-intrinsic-block-size: auto 900px;
-          }
-          body.reader-paged .source-page {
-            content-visibility: visible;
-            contain-intrinsic-block-size: none;
-          }
+          .source-page { position: relative; }
           .page-divider {
             display: flex;
             align-items: center;
@@ -1738,6 +1736,7 @@ const textColor = isDark && !colorsCustomized
               <HorizontalReaderPager
                 blocks={blocks}
                 destination={effectivePagerDestination}
+                stationarySwitchHighlight={stationarySwitchHighlight}
                 fontFamily={fontFamily.split(",")[0].replaceAll("'", "").trim()}
                 fontSize={fontSize}
                 lineHeight={lineHeight}
@@ -1913,7 +1912,7 @@ const textColor = isDark && !colorsCustomized
                 let textNode = walker.nextNode();
                 while (textNode) {
                   const text = textNode.textContent || '';
-                  Array.from(text.matchAll(/\S+/g)).forEach(function(match) {
+                  Array.from(text.matchAll(/\\S+/g)).forEach(function(match) {
                     words.push({ node: textNode, match: match });
                   });
                   textNode = walker.nextNode();
@@ -1924,7 +1923,7 @@ const textColor = isDark && !colorsCustomized
                   return String(value || '')
                     .toLocaleLowerCase()
                     .replace(/[\u064B-\u065F\u0670]/g, '')
-                    .replace(/[^\p{L}\p{N}]/gu, '');
+                    .replace(/[^\\p{L}\\p{N}]/gu, '');
                 }
 
                 const normalizedQuery = normalizeForMatch(translatedQuery);

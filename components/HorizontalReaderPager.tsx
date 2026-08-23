@@ -32,6 +32,11 @@ type PageAnchor = {
 type Props = {
   blocks: ExtractedPdfBlock[];
   destination?: Destination;
+  stationarySwitchHighlight?: {
+    blockId: string;
+    offset: number;
+    nonce: number;
+  } | null;
   fontFamily: string;
   fontSize: number;
   lineHeight: number;
@@ -145,6 +150,7 @@ function pageAnchor(
 export default function HorizontalReaderPager({
   blocks,
   destination,
+  stationarySwitchHighlight,
   fontFamily,
   fontSize,
   lineHeight,
@@ -317,6 +323,20 @@ export default function HorizontalReaderPager({
     return hyphenated;
   }, [automaticHyphenation]);
 
+  const navigationSwitchHighlight = destination?.blockId &&
+    destination.switchHighlightOffset !== undefined
+    ? {
+        blockId: destination.blockId,
+        offset: destination.switchHighlightOffset,
+        nonce: destination.nonce,
+      }
+    : null;
+  const activeSwitchHighlight = stationarySwitchHighlight &&
+    (!navigationSwitchHighlight ||
+      stationarySwitchHighlight.nonce >= navigationSwitchHighlight.nonce)
+    ? stationarySwitchHighlight
+    : navigationSwitchHighlight;
+
   const renderSegment = (segment: Segment, index: number) => {
     const isSearchTarget = destination?.nonce !== dismissedSearchNonce &&
       destination?.blockId === segment.blockId &&
@@ -328,13 +348,12 @@ export default function HorizontalReaderPager({
       ? destination.searchMatchIndex! - segment.startOffset
       : -1;
     const queryLength = isSearchTarget ? destination.searchQuery!.length : 0;
-    const isSwitchTarget = destination?.nonce !== dismissedSwitchNonce &&
-      destination?.blockId === segment.blockId &&
-      destination.switchHighlightOffset !== undefined &&
-      destination.switchHighlightOffset >= segment.startOffset &&
-      destination.switchHighlightOffset < segment.startOffset + segment.text.length;
+    const isSwitchTarget = activeSwitchHighlight?.nonce !== dismissedSwitchNonce &&
+      activeSwitchHighlight?.blockId === segment.blockId &&
+      activeSwitchHighlight.offset >= segment.startOffset &&
+      activeSwitchHighlight.offset < segment.startOffset + segment.text.length;
     const switchLocalOffset = isSwitchTarget
-      ? destination.switchHighlightOffset! - segment.startOffset
+      ? activeSwitchHighlight!.offset - segment.startOffset
       : -1;
     const switchMatch = isSwitchTarget
       ? Array.from(segment.text.matchAll(/\S+/g)).find((match) =>
@@ -427,8 +446,8 @@ export default function HorizontalReaderPager({
         })}
         onScrollBeginDrag={() => {
           onSwipeStart?.();
-          if (destination?.switchHighlightOffset !== undefined) {
-            setDismissedSwitchNonce(destination.nonce);
+          if (activeSwitchHighlight) {
+            setDismissedSwitchNonce(activeSwitchHighlight.nonce);
           }
         }}
         scrollEventThrottle={16}

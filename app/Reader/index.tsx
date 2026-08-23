@@ -215,6 +215,11 @@ export default function ReaderScreen() {
     switchHighlightWordIndex?: number;
     nonce: number;
   } | null>(null);
+  const [readerSwitchHighlight, setReaderSwitchHighlight] = useState<{
+    blockId: string;
+    offset: number;
+    nonce: number;
+  } | null>(null);
   const [translatedDestination, setTranslatedDestination] = useState<{
     page: number;
     readerPage?: number;
@@ -785,12 +790,16 @@ export default function ReaderScreen() {
   const handleTabChange = (value: ReaderMode) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (value === "original") setHasVisitedOriginal(true);
+    if (value === "reader") {
+      // Returning from Original must not navigate the horizontal reader. Its
+      // FlatList has remained mounted and already owns the exact reading
+      // offset. Highlight the mapped word independently of navigation.
+      setReaderDestination(null);
+    }
     if (switchHighlightTarget && value === "reader") {
-      setReaderDestination({
-        page: switchHighlightTarget.page,
+      setReaderSwitchHighlight({
         blockId: switchHighlightTarget.blockId,
-        switchHighlightOffset: switchHighlightTarget.blockOffset,
-        switchHighlightWordIndex: switchHighlightTarget.wordIndex,
+        offset: switchHighlightTarget.blockOffset,
         nonce: Date.now(),
       });
     }
@@ -1079,8 +1088,8 @@ export default function ReaderScreen() {
         }}
       >
         <Animated.View
-          className="pb-3 pt-12"
-          style={{ minHeight: 148 }}
+          className="pt-12"
+          style={{ minHeight: 128 }}
           onLayout={(event) => {
             const measuredHeight = event.nativeEvent.layout.height;
 
@@ -1132,7 +1141,7 @@ export default function ReaderScreen() {
             </View>
           </View>
           {visiblePageCount > 0 && (
-            <View className="absolute bottom-3 left-0 right-0 flex-row items-center px-5">
+            <View className="absolute bottom-[6px] left-0 right-0 flex-row items-center px-5">
               <Text
                 className="mr-4 flex-1 font-lato-bold text-xs text-[#83877e]"
                 numberOfLines={1}
@@ -1267,6 +1276,7 @@ export default function ReaderScreen() {
                 blocks={readerBlocks}
                 pageCount={readerPageCount}
                 destination={readerDestination}
+                stationarySwitchHighlight={readerSwitchHighlight}
                 onPageChange={setReaderCurrentPage}
                 onPaginationChange={handleReaderPagination}
                 onPageMapChange={handleReaderChapterPageMapChange}

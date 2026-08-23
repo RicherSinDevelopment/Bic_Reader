@@ -1,0 +1,115 @@
+diff --git a/node_modules/@bsky.app/expo-translate-text/ios/ExpoTranslateTextModule.swift b/node_modules/@bsky.app/expo-translate-text/ios/ExpoTranslateTextModule.swift
+index c96fab0..7669b2e 100644
+--- a/node_modules/@bsky.app/expo-translate-text/ios/ExpoTranslateTextModule.swift
++++ b/node_modules/@bsky.app/expo-translate-text/ios/ExpoTranslateTextModule.swift
+@@ -6,10 +6,17 @@ import SwiftUI
+ 
+ public class ExpoTranslateTextModule: Module {
+     private var hostingController: UIHostingController<AnyView>?
++    private var currentTaskProps: Props?
+ 
+     public func definition() -> ModuleDefinition {
+         Name("ExpoTranslateText")
+ 
++        Events("onTranslationProgress")
++
++        AsyncFunction("cancelTranslationTask") { [weak self] () async -> Void in
++            await MainActor.run { self?.cancelActiveTranslationTask() }
++        }
++
+         Function("isTranslationSupported") { () -> Bool in
+             if #available(iOS 18.0, *) {
+                 return true
+@@ -86,11 +88,21 @@ public class ExpoTranslateTextModule: Module {
+ 
+             let targetLangCode = params["targetLangCode"] as? String ?? "en"
+             let sourceLangCode = params["sourceLangCode"] as? String
++            let requestId = params["requestId"] as? String
+ 
+             let props = Props()
+             props.texts = texts
+             props.targetLanguage = targetLangCode
+             props.sourceLanguage = sourceLangCode
++            props.onProgress = { [weak self] index, translatedText, detectedSourceLanguage in
++                guard let self, let requestId else { return }
++                self.sendEvent("onTranslationProgress", [
++                    "requestId": requestId,
++                    "index": index,
++                    "translatedText": translatedText,
++                    "sourceLanguage": detectedSourceLanguage as Any,
++                ])
++            }
+ 
+             if #available(iOS 18.0, *) {
+                 await MainActor.run { self.presentTranslationView(props) }
+diff --git a/node_modules/@bsky.app/expo-translate-text/ios/Props.swift b/node_modules/@bsky.app/expo-translate-text/ios/Props.swift
+index 93b67e0..c223a2e 100644
+--- a/node_modules/@bsky.app/expo-translate-text/ios/Props.swift
++++ b/node_modules/@bsky.app/expo-translate-text/ios/Props.swift
+@@ -3,6 +3,7 @@ import SwiftUI
+ public class Props: ObservableObject {
+   @Published var texts: [String] = []
+   @Published var onSuccess: ((_ translatedTexts: [String], _ detectedSourceLanguage: String?) -> Void)?
++  @Published var onProgress: ((_ index: Int, _ translatedText: String, _ detectedSourceLanguage: String?) -> Void)?
+   @Published var onError: ((String) -> Void)?
+   @Published var shouldTranslate: Bool = false
+   @Published var sourceLanguage: String?
+diff --git a/node_modules/@bsky.app/expo-translate-text/ios/TranslationViews.swift b/node_modules/@bsky.app/expo-translate-text/ios/TranslationViews.swift
+index 5e3494b..cc008ed 100644
+--- a/node_modules/@bsky.app/expo-translate-text/ios/TranslationViews.swift
++++ b/node_modules/@bsky.app/expo-translate-text/ios/TranslationViews.swift
+@@ -44,6 +44,10 @@ struct IOSTranslateTasksAvailable: View {
+       for try await response in session.translate(batch: requests) {
+         if let index = Int(response.clientIdentifier ?? "") {
+           translatedTexts[index] = response.targetText
++          let sourceLanguage = response.sourceLanguage.minimalIdentifier
++          DispatchQueue.main.async {
++            props.onProgress?(index, response.targetText, sourceLanguage)
++          }
+         }
+         // Capture the detected source language from the first response
+         if detectedSourceLanguage == nil {
+diff --git a/node_modules/@bsky.app/expo-translate-text/ios/ExpoTranslateTextModule.swift b/node_modules/@bsky.app/expo-translate-text/ios/ExpoTranslateTextModule.swift
+--- a/node_modules/@bsky.app/expo-translate-text/ios/ExpoTranslateTextModule.swift
++++ b/node_modules/@bsky.app/expo-translate-text/ios/ExpoTranslateTextModule.swift
+@@ -112,6 +117,7 @@ public class ExpoTranslateTextModule: Module {
+             if #available(iOS 18.0, *) {
+                 await MainActor.run { self.presentTranslationView(props) }
+                 return try await withCheckedThrowingContinuation { continuation in
++                    self.currentTaskProps = props
+                     props.onSuccess = { translatedTexts, detectedSourceLanguage in
+                         let result: [String: Any]
+                         // Use detected source language, falling back to input if not available
+@@ -148,7 +154,12 @@ public class ExpoTranslateTextModule: Module {
+                             ]
+                         }
+                         continuation.resume(returning: result)
+-                        DispatchQueue.main.async { self.dismissTranslationView() }
++                        DispatchQueue.main.async {
++                            if self.currentTaskProps === props {
++                                self.currentTaskProps = nil
++                            }
++                            self.dismissTranslationView()
++                        }
+                     }
+ 
+                     props.onError = { errorMessage in
+@@ -183,6 +199,18 @@ public class ExpoTranslateTextModule: Module {
+     }
+ 
+     // MARK: - Private Helpers for Managing SwiftUI Views
++    @MainActor
++    private func cancelActiveTranslationTask() {
++        guard let props = currentTaskProps else { return }
++        currentTaskProps = nil
++        let onError = props.onError
++        props.onSuccess = nil
++        props.onError = nil
++        props.onProgress = nil
++        onError?("BIC_TRANSLATION_CANCELLED")
++        dismissTranslationView()
++    }
++
+     @MainActor
+     private func presentTranslationView(_ props: Props) {
+         let controller = UIHostingController(rootView: AnyView(IOSTranslateTasks(props: props)))

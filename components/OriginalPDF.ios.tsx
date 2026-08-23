@@ -13,6 +13,7 @@ type OriginalPdfProps = {
   onOutlineChanged?: (outline: PdfOutlineItem[]) => void;
   highlightTarget?: SwitchHighlightTarget | null;
   outlineOnly?: boolean;
+  destination?: { page: number; nonce: number } | null;
 };
 
 export type PdfOutlineItem = {
@@ -46,6 +47,7 @@ export default function OriginalPDF({
   onOutlineChanged,
   highlightTarget,
   outlineOnly = false,
+  destination,
 }: OriginalPdfProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,6 +61,11 @@ export default function OriginalPDF({
     setErrorMessage(null);
     setLoading(true);
   }, [pdfUri]);
+
+  useEffect(() => {
+    if (loading || !destination) return;
+    pdfRef.current?.setPage(Math.max(1, destination.page));
+  }, [destination, loading, pdfRef]);
 
   const handleLoadComplete = useCallback(
     (
@@ -102,7 +109,7 @@ export default function OriginalPDF({
       <Pdf
         ref={pdfRef}
         source={source}
-        page={Math.max(1, initialPage)}
+        page={Math.max(1, destination?.page ?? initialPage)}
         horizontal={false}
         enablePaging={false}
         fitPolicy={0}

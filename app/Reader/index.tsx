@@ -43,9 +43,12 @@ import Reanimated, {
   withTiming,
 } from "react-native-reanimated";
 import {
+  cancelActiveBookTranslation,
+  isBookTranslationCancellation,
   translateAnchorText,
   translatePdfBlocks,
 } from "@/services/translationService";
+import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
 
 function isVisibleReaderBlock(block: ExtractedPdfBlock) {
   if (block.hiddenInReader) return false;
@@ -68,9 +71,40 @@ function firstMissingPageIndex(
   return document.pageCount;
 }
 
+function outlineTranslationBlocks(
+  items: PdfOutlineItem[],
+  path = "outline",
+): ExtractedPdfBlock[] {
+  return items.flatMap((item, index) => {
+    const chapterId = `${path}-${index}-${item.page}`;
+    const block: ExtractedPdfBlock = {
+      id: `toc-${chapterId}`,
+      kind: "heading",
+      text: item.title,
+      page: item.page,
+      sourceBounds: { left: 0, top: 0, right: 0, bottom: 0 },
+      wordBounds: [],
+      readingOrder: index,
+      confidence: 1,
+      hiddenInReader: true,
+    };
+    return [
+      block,
+      ...outlineTranslationBlocks(item.children ?? [], `${path}-${index}`),
+    ];
+  });
+}
+
 const FIRST_READER_PAGE_BATCH = 1;
 const WARM_READER_PAGE_COUNT = 5;
 const BACKGROUND_READER_PAGE_BATCH = 16;
+const TRANSLATION_WORK_CHUNK = 80;
+const TRANSLATION_PRIORITY_CHUNK = 56;
+const TRANSLATION_PRIORITY_RADIUS = 12;
+const CHAPTER_EXTRACTION_PAGES_ABOVE = 3;
+const CHAPTER_EXTRACTION_PAGE_COUNT = 7;
+const TRANSLATION_PREFETCH_DISTANCE = 7;
+const EXTRACTION_CACHE_PAGE_INTERVAL = 32;
 
 function BookPageSkeleton() {
   const lineWidths = [
@@ -122,6 +156,7 @@ function BookPageSkeleton() {
 export default function ReaderScreen() {
   const { pdfId } = useLocalSearchParams<{ pdfId?: string }>();
   const db = useSQLiteContext();
+  const readerTransition = useReaderSettingsStore((state) => state.transition);
   const [pdf, setPdf] = useState<PdfDocument | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -132,6 +167,14 @@ export default function ReaderScreen() {
   const [translatedBlocks, setTranslatedBlocks] = useState<ExtractedPdfBlock[]>([]);
   const [translationLoading, setTranslationLoading] = useState(false);
   const [translationError, setTranslationError] = useState<string | null>(null);
+  const [translationPriorityVersion, setTranslationPriorityVersion] = useState(0);
+  const [translationRestartWaitingPage, setTranslationRestartWaitingPage] =
+    useState<number | null>(null);
+  const [translatedChapterRequest, setTranslatedChapterRequest] = useState<{
+    sourcePage: number;
+    resolvedPage?: number;
+    nonce: number;
+  } | null>(null);
   const [hasVisitedOriginal, setHasVisitedOriginal] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isLandscape, setIsLandscape] = useState(false);
@@ -144,14 +187,25 @@ export default function ReaderScreen() {
   const [readerPageCount, setReaderPageCount] = useState(0);
   const [readerContentReady, setReaderContentReady] = useState(false);
   const readerSkeletonOpacity = useSharedValue(1);
-  const [readerCurrentPage, setReaderCurrentPage] = useState(1);
+  const [, setReaderCurrentPage] = useState(1);
   const [readerDisplayCurrentPage, setReaderDisplayCurrentPage] = useState(1);
   const [readerDisplayPageCount, setReaderDisplayPageCount] = useState(0);
+  const [readerChapterPageMap, setReaderChapterPageMap] = useState<
+    Record<number, number>
+  >({});
+  const [translatedChapterPageMap, setTranslatedChapterPageMap] = useState<
+    Record<number, number>
+  >({});
   const [originalCurrentPage, setOriginalCurrentPage] = useState(1);
   const [originalPageCount, setOriginalPageCount] = useState(0);
+  const [originalDestination, setOriginalDestination] = useState<{
+    page: number;
+    nonce: number;
+  } | null>(null);
   const [pdfOutline, setPdfOutline] = useState<PdfOutlineItem[]>([]);
   const [readerDestination, setReaderDestination] = useState<{
     page: number;
+    readerPage?: number;
     blockId?: string;
     searchQuery?: string;
     searchMatchIndex?: number;
@@ -159,6 +213,7 @@ export default function ReaderScreen() {
   } | null>(null);
   const [translatedDestination, setTranslatedDestination] = useState<{
     page: number;
+    readerPage?: number;
     blockId?: string;
     switchHighlightWordIndex?: number;
     switchHighlightWordProgress?: number;
@@ -166,19 +221,34 @@ export default function ReaderScreen() {
     nonce: number;
   } | null>(null);
   const readerExtractionStarted = React.useRef(false);
-  const requestedExtractionPage = React.useRef<number | null>(null);
+  const requestedExtractionPages = React.useRef<number[]>([]);
+  const requestedTranslationPage = React.useRef<number | null>(null);
+  const latestTranslatedChapterRequest = React.useRef<number | null>(null);
   const translatedBlockCache = React.useRef(
     new Map<string, ExtractedPdfBlock>(),
   );
   const translationQueue = React.useRef<Promise<void>>(Promise.resolve());
+  const translationPublishTimer = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const scheduledTranslationLanguage = React.useRef<string | null>(null);
   const activeTranslationLanguage = React.useRef<string | null>(null);
+  const translationCancellationRequested = React.useRef(false);
   const translationSourceLanguage = React.useRef<string | undefined>(undefined);
+  const latestReaderBlocks = React.useRef(readerBlocks);
+  const latestPdfOutline = React.useRef(pdfOutline);
+  const latestReaderPageSizes = React.useRef(readerPageSizes);
+  const latestReaderPageCount = React.useRef(readerPageCount);
   const { reportVisibleBlock, target: switchHighlightTarget } =
     useSwitchHighlight(readerBlocks, readerPageSizes);
 
   useScreenRotation(setIsLandscape);
 
   activeTranslationLanguage.current = translationLanguage?.code ?? null;
+  latestReaderBlocks.current = readerBlocks;
+  latestPdfOutline.current = pdfOutline;
+  latestReaderPageSizes.current = readerPageSizes;
+  latestReaderPageCount.current = readerPageCount;
 
   useEffect(() => {
     translationSourceLanguage.current = undefined;
@@ -187,33 +257,135 @@ export default function ReaderScreen() {
   useEffect(() => {
     if (!translationLanguage) {
       setTranslatedBlocks([]);
+      setTranslatedChapterRequest(null);
       setTranslationLoading(false);
       setTranslationError(null);
       return;
     }
 
     const languageCode = translationLanguage.code;
-    const sourceBlocks = readerBlocks;
-    setTranslatedBlocks(
-      sourceBlocks.flatMap((block) => {
-        const translated = translatedBlockCache.current.get(
-          `${languageCode}:${block.id}`,
-        );
-        return translated ? [translated] : [];
-      }),
-    );
+    const publishTranslatedBlocks = () => {
+      const latestBlocks = latestReaderBlocks.current;
+      const blocksByPage = new Map<number, ExtractedPdfBlock[]>();
+      latestBlocks
+        .filter((block) => block.text.trim().length > 0)
+        .forEach((block) => {
+          const pageBlocks = blocksByPage.get(block.page);
+          if (pageBlocks) pageBlocks.push(block);
+          else blocksByPage.set(block.page, [block]);
+        });
+      const completedBlocks: ExtractedPdfBlock[] = [];
+      const orderedPages = [...blocksByPage.keys()].sort((a, b) => a - b);
+      for (const page of orderedPages) {
+        const pageBlocks = blocksByPage.get(page) ?? [];
+        const translatedPage = pageBlocks.flatMap((block) => {
+          const translated = translatedBlockCache.current.get(
+            `${languageCode}:${block.id}`,
+          );
+          return translated ? [translated] : [];
+        });
+        if (translatedPage.length === pageBlocks.length) {
+          completedBlocks.push(...translatedPage);
+        }
+      }
+      setTranslatedBlocks((current) => {
+        if (
+          current.length === completedBlocks.length &&
+          current.at(-1)?.id === completedBlocks.at(-1)?.id
+        ) {
+          return current;
+        }
+        return completedBlocks;
+      });
+    };
+    const scheduleTranslatedPublish = () => {
+      if (translationPublishTimer.current) return;
+      translationPublishTimer.current = setTimeout(() => {
+        translationPublishTimer.current = null;
+        if (activeTranslationLanguage.current === languageCode) {
+          publishTranslatedBlocks();
+        }
+      }, 180);
+    };
+    publishTranslatedBlocks();
     setTranslationLoading(true);
     setTranslationError(null);
+
+    // A running worker reads the latest refs on every pass, so extraction and
+    // outline updates do not enqueue stale copies of the whole document.
+    if (scheduledTranslationLanguage.current === languageCode) return;
+    scheduledTranslationLanguage.current = languageCode;
 
     translationQueue.current = translationQueue.current
       .catch(() => undefined)
       .then(async () => {
-        const missingBlocks = sourceBlocks.filter(
-          (block) =>
-            !translatedBlockCache.current.has(`${languageCode}:${block.id}`),
-        );
+        while (activeTranslationLanguage.current === languageCode) {
+          const latestContentBlocks = latestReaderBlocks.current;
+          const firstContentPage = latestContentBlocks[0]?.page;
+          const warmContentBlocks = firstContentPage === undefined
+            ? []
+            : latestContentBlocks.filter(
+                (block) => block.page <= firstContentPage + 1,
+              );
+          const warmContentIds = new Set(
+            warmContentBlocks.map((block) => block.id),
+          );
+          const allSourceBlocks = [
+            ...warmContentBlocks,
+            ...outlineTranslationBlocks(latestPdfOutline.current),
+            ...latestContentBlocks.filter(
+              (block) => !warmContentIds.has(block.id),
+            ),
+          ];
+          let missingBlocks = allSourceBlocks.filter(
+            (block) =>
+              block.text.trim().length > 0 &&
+              !translatedBlockCache.current.has(`${languageCode}:${block.id}`),
+          );
 
-        if (missingBlocks.length > 0) {
+          const hasTranslatedContent = latestContentBlocks.some((block) =>
+            translatedBlockCache.current.has(`${languageCode}:${block.id}`),
+          );
+          if (!hasTranslatedContent && firstContentPage !== undefined) {
+            missingBlocks = missingBlocks.filter(
+              (block) =>
+                !block.id.startsWith("toc-") &&
+                block.page === firstContentPage,
+            );
+          }
+
+          const priorityPage = requestedTranslationPage.current;
+          if (priorityPage !== null) {
+            const contentBlocks = missingBlocks.filter(
+              (block) => !block.id.startsWith("toc-"),
+            );
+            const allNearbyBlocks = contentBlocks
+              .filter(
+                (block) =>
+                  Math.abs(block.page - priorityPage) <=
+                  TRANSLATION_PRIORITY_RADIUS,
+              )
+              .sort((a, b) => {
+                const distanceDifference =
+                  Math.abs(a.page - priorityPage) -
+                  Math.abs(b.page - priorityPage);
+                return distanceDifference || a.page - b.page;
+              });
+            const nearbyBlocks = allNearbyBlocks.slice(
+              0,
+              TRANSLATION_PRIORITY_CHUNK,
+            );
+            const selectedIds = new Set(nearbyBlocks.map((block) => block.id));
+            const sequentialBlocks = [
+              ...contentBlocks.filter((block) => !selectedIds.has(block.id)),
+              ...missingBlocks.filter((block) => block.id.startsWith("toc-")),
+            ];
+            missingBlocks = [...nearbyBlocks, ...sequentialBlocks];
+
+          }
+          missingBlocks = missingBlocks.slice(0, TRANSLATION_WORK_CHUNK);
+
+          if (missingBlocks.length === 0) break;
           await translatePdfBlocks(
             missingBlocks,
             languageCode,
@@ -230,14 +402,7 @@ export default function ReaderScreen() {
               });
 
               if (activeTranslationLanguage.current === languageCode) {
-                setTranslatedBlocks(
-                  sourceBlocks.flatMap((block) => {
-                    const translated = translatedBlockCache.current.get(
-                      `${languageCode}:${block.id}`,
-                    );
-                    return translated ? [translated] : [];
-                  }),
-                );
+                scheduleTranslatedPublish();
               }
             },
             translationSourceLanguage.current,
@@ -248,27 +413,182 @@ export default function ReaderScreen() {
         }
 
         if (activeTranslationLanguage.current === languageCode) {
-          setTranslatedBlocks(
-            sourceBlocks.flatMap((block) => {
-              const translated = translatedBlockCache.current.get(
-                `${languageCode}:${block.id}`,
-              );
-              return translated ? [translated] : [];
-            }),
-          );
-          setTranslationLoading(false);
+          if (translationPublishTimer.current) {
+            clearTimeout(translationPublishTimer.current);
+            translationPublishTimer.current = null;
+          }
+          publishTranslatedBlocks();
+          const extractionIsComplete =
+            latestReaderPageCount.current > 0 &&
+            Object.keys(latestReaderPageSizes.current).length >=
+              latestReaderPageCount.current;
+          setTranslationLoading(!extractionIsComplete);
         }
       })
       .catch((error) => {
         if (activeTranslationLanguage.current !== languageCode) return;
+        if (
+          translationCancellationRequested.current ||
+          isBookTranslationCancellation(error)
+        ) {
+          setTranslationLoading(true);
+          return;
+        }
         setTranslationError(
           error instanceof Error
             ? error.message
             : "Unable to translate this document.",
         );
+        setTranslatedChapterRequest(null);
         setTranslationLoading(false);
+      })
+      .finally(() => {
+        if (scheduledTranslationLanguage.current === languageCode) {
+          scheduledTranslationLanguage.current = null;
+        }
       });
-  }, [readerBlocks, translationLanguage]);
+  }, [
+    pdfOutline,
+    readerBlocks,
+    translationLanguage,
+    translationPriorityVersion,
+  ]);
+
+  useEffect(() => {
+    if (
+      translationRestartWaitingPage === null ||
+      !readerPageSizes[translationRestartWaitingPage]
+    ) {
+      return;
+    }
+    setTranslationRestartWaitingPage(null);
+    setTranslationPriorityVersion((version) => version + 1);
+  }, [readerPageSizes, translationRestartWaitingPage]);
+
+  useEffect(
+    () => () => {
+      if (translationPublishTimer.current) {
+        clearTimeout(translationPublishTimer.current);
+      }
+    },
+    [],
+  );
+
+  const translatedAvailablePageCount = useMemo(() => {
+    if (!translationLanguage || translatedBlocks.length === 0) return 0;
+    const prefix = `translated-${translationLanguage.code}-`;
+    const translatedSourceIds = new Set(
+      translatedBlocks.map((block) => block.id.replace(prefix, "")),
+    );
+    const sourceBlocksByPage = new Map<number, ExtractedPdfBlock[]>();
+    readerBlocks
+      .filter((block) => block.text.trim().length > 0)
+      .forEach((block) => {
+        const pageBlocks = sourceBlocksByPage.get(block.page);
+        if (pageBlocks) pageBlocks.push(block);
+        else sourceBlocksByPage.set(block.page, [block]);
+      });
+
+    let highestCompletedPage = 0;
+    sourceBlocksByPage.forEach((pageBlocks, page) => {
+      if (pageBlocks.every((block) => translatedSourceIds.has(block.id))) {
+        highestCompletedPage = Math.max(highestCompletedPage, page);
+      }
+    });
+    return highestCompletedPage;
+  }, [readerBlocks, translatedBlocks, translationLanguage]);
+
+  useEffect(() => {
+    if (!translatedChapterRequest || translatedChapterRequest.resolvedPage) {
+      return;
+    }
+
+    const sourcePage = translatedChapterRequest.sourcePage;
+    if (!readerPageSizes[sourcePage]) return;
+
+    const sourcePageHasText = readerBlocks.some(
+      (block) => block.page === sourcePage && block.text.trim().length > 0,
+    );
+    const translatedPages = new Set(translatedBlocks.map((block) => block.page));
+    let resolvedPage: number | undefined;
+
+    if (sourcePageHasText) {
+      const nearbySourcePages = [
+        ...new Set(
+          readerBlocks
+            .filter(
+              (block) =>
+                block.text.trim().length > 0 &&
+                Math.abs(block.page - sourcePage) <=
+                  CHAPTER_EXTRACTION_PAGES_ABOVE,
+            )
+            .map((block) => block.page),
+        ),
+      ];
+      const previousPage = nearbySourcePages
+        .filter((page) => page < sourcePage)
+        .sort((a, b) => b - a)[0];
+      const nextPage = nearbySourcePages
+        .filter((page) => page > sourcePage)
+        .sort((a, b) => a - b)[0];
+      const neighborhoodIsReady =
+        translatedPages.has(sourcePage) &&
+        (previousPage === undefined || translatedPages.has(previousPage)) &&
+        (nextPage === undefined || translatedPages.has(nextPage));
+      if (neighborhoodIsReady) resolvedPage = sourcePage;
+    } else {
+      resolvedPage = [...translatedPages]
+        .filter(
+          (page) =>
+            Math.abs(page - sourcePage) <= TRANSLATION_PRIORITY_RADIUS,
+        )
+        .sort((a, b) => {
+          const distance =
+            Math.abs(a - sourcePage) - Math.abs(b - sourcePage);
+          return distance || a - b;
+        })[0];
+    }
+
+    if (resolvedPage === undefined) return;
+    const nonce = translatedChapterRequest.nonce;
+    setTranslatedChapterRequest((current) =>
+      current?.nonce === nonce ? { ...current, resolvedPage } : current,
+    );
+    setTranslatedDestination({ page: resolvedPage, nonce: Date.now() });
+  }, [
+    readerBlocks,
+    readerPageSizes,
+    translatedBlocks,
+    translatedChapterRequest,
+  ]);
+
+  const handleTranslatedPageChange = useCallback((page: number) => {
+    setReaderCurrentPage(page);
+    requestedTranslationPage.current = page;
+    const pageCount = latestReaderPageCount.current;
+    const extractionCandidates = [
+      Math.max(1, page - TRANSLATION_PREFETCH_DISTANCE),
+      Math.min(pageCount, page + TRANSLATION_PREFETCH_DISTANCE),
+    ];
+    extractionCandidates.forEach((candidate) => {
+      if (
+        candidate > 0 &&
+        !latestReaderPageSizes.current[candidate] &&
+        !requestedExtractionPages.current.includes(candidate)
+      ) {
+        requestedExtractionPages.current.push(candidate);
+      }
+    });
+    if (
+      activeTranslationLanguage.current &&
+      scheduledTranslationLanguage.current === null
+    ) {
+      setTranslationPriorityVersion((version) => version + 1);
+    }
+    setTranslatedChapterRequest((current) =>
+      current?.resolvedPage === page ? null : current,
+    );
+  }, []);
 
   useEffect(() => {
     readerSkeletonOpacity.value = withTiming(readerContentReady ? 0 : 1, {
@@ -365,18 +685,32 @@ export default function ReaderScreen() {
 
           let nextPage = firstMissingPageIndex(document);
           let pageCount = document?.pageCount ?? Number.MAX_SAFE_INTEGER;
+          let lastSavedPageCount = document?.pages.length ?? 0;
 
           while (!cancelled && nextPage < pageCount) {
-            const requestedPage = requestedExtractionPage.current;
-            const requestIsMissing =
-              requestedPage !== null &&
-              !document?.pages.some((page) => page.page === requestedPage);
-            const firstPage = requestIsMissing ? requestedPage - 1 : nextPage;
-            if (requestIsMissing) requestedExtractionPage.current = null;
+            let requestedPage: number | null = null;
+            while (
+              requestedPage === null &&
+              requestedExtractionPages.current.length > 0
+            ) {
+              const candidate = requestedExtractionPages.current.shift()!;
+              if (!document?.pages.some((page) => page.page === candidate)) {
+                requestedPage = candidate;
+              }
+            }
+            const requestIsMissing = requestedPage !== null;
+            const firstPage = requestedPage !== null
+              ? Math.max(
+                  0,
+                  requestedPage - 1 - CHAPTER_EXTRACTION_PAGES_ABOVE,
+                )
+              : nextPage;
 
             const extractedPageCount = document?.pages.length ?? 0;
             const batchSize =
-              extractedPageCount === 0 && firstPage === 0
+              requestIsMissing
+                ? CHAPTER_EXTRACTION_PAGE_COUNT
+                : extractedPageCount === 0 && firstPage === 0
                 ? FIRST_READER_PAGE_BATCH
                 : firstPage < WARM_READER_PAGE_COUNT
                   ? WARM_READER_PAGE_COUNT - firstPage
@@ -398,8 +732,15 @@ export default function ReaderScreen() {
             };
             pageCount = document.pageCount;
             nextPage = firstMissingPageIndex(document);
-            await savePdfExtraction(db, pdfId, document);
             publish(document);
+            const shouldSaveExtraction =
+              document.pages.length - lastSavedPageCount >=
+                EXTRACTION_CACHE_PAGE_INTERVAL ||
+              nextPage >= pageCount;
+            if (shouldSaveExtraction) {
+              await savePdfExtraction(db, pdfId, document);
+              lastSavedPageCount = document.pages.length;
+            }
 
             if (chunk.pages.length === 0) break;
             await new Promise<void>((resolve) => setTimeout(resolve, 16));
@@ -499,18 +840,64 @@ export default function ReaderScreen() {
   );
 
   const readerChapters = useMemo<ReaderChapter[]>(() => {
+    const pageMap = activeTab === "reader"
+      ? readerChapterPageMap
+      : activeTab === "translated"
+        ? translatedChapterPageMap
+        : null;
     const convert = (
       items: PdfOutlineItem[],
       path = "outline",
     ): ReaderChapter[] =>
-      items.map((item, index) => ({
-        id: `${path}-${index}-${item.page}`,
-        title: item.title,
-        page: item.page,
-        children: convert(item.children ?? [], `${path}-${index}`),
-      }));
+      items.map((item, index) => {
+        const chapterId = `${path}-${index}-${item.page}`;
+        const translatedTitle =
+          activeTab === "translated" && translationLanguage
+            ? translatedBlockCache.current.get(
+                `${translationLanguage.code}:toc-${chapterId}`,
+              )?.text
+            : undefined;
+        return {
+          id: chapterId,
+          title: translatedTitle || item.title,
+          page: pageMap?.[item.page] ?? item.page,
+          sourcePage: item.page,
+          children: convert(item.children ?? [], `${path}-${index}`),
+        };
+      });
     return convert(pdfOutline);
-  }, [pdfOutline]);
+  }, [
+    activeTab,
+    pdfOutline,
+    readerChapterPageMap,
+    translatedBlocks,
+    translatedChapterPageMap,
+    translationLanguage,
+  ]);
+
+  const updateReaderChapterPageMap = useCallback(
+    (setPageMap: React.Dispatch<React.SetStateAction<Record<number, number>>>) =>
+      (next: Record<number, number>) => {
+        setPageMap((current) => {
+          const currentKeys = Object.keys(current);
+          const nextKeys = Object.keys(next);
+          if (
+            currentKeys.length === nextKeys.length &&
+            nextKeys.every((key) => current[Number(key)] === next[Number(key)])
+          ) return current;
+          return next;
+        });
+      },
+    [],
+  );
+  const handleReaderChapterPageMapChange = useMemo(
+    () => updateReaderChapterPageMap(setReaderChapterPageMap),
+    [updateReaderChapterPageMap],
+  );
+  const handleTranslatedChapterPageMapChange = useMemo(
+    () => updateReaderChapterPageMap(setTranslatedChapterPageMap),
+    [updateReaderChapterPageMap],
+  );
 
   const handleOutlineChanged = useCallback((outline: PdfOutlineItem[]) => {
     setPdfOutline(outline);
@@ -531,11 +918,7 @@ export default function ReaderScreen() {
       ? originalPageCount || pdf?.totalPages || readerPageCount
       : readerDisplayPageCount || readerPageCount;
   const navigationCurrentPage =
-    activeTab === "original" ? originalCurrentPage : readerCurrentPage;
-  const readingProgress =
-    visiblePageCount > 0
-      ? Math.max(0, Math.min(1, visiblePage / visiblePageCount))
-      : 0;
+    activeTab === "original" ? originalCurrentPage : readerDisplayCurrentPage;
   const displayPdfName = pdf?.name.replace(/\.pdf$/i, "") ?? "";
 
   const goToReaderPage = useCallback(
@@ -545,7 +928,7 @@ export default function ReaderScreen() {
       searchQuery?: string,
       searchMatchIndex?: number,
     ) => {
-      requestedExtractionPage.current = page;
+      requestedExtractionPages.current.push(page);
       setActiveTab("reader");
       setReaderDestination({
         page,
@@ -556,6 +939,84 @@ export default function ReaderScreen() {
       });
     },
     [],
+  );
+
+  const goToNavigationPage = useCallback(
+    (page: number, blockId?: string) => {
+      if (activeTab === "original") {
+        setOriginalDestination({ page, nonce: Date.now() });
+        return;
+      }
+      if (activeTab === "translated") {
+        const requestNonce = Date.now();
+        const lastSourcePage =
+          latestReaderPageCount.current ||
+          page + TRANSLATION_PREFETCH_DISTANCE;
+        latestTranslatedChapterRequest.current = requestNonce;
+        requestedExtractionPages.current = [
+          page,
+          Math.max(1, page - TRANSLATION_PREFETCH_DISTANCE),
+          Math.min(lastSourcePage, page + TRANSLATION_PREFETCH_DISTANCE),
+        ];
+        requestedTranslationPage.current = page;
+        setTranslationRestartWaitingPage(null);
+        setTranslatedDestination(null);
+        setTranslatedChapterRequest({
+          sourcePage: page,
+          nonce: requestNonce,
+        });
+        translationCancellationRequested.current = true;
+        void cancelActiveBookTranslation().finally(() => {
+          const activeQueue = translationQueue.current;
+          void activeQueue.finally(() => {
+            if (latestTranslatedChapterRequest.current !== requestNonce) return;
+            translationCancellationRequested.current = false;
+            const chapterIsExtracted = Boolean(
+              latestReaderPageSizes.current[page],
+            );
+            if (chapterIsExtracted) {
+              setTranslationPriorityVersion((version) => version + 1);
+            } else {
+              setTranslationRestartWaitingPage(page);
+            }
+          });
+        });
+        return;
+      }
+      goToReaderPage(page, blockId);
+    },
+    [activeTab, goToReaderPage],
+  );
+
+  const goToDisplayedPage = useCallback(
+    (page: number) => {
+      if (activeTab === "original") {
+        setOriginalDestination({ page, nonce: Date.now() });
+        return;
+      }
+
+      if (readerTransition !== "pager") {
+        setReaderDisplayCurrentPage(page);
+        if (activeTab === "translated") {
+          setTranslatedDestination({ page, nonce: Date.now() });
+        } else {
+          goToReaderPage(page);
+        }
+        return;
+      }
+
+      const destination = {
+        page: 1,
+        readerPage: page,
+        nonce: Date.now(),
+      };
+      if (activeTab === "translated") {
+        setTranslatedDestination(destination);
+      } else {
+        setReaderDestination(destination);
+      }
+    },
+    [activeTab, goToReaderPage, readerTransition],
   );
 
   if (isLoading) {
@@ -631,9 +1092,12 @@ export default function ReaderScreen() {
                   currentPage={navigationCurrentPage}
                   grouped
                   totalPages={visiblePageCount}
-                  onGoToPage={(page) => goToReaderPage(page)}
+                  onGoToPage={goToDisplayedPage}
                   onGoToChapter={(chapter) =>
-                    goToReaderPage(chapter.page, chapter.blockId)
+                    goToNavigationPage(
+                      chapter.sourcePage ?? chapter.page,
+                      chapter.blockId,
+                    )
                   }
                 />
             </View>
@@ -660,16 +1124,6 @@ export default function ReaderScreen() {
               >
                 {displayPdfName}
               </Text>
-              <View
-                accessible
-                accessibilityLabel={`${Math.round(readingProgress * 100)} percent read`}
-                className="mr-3 h-1.5 w-24 overflow-hidden rounded-full bg-[#e9ebe8]"
-              >
-                <View
-                  className="h-full rounded-full bg-[#4f936b]"
-                  style={{ width: `${readingProgress * 100}%` }}
-                />
-              </View>
               <Text className="min-w-14 text-right font-lato-bold text-xs text-[#6d716a]">
                 {visiblePage}/{visiblePageCount}
               </Text>
@@ -699,6 +1153,7 @@ export default function ReaderScreen() {
             pdfUri={pdf.uri}
             fileSize={pdf.size}
             initialPage={pdf.currentPage || 1}
+            destination={originalDestination}
             onPageChanged={handlePageChanged}
             onOutlineChanged={handleOutlineChanged}
             highlightTarget={
@@ -724,10 +1179,12 @@ export default function ReaderScreen() {
               isActive={activeTab === "translated"}
               isLandscape={isLandscape}
               blocks={translatedBlocks}
-              pageCount={readerPageCount}
+              pageCount={translatedAvailablePageCount}
+              sourcePageCount={readerPageCount}
               destination={translatedDestination}
-              onPageChange={setReaderCurrentPage}
+              onPageChange={handleTranslatedPageChange}
               onPaginationChange={handleReaderPagination}
+              onPageMapChange={handleTranslatedChapterPageMapChange}
               showSwitchHighlight={activeTab === "translated"}
               translationLanguage={translationLanguage}
               onTranslationLanguageChange={handleTranslationLanguageChange}
@@ -746,7 +1203,7 @@ export default function ReaderScreen() {
             <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8">
               <ActivityIndicator size="large" color="#8fb996" />
               <Text className="mt-4 text-center font-lato-bold text-base text-black">
-                Preparing {translationLanguage?.label} translation…
+                Translating the first page to {translationLanguage?.label}…
               </Text>
               <Text className="mt-2 text-center text-sm text-black/50">
                 iOS may ask to download the required language models.
@@ -756,6 +1213,20 @@ export default function ReaderScreen() {
           {translationLoading && translatedBlocks.length > 0 && (
             <View className="absolute right-4 top-4 rounded-full bg-white/90 p-2 shadow-sm">
               <ActivityIndicator size="small" color="#4f936b" />
+            </View>
+          )}
+          {translatedChapterRequest && (
+            <View className="absolute inset-0 z-50 items-center justify-center bg-[#F7F5EC]/95 px-8">
+              <ActivityIndicator size="large" color="#4f936b" />
+              <Text className="mt-4 text-center font-lato-bold text-base text-black">
+                {readerPageSizes[translatedChapterRequest.sourcePage]
+                  ? "Translating this chapter…"
+                  : "Preparing this chapter…"}
+              </Text>
+              <Text className="mt-2 text-center text-sm text-black/50">
+                Preparing page {translatedChapterRequest.sourcePage} and the
+                pages around it.
+              </Text>
             </View>
           )}
         </Animated.View>
@@ -783,6 +1254,7 @@ export default function ReaderScreen() {
                 destination={readerDestination}
                 onPageChange={setReaderCurrentPage}
                 onPaginationChange={handleReaderPagination}
+                onPageMapChange={handleReaderChapterPageMapChange}
                 onSwitchAnchorChange={reportVisibleBlock}
                 showSwitchHighlight={
                   hasVisitedOriginal && activeTab === "reader"

@@ -1,11 +1,12 @@
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Text, useWindowDimensions, View } from "react-native";
-import PagerView from "react-native-pager-view";
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Destination = {
   page: number;
+  readerPage?: number;
+  switchHighlightOffset?: number;
   blockId?: string;
   searchQuery?: string;
   searchMatchIndex?: number;
@@ -20,6 +21,12 @@ type Segment = {
   kind: ExtractedPdfBlock["kind"];
 };
 
+type PageAnchor = {
+  blockId: string;
+  blockOffset: number;
+  wordIndex: number;
+};
+
 type Props = {
   blocks: ExtractedPdfBlock[];
   destination?: Destination;
@@ -27,10 +34,17 @@ type Props = {
   fontSize: number;
   lineHeight: number;
   letterSpacing: number;
+  wordSpacing: number;
   bold: boolean;
   backgroundColor: string;
   textColor: string;
-  onPageChange?: (page: number, totalPages: number, sourcePage: number) => void;
+  onPageChange?: (
+    page: number,
+    totalPages: number,
+    sourcePage: number,
+    anchor?: PageAnchor,
+  ) => void;
+  onPageMapChange?: (pageMap: Record<number, number>) => void;
   onReaderTap?: () => void;
   onSwipeStart?: () => void;
 };
@@ -91,6 +105,21 @@ function buildPages(
   return pages.filter((page) => page.length > 0);
 }
 
+function pageAnchor(
+  page: Segment[] | undefined,
+  blocks: ExtractedPdfBlock[],
+): PageAnchor | undefined {
+  const segment = page?.[0];
+  if (!segment) return undefined;
+  const block = blocks.find((item) => item.id === segment.blockId);
+  const prefix = block?.text.slice(0, segment.startOffset) ?? "";
+  return {
+    blockId: segment.blockId,
+    blockOffset: segment.startOffset,
+    wordIndex: prefix.match(/\S+/g)?.length ?? 0,
+  };
+}
+
 export default function HorizontalReaderPager({
   blocks,
   destination,
@@ -98,32 +127,52 @@ export default function HorizontalReaderPager({
   fontSize,
   lineHeight,
   letterSpacing,
+  wordSpacing,
   bold,
   backgroundColor,
   textColor,
   onPageChange,
+  onPageMapChange,
   onReaderTap,
   onSwipeStart,
 }: Props) {
-  const pagerRef = useRef<PagerView>(null);
+  const pagerRef = useRef<FlatList<Segment[]>>(null);
   const currentPageRef = useRef(0);
   const navigatedDestinationNonceRef = useRef<number | null>(null);
   const [containerHeight, setContainerHeight] = useState(0);
-  const [visiblePage, setVisiblePage] = useState(0);
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<number | null>(null);
+  const [dismissedSwitchNonce, setDismissedSwitchNonce] = useState<number | null>(null);
   const touchStart = useRef({ x: 0, y: 0, time: 0 });
   const { width, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const usableHeight = containerHeight || windowHeight;
+  // Painting the new type settings is urgent; rebuilding every page in a long
+  // book is not. Deferred layout metrics keep the controls responsive while
+  // React repaginates in the background.
+  const deferredFontSize = useDeferredValue(fontSize);
+  const deferredLineHeight = useDeferredValue(lineHeight);
+  const deferredLetterSpacing = useDeferredValue(letterSpacing);
+  const deferredWordSpacing = useDeferredValue(wordSpacing);
   const charactersPerLine = Math.max(
     12,
-    Math.floor((width - 40) / Math.max(7, fontSize * 0.52 + letterSpacing))
+    Math.floor(
+      (width - 40) /
+      Math.max(
+        7,
+        deferredFontSize * 0.52 +
+          deferredLetterSpacing +
+          deferredWordSpacing * 0.16,
+      ),
+    )
   );
   const pageContentHeight = Math.max(
     120,
     (usableHeight - 32 - insets.bottom) * 0.94
   );
-  const baseLineHeight = Math.max(16, fontSize * lineHeight);
+  const baseLineHeight = Math.max(
+    16,
+    deferredFontSize * deferredLineHeight,
+  );
   const pages = useMemo(
     () => buildPages(
       blocks,
@@ -133,8 +182,33 @@ export default function HorizontalReaderPager({
     ),
     [baseLineHeight, blocks, charactersPerLine, pageContentHeight]
   );
+  const sourcePageMap = useMemo(() => {
+    const direct: Record<number, number> = {};
+    let maximumSourcePage = 0;
+    pages.forEach((page, readerPageIndex) => {
+      page.forEach((segment) => {
+        maximumSourcePage = Math.max(maximumSourcePage, segment.sourcePage);
+        direct[segment.sourcePage] ??= readerPageIndex + 1;
+      });
+    });
+
+    const complete: Record<number, number> = {};
+    let nextReaderPage = pages.length || 1;
+    for (let sourcePage = maximumSourcePage; sourcePage >= 1; sourcePage -= 1) {
+      if (direct[sourcePage] !== undefined) nextReaderPage = direct[sourcePage];
+      complete[sourcePage] = nextReaderPage;
+    }
+    return complete;
+  }, [pages]);
+
+  useEffect(() => {
+    onPageMapChange?.(sourcePageMap);
+  }, [onPageMapChange, sourcePageMap]);
   const destinationPage = useMemo(() => {
     if (!destination) return 0;
+    if (destination.readerPage !== undefined) {
+      return Math.max(0, Math.min(pages.length - 1, destination.readerPage - 1));
+    }
     const exactIndex = pages.findIndex((page) => page.some((segment) =>
       segment.blockId === destination.blockId &&
       (destination.searchMatchIndex === undefined || (
@@ -150,10 +224,14 @@ export default function HorizontalReaderPager({
   useEffect(() => {
     if (!destination || !pages.length) return;
     currentPageRef.current = destinationPage;
-    setVisiblePage(destinationPage);
     const sourcePage = pages[destinationPage]?.[0]?.sourcePage ?? destination.page;
-    onPageChange?.(destinationPage + 1, pages.length, sourcePage);
-  }, [destination, destinationPage, onPageChange, pages]);
+    onPageChange?.(
+      destinationPage + 1,
+      pages.length,
+      sourcePage,
+      pageAnchor(pages[destinationPage], blocks),
+    );
+  }, [blocks, destination, destinationPage, onPageChange, pages]);
 
   useEffect(() => {
     if (
@@ -161,7 +239,10 @@ export default function HorizontalReaderPager({
       navigatedDestinationNonceRef.current === destination.nonce
     ) return;
     const timer = setTimeout(() => {
-      pagerRef.current?.setPageWithoutAnimation(destinationPage);
+      pagerRef.current?.scrollToIndex({
+        animated: false,
+        index: destinationPage,
+      });
       navigatedDestinationNonceRef.current = destination.nonce;
     }, 0);
     return () => clearTimeout(timer);
@@ -171,14 +252,14 @@ export default function HorizontalReaderPager({
     if (pages.length) {
       const current = Math.min(currentPageRef.current, pages.length - 1);
       currentPageRef.current = current;
-      setVisiblePage(current);
       onPageChange?.(
         current + 1,
         pages.length,
-        pages[current]?.[0]?.sourcePage ?? 1
+        pages[current]?.[0]?.sourcePage ?? 1,
+        pageAnchor(pages[current], blocks),
       );
     }
-  }, [onPageChange, pages]);
+  }, [blocks, onPageChange, pages]);
 
   const renderSegment = (segment: Segment, index: number) => {
     const isSearchTarget = destination?.nonce !== dismissedSearchNonce &&
@@ -191,6 +272,21 @@ export default function HorizontalReaderPager({
       ? destination.searchMatchIndex! - segment.startOffset
       : -1;
     const queryLength = isSearchTarget ? destination.searchQuery!.length : 0;
+    const isSwitchTarget = destination?.nonce !== dismissedSwitchNonce &&
+      destination?.blockId === segment.blockId &&
+      destination.switchHighlightOffset !== undefined &&
+      destination.switchHighlightOffset >= segment.startOffset &&
+      destination.switchHighlightOffset < segment.startOffset + segment.text.length;
+    const switchLocalOffset = isSwitchTarget
+      ? destination.switchHighlightOffset! - segment.startOffset
+      : -1;
+    const switchMatch = isSwitchTarget
+      ? Array.from(segment.text.matchAll(/\S+/g)).find((match) =>
+          (match.index ?? 0) + match[0].length > switchLocalOffset
+        )
+      : undefined;
+    const switchStart = switchMatch?.index ?? -1;
+    const switchLength = switchMatch?.[0].length ?? 0;
     const headingScale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
 
     return (
@@ -213,6 +309,14 @@ export default function HorizontalReaderPager({
               {segment.text.slice(localMatch, localMatch + queryLength)}
             </Text>
             {segment.text.slice(localMatch + queryLength)}
+          </>
+        ) : switchStart >= 0 ? (
+          <>
+            {segment.text.slice(0, switchStart)}
+            <Text style={{ backgroundColor: "rgba(250, 204, 21, 0.68)" }}>
+              {segment.text.slice(switchStart, switchStart + switchLength)}
+            </Text>
+            {segment.text.slice(switchStart + switchLength)}
           </>
         ) : segment.text}
       </Text>
@@ -243,49 +347,93 @@ export default function HorizontalReaderPager({
         }
       }}
     >
-      <PagerView
+      <FlatList
         ref={pagerRef}
         style={{ flex: 1, backgroundColor }}
-        initialPage={0}
-        orientation="horizontal"
-        overdrag={false}
+        data={pages}
+        horizontal
+        pagingEnabled
+        initialScrollIndex={pages.length ? destinationPage : undefined}
+        bounces={false}
         overScrollMode="never"
-        offscreenPageLimit={1}
-        onPageScrollStateChanged={(event) => {
-          const state = event.nativeEvent.pageScrollState;
-          if (state === "dragging") {
-            onSwipeStart?.();
+        initialNumToRender={3}
+        maxToRenderPerBatch={3}
+        windowSize={5}
+        removeClippedSubviews
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={(_, pageIndex) => `reader-page-${pageIndex}`}
+        getItemLayout={(_, pageIndex) => ({
+          index: pageIndex,
+          length: width,
+          offset: width * pageIndex,
+        })}
+        onScrollBeginDrag={() => {
+          onSwipeStart?.();
+          if (destination?.switchHighlightOffset !== undefined) {
+            setDismissedSwitchNonce(destination.nonce);
           }
         }}
-        onPageSelected={(event) => {
-          const position = event.nativeEvent.position;
+        scrollEventThrottle={16}
+        onScroll={(event) => {
+          if (!pages.length || width <= 0) return;
+          const position = Math.max(
+            0,
+            Math.min(
+              pages.length - 1,
+              Math.round(event.nativeEvent.contentOffset.x / width),
+            ),
+          );
+          if (position === currentPageRef.current) return;
           currentPageRef.current = position;
-          setVisiblePage(position);
+          const sourcePage = pages[position]?.[0]?.sourcePage ?? 1;
+          onPageChange?.(
+            position + 1,
+            pages.length,
+            sourcePage,
+            pageAnchor(pages[position], blocks),
+          );
+        }}
+        onMomentumScrollEnd={(event) => {
+          const position = Math.max(
+            0,
+            Math.min(
+              pages.length - 1,
+              Math.round(event.nativeEvent.contentOffset.x / width),
+            ),
+          );
+          currentPageRef.current = position;
           if (destination?.searchQuery && position !== destinationPage) {
             setDismissedSearchNonce(destination.nonce);
           }
           const sourcePage = pages[position]?.[0]?.sourcePage ?? 1;
-          onPageChange?.(position + 1, pages.length, sourcePage);
+          onPageChange?.(
+            position + 1,
+            pages.length,
+            sourcePage,
+            pageAnchor(pages[position], blocks),
+          );
         }}
-      >
-        {pages.map((page, pageIndex) => (
+        onScrollToIndexFailed={({ index }) => {
+          pagerRef.current?.scrollToOffset({
+            animated: false,
+            offset: index * width,
+          });
+        }}
+        renderItem={({ item: page }) => (
           <View
-            key={`reader-page-${pageIndex}`}
-            collapsable={false}
             style={{
-              flex: 1,
               backgroundColor,
+              height: "100%",
               paddingHorizontal: 20,
               paddingTop: 20,
               paddingBottom: 12 + insets.bottom,
+              width,
             }}
           >
-            {Math.abs(pageIndex - visiblePage) <= 2
-              ? page.map(renderSegment)
-              : null}
+            {page.map(renderSegment)}
           </View>
-        ))}
-      </PagerView>
+        )}
+      />
     </View>
   );
 }

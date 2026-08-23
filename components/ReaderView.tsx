@@ -50,8 +50,10 @@ type ReaderViewProps = {
   isLandscape: boolean;
   blocks: ExtractedPdfBlock[];
   pageCount: number;
+  sourcePageCount?: number;
   destination?: {
     page: number;
+    readerPage?: number;
     blockId?: string;
     searchQuery?: string;
     searchMatchIndex?: number;
@@ -62,6 +64,7 @@ type ReaderViewProps = {
   } | null;
   onPageChange?: (page: number) => void;
   onPaginationChange?: (currentPage: number, totalPages: number) => void;
+  onPageMapChange?: (pageMap: Record<number, number>) => void;
   onSwitchAnchorChange?: (blockId: string, word: string, wordIndex: number) => void;
   showSwitchHighlight?: boolean;
   onReady?: () => void;
@@ -123,9 +126,11 @@ const ReaderView = ({
   isLandscape,
   blocks,
   pageCount,
+  sourcePageCount,
   destination,
   onPageChange,
   onPaginationChange,
+  onPageMapChange,
   onSwitchAnchorChange,
   showSwitchHighlight = false,
   onReady,
@@ -165,7 +170,19 @@ const ReaderView = ({
   const appendedBlockCount = useRef(initialBlocks.length);
   const sentBlockIds = useRef(new Set(initialBlocks.map((block) => block.id)));
   const lastSourcePageRef = useRef(1);
+  const modeTextAnchorRef = useRef<{
+    blockId: string;
+    blockOffset: number;
+    wordIndex: number;
+  } | null>(null);
   const [currentSourcePage, setCurrentSourcePage] = useState(1);
+  const [pagerModeDestination, setPagerModeDestination] = useState<{
+    page: number;
+    blockId?: string;
+    searchMatchIndex?: number;
+    switchHighlightOffset?: number;
+    nonce: number;
+  } | null>(null);
   const recoveryPageRef = useRef<number | null>(null);
   const [webViewReady, setWebViewReady] = useState(false);
   const [appendPass, setAppendPass] = useState(0);
@@ -221,7 +238,9 @@ const ReaderView = ({
       (highest, block) => Math.max(highest, block.page),
       0,
     );
-    const hasMore = highestAvailablePage < pageCount || remaining.length > appended.length;
+    const hasMore =
+      highestAvailablePage < (sourcePageCount ?? pageCount) ||
+      remaining.length > appended.length;
     if (!appended.length) {
       webViewRef.current?.postMessage(JSON.stringify({
         type: "appendBlocks",
@@ -241,7 +260,14 @@ const ReaderView = ({
       const timer = setTimeout(() => setAppendPass((value) => value + 1), 45);
       return () => clearTimeout(timer);
     }
-  }, [appendPass, blocks, destination, pageCount, webViewReady]);
+  }, [
+    appendPass,
+    blocks,
+    destination,
+    pageCount,
+    sourcePageCount,
+    webViewReady,
+  ]);
 
   useEffect(() => {
     if (!webViewReady || !destination) return;
@@ -249,7 +275,7 @@ const ReaderView = ({
       type: "goToSourcePage",
       ...destination,
     }));
-  }, [destination, pageCount, webViewReady]);
+  }, [destination, webViewReady]);
   const transition = useReaderSettingsStore((state) => state.transition);
   const { isPaged, syncPageTransition } = usePageTransition({
     webViewRef,
@@ -403,10 +429,64 @@ const textColor =
     current: number,
     total: number,
     sourcePage: number,
+    anchor?: { blockId: string; blockOffset: number; wordIndex: number },
   ) => {
+    lastSourcePageRef.current = sourcePage;
+    if (anchor) modeTextAnchorRef.current = anchor;
+    setCurrentSourcePage(sourcePage);
     onPaginationChange?.(current, total);
     onPageChange?.(sourcePage);
   }, [onPageChange, onPaginationChange]);
+
+  const previousPagedModeRef = useRef(isPaged);
+  useEffect(() => {
+    const wasPaged = previousPagedModeRef.current;
+    previousPagedModeRef.current = isPaged;
+    if (!wasPaged && isPaged) {
+      const anchor = modeTextAnchorRef.current;
+      setPagerModeDestination({
+        page: Math.max(1, lastSourcePageRef.current),
+        blockId: anchor?.blockId,
+        searchMatchIndex: anchor?.blockOffset,
+        switchHighlightOffset: anchor?.blockOffset,
+        nonce: Date.now(),
+      });
+      return;
+    }
+    if (!wasPaged || isPaged || !webViewReady) return;
+
+    const sourcePage = Math.max(1, lastSourcePageRef.current);
+    const anchor = modeTextAnchorRef.current;
+    onPaginationChange?.(sourcePage, pageCount);
+    onPageChange?.(sourcePage);
+    const timer = setTimeout(() => {
+      webViewRef.current?.postMessage(JSON.stringify({
+        type: "goToSourcePage",
+        page: sourcePage,
+        blockId: anchor?.blockId,
+        switchHighlightWordIndex: anchor?.wordIndex,
+      }));
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [isPaged, onPageChange, onPaginationChange, pageCount, webViewReady]);
+
+  const effectivePagerDestination = useMemo(() => {
+    if (isPaged && !previousPagedModeRef.current) {
+      const anchor = modeTextAnchorRef.current;
+      return {
+        page: Math.max(1, currentSourcePage),
+        blockId: anchor?.blockId,
+        searchMatchIndex: anchor?.blockOffset,
+        switchHighlightOffset: anchor?.blockOffset,
+        nonce: Number.MAX_SAFE_INTEGER,
+      };
+    }
+    if (!pagerModeDestination) return destination;
+    if (!destination) return pagerModeDestination;
+    return destination.nonce > pagerModeDestination.nonce
+      ? destination
+      : pagerModeDestination;
+  }, [currentSourcePage, destination, isPaged, pagerModeDestination]);
 
 
   const sendReaderSettings = useCallback(() => {
@@ -775,6 +855,10 @@ const textColor =
       if (message.type === 'appendBlocks') {
         const container = document.getElementById('reader-pages');
         if (!container) return;
+        const viewportAnchor = document
+          .elementFromPoint(Math.max(1, window.innerWidth / 2), 12)
+          ?.closest?.('[data-source-page-section]');
+        const anchorTop = viewportAnchor?.getBoundingClientRect().top;
         if (message.html) {
           const template = document.createElement('template');
           template.innerHTML = message.html;
@@ -785,6 +869,13 @@ const textColor =
             });
             container.insertBefore(section, next || null);
           });
+        }
+        if (viewportAnchor && Number.isFinite(anchorTop)) {
+          const nextAnchorTop = viewportAnchor.getBoundingClientRect().top;
+          const insertedOffset = nextAnchorTop - anchorTop;
+          if (Math.abs(insertedOffset) > 0.5) {
+            window.scrollBy({ top: insertedOffset, left: 0, behavior: 'auto' });
+          }
         }
         window.__readerHasMore = Boolean(message.hasMore);
         const loader = document.getElementById('reader-loader');
@@ -883,7 +974,11 @@ const textColor =
         );
         const destinationTarget = searchHighlight || resolvedTarget;
         if (window.__readerTransition === 'scroll') {
-          destinationTarget.scrollIntoView({ behavior: 'auto', block: 'center' });
+          window.__pinnedSourcePage = Number(pending.page);
+          destinationTarget.scrollIntoView({ behavior: 'auto', block: 'start' });
+          requestAnimationFrame(function() {
+            window.__reportSourcePage?.(pending.page);
+          });
         } else if (window.__goToElementPage) {
           window.__goToElementPage(destinationTarget);
         }
@@ -894,12 +989,20 @@ const textColor =
         });
         setTimeout(function() {
           window.__reportSwitchAnchor?.();
-          window.__highlightSwitchWordAtIndex?.(
-            resolvedTarget,
-            pending.switchHighlightWordIndex,
-            pending.switchHighlightWordProgress,
-            pending.switchHighlightQuery
-          );
+          const hasSwitchTarget =
+            pending.switchHighlightWordIndex !== undefined ||
+            pending.switchHighlightWordProgress !== undefined ||
+            Boolean(pending.switchHighlightQuery);
+          if (hasSwitchTarget) {
+            window.__highlightSwitchWordAtIndex?.(
+              resolvedTarget,
+              pending.switchHighlightWordIndex,
+              pending.switchHighlightWordProgress,
+              pending.switchHighlightQuery
+            );
+          } else {
+            window.__clearReaderSwitchHighlight?.();
+          }
         }, 100);
       };
       if (message.type === 'goToSourcePage') {
@@ -1254,8 +1357,10 @@ const textColor =
         if (typeof data.sourcePage === "number") {
           lastSourcePageRef.current = data.sourcePage;
           setCurrentSourcePage(data.sourcePage);
-          onPageChange?.(data.sourcePage);
-          onPaginationChange?.(data.sourcePage, pageCount);
+          if (!isPaged) {
+            onPageChange?.(data.sourcePage);
+            onPaginationChange?.(data.sourcePage, pageCount);
+          }
         }
 
         const currentScrollY =
@@ -1317,8 +1422,10 @@ const textColor =
       if (data.type === "sourcePage" && typeof data.page === "number") {
         lastSourcePageRef.current = data.page;
         setCurrentSourcePage(data.page);
-        onPageChange?.(data.page);
-        onPaginationChange?.(data.page, pageCount);
+        if (!isPaged) {
+          onPageChange?.(data.page);
+          onPaginationChange?.(data.page, pageCount);
+        }
         return;
       }
 
@@ -1331,6 +1438,23 @@ const textColor =
       }
 
       if (data.type === "switchAnchor" && typeof data.blockId === "string") {
+        const wordIndex = typeof data.wordIndex === "number"
+          ? Math.max(0, data.wordIndex)
+          : 0;
+        const sourceBlock = blocks.find((block) => block.id === data.blockId);
+        const wordAtIndex = sourceBlock
+          ? Array.from(sourceBlock.text.matchAll(/\S+/g))[wordIndex]
+          : undefined;
+        const blockOffset = typeof data.blockOffset === "number"
+          ? data.blockOffset
+          : wordAtIndex?.index;
+        if (blockOffset !== undefined) {
+          modeTextAnchorRef.current = {
+            blockId: data.blockId,
+            blockOffset,
+            wordIndex,
+          };
+        }
         if (typeof data.ttsOffset === "number") {
           setTtsStartOffset(Math.max(0, data.ttsOffset));
         }
@@ -1359,6 +1483,14 @@ const textColor =
       showToolbar();
     }
   }, [hideToolbar, isPaged, showToolbar]);
+
+  useEffect(() => {
+    if (!isActive || isPaged || pageCount < 1) return;
+    onPaginationChange?.(
+      Math.max(1, Math.min(currentSourcePage, pageCount)),
+      pageCount,
+    );
+  }, [currentSourcePage, isActive, isPaged, onPaginationChange, pageCount]);
 
   // --------------------------------
   // TOOLBAR BUTTON
@@ -1543,15 +1675,17 @@ const textColor =
             <View style={StyleSheet.absoluteFill}>
               <HorizontalReaderPager
                 blocks={blocks}
-                destination={destination}
+                destination={effectivePagerDestination}
                 fontFamily={fontFamily.split(",")[0].replaceAll("'", "").trim()}
                 fontSize={fontSize}
                 lineHeight={lineHeight}
                 letterSpacing={letterSpacing}
+                wordSpacing={wordSpacing}
                 bold={bold}
                 backgroundColor={backgroundColor}
                 textColor={textColor}
                 onPageChange={handlePagerPageChange}
+                onPageMapChange={onPageMapChange}
                 onReaderTap={() => {
                   if (toolbarHidden.current) {
                     showToolbar();
@@ -1757,6 +1891,14 @@ const textColor =
                   selected.match.index + selected.match[0].length
                 );
                 drawReaderSwitchHighlight(range);
+                if (window.__readerTransition === 'scroll') {
+                  const rect = range.getBoundingClientRect();
+                  window.scrollBy({
+                    top: rect.top - window.innerHeight * 0.28,
+                    left: 0,
+                    behavior: 'auto'
+                  });
+                }
               };
 
               function reportSwitchAnchor() {
@@ -1830,6 +1972,7 @@ const textColor =
                     blockId: blockId,
                     word: highlightedWord,
                     wordIndex: highlightedWordIndex,
+                    blockOffset: highlightedCharacterOffset,
                     ttsOffset:
                       Number(block.dataset.ttsStart || 0) +
                       highlightedCharacterOffset
@@ -2284,23 +2427,43 @@ const textColor =
               }
 
               function sourcePageAtViewport() {
-                const probeX = window.innerWidth / 2;
-                const probeY = window.innerHeight * 0.28;
-                let section = document.elementFromPoint(probeX, probeY)
-                  ?.closest?.('[data-source-page-section]');
-                if (!section) {
-                  for (let y = probeY; y >= 8 && !section; y -= 36) {
-                    section = document.elementFromPoint(probeX, y)
-                      ?.closest?.('[data-source-page-section]');
+                const sections = Array.from(
+                  document.querySelectorAll('[data-source-page-section]')
+                );
+                if (!sections.length) return lastReportedSourcePage || 1;
+
+                // Use the reading area's top edge as the page boundary. An
+                // elementFromPoint probe farther down can still hit the prior
+                // section when a page starts with whitespace or a divider.
+                const anchorY = Math.min(48, window.innerHeight * 0.1);
+                // Adjacent sections may overlap because their first/last text
+                // margins collapse. Choose the latest section that has crossed
+                // the anchor, not the first section whose rectangle contains it.
+                let section = null;
+                sections.forEach(function(item) {
+                  if (item.getBoundingClientRect().top <= anchorY) {
+                    section = item;
                   }
+                });
+                if (!section) {
+                  section = sections.find(function(item) {
+                    return item.getBoundingClientRect().top > anchorY;
+                  }) || sections[sections.length - 1];
                 }
                 return Number(section?.dataset.sourcePageSection) ||
                   lastReportedSourcePage || 1;
               }
 
               let lastReportedSourcePage = 0;
-              function reportSourcePage() {
-                const page = sourcePageAtViewport();
+              function reportSourcePage(requestedPage) {
+                const numericRequestedPage = Number(requestedPage);
+                const pinnedSourcePage = Number(window.__pinnedSourcePage);
+                const page = Number.isFinite(numericRequestedPage) &&
+                  numericRequestedPage >= 1
+                  ? numericRequestedPage
+                  : Number.isFinite(pinnedSourcePage) && pinnedSourcePage >= 1
+                    ? pinnedSourcePage
+                  : sourcePageAtViewport();
                 if (page === lastReportedSourcePage) return page;
                 lastReportedSourcePage = page;
                 window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -2309,6 +2472,7 @@ const textColor =
                 }));
                 return page;
               }
+              window.__reportSourcePage = reportSourcePage;
 
               window.__goToElementPage = function(element) {
                 if (!element || window.__readerTransition === 'scroll') return;
@@ -2403,6 +2567,25 @@ const textColor =
               // SCROLL HANDLING
               // --------------------------------
 
+              function releaseProgrammaticSourcePage() {
+                window.__pinnedSourcePage = null;
+              }
+              window.addEventListener(
+                'touchstart',
+                releaseProgrammaticSourcePage,
+                { passive: true }
+              );
+              window.addEventListener(
+                'pointerdown',
+                releaseProgrammaticSourcePage,
+                { passive: true }
+              );
+              window.addEventListener(
+                'wheel',
+                releaseProgrammaticSourcePage,
+                { passive: true }
+              );
+
               let scrollTimer = null;
 
               window.addEventListener(
@@ -2417,6 +2600,12 @@ const textColor =
 
                   if (window.__showReaderSwitchHighlight) {
                     window.__showReaderSwitchHighlight = false;
+                    clearReaderSwitchHighlight();
+                  }
+                  if (
+                    !window.__pinnedSourcePage &&
+                    document.getElementById('reader-switch-highlight')
+                  ) {
                     clearReaderSwitchHighlight();
                   }
 

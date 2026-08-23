@@ -18,6 +18,7 @@ export type ReaderChapter = {
   blockId?: string;
   title: string;
   page: number;
+  sourcePage?: number;
   children?: ReaderChapter[];
 };
 

@@ -21,6 +21,7 @@ type OriginalPdfProps = {
   onOutlineChanged?: (outline: PdfOutlineItem[]) => void;
   highlightTarget?: SwitchHighlightTarget | null;
   outlineOnly?: boolean;
+  destination?: { page: number; nonce: number } | null;
 };
 
 export type PdfOutlineItem = {
@@ -106,6 +107,7 @@ export default function OriginalPDF({
   onOutlineChanged,
   highlightTarget,
   outlineOnly = false,
+  destination,
 }: OriginalPdfProps) {
   const webViewRef = useRef<WebView>(null);
   const [html, setHtml] = useState<string | null>(null);
@@ -141,6 +143,12 @@ export default function OriginalPDF({
   useEffect(() => {
     if (ready) sendToViewer({ type: "highlight", target: highlightTarget ?? null });
   }, [highlightTarget, ready, sendToViewer]);
+
+  useEffect(() => {
+    if (ready && destination) {
+      sendToViewer({ type: "goToPage", page: Math.max(1, destination.page) });
+    }
+  }, [destination, ready, sendToViewer]);
 
   const handleMessage = useCallback(async (event: WebViewMessageEvent) => {
     let message: { type: string; [key: string]: unknown };

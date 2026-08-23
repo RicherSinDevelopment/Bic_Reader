@@ -11,7 +11,7 @@ import { Heading } from "@/components/ui/heading";
 import { CloseIcon, Icon, SearchIcon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
 import React, { useDeferredValue, useMemo, useState } from "react";
-import { FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, TextInput, useColorScheme, View } from "react-native";
 
 type SearchResult = {
   id: string;
@@ -47,6 +47,8 @@ export default function ReaderSearchButton({
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase());
+  const isDark = useColorScheme() === "dark";
+  const styles = useMemo(() => createStyles(isDark), [isDark]);
 
   const results = useMemo<SearchResult[]>(() => {
     if (!deferredQuery) return [];
@@ -80,7 +82,7 @@ export default function ReaderSearchButton({
         grouped={grouped}
         onPress={() => setIsOpen(true)}
       >
-        <Icon as={SearchIcon} size="lg" className="text-[#242424]" />
+        <Icon as={SearchIcon} size="lg" className="text-[#242424] dark:text-[#F4F5F1]" />
       </ReaderGlassIconButton>
 
       <Drawer
@@ -101,7 +103,7 @@ export default function ReaderSearchButton({
           </DrawerHeader>
 
           <View style={styles.searchBox}>
-            <Icon as={SearchIcon} size="md" className="text-black/40" />
+            <Icon as={SearchIcon} size="md" className="text-black/40 dark:text-white/50" />
             <TextInput
               accessibilityLabel="Search text in this book"
               autoFocus
@@ -109,14 +111,14 @@ export default function ReaderSearchButton({
               autoCorrect={false}
               clearButtonMode="while-editing"
               placeholder="Search this book"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={isDark ? "#9EA69A" : "#9ca3af"}
               value={query}
               onChangeText={setQuery}
               style={styles.input}
             />
           </View>
 
-          <Text className="mb-2 mt-3 text-xs text-black/50">
+          <Text className="mb-2 mt-3 text-xs text-black/50 dark:text-white/50">
             {deferredQuery
               ? `${results.length}${results.length === 250 ? "+" : ""} result${results.length === 1 ? "" : "s"}`
               : "Type a word or phrase"}
@@ -134,7 +136,7 @@ export default function ReaderSearchButton({
             ItemSeparatorComponent={() => <View style={styles.separator} />}
             ListEmptyComponent={
               deferredQuery ? (
-                <Text className="py-8 text-center text-sm text-black/45">
+                <Text className="py-8 text-center text-sm text-black/45 dark:text-white/45">
                   No matches found
                 </Text>
               ) : null
@@ -163,7 +165,7 @@ export default function ReaderSearchButton({
                   Page {item.page}
                 </Text>
                 <Text
-                  className="mt-1 text-sm leading-5 text-black/75"
+                  className="mt-1 text-sm leading-5 text-black/75 dark:text-white/75"
                   numberOfLines={3}
                 >
                   {item.snippet}
@@ -177,21 +179,21 @@ export default function ReaderSearchButton({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (isDark: boolean) => StyleSheet.create({
   searchBox: {
     height: 52,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
     borderWidth: 1,
-    borderColor: "#dbe2ea",
+    borderColor: isDark ? "#42483F" : "#dbe2ea",
     borderRadius: 14,
-    backgroundColor: "#ffffff",
+    backgroundColor: isDark ? "#222720" : "#ffffff",
     paddingHorizontal: 14,
   },
-  input: { flex: 1, height: "100%", color: "#0f172a", fontSize: 16 },
+  input: { flex: 1, height: "100%", color: isDark ? "#F4F5F1" : "#0f172a", fontSize: 16 },
   results: { paddingBottom: 32 },
   result: { borderRadius: 12, paddingHorizontal: 10, paddingVertical: 12 },
-  pressed: { backgroundColor: "#f1f5f9" },
-  separator: { height: 1, backgroundColor: "rgba(15, 23, 42, 0.07)" },
+  pressed: { backgroundColor: isDark ? "#2A3027" : "#f1f5f9" },
+  separator: { height: 1, backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(15, 23, 42, 0.07)" },
 });

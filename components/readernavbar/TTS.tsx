@@ -16,6 +16,7 @@ import {
   Pressable,
   ScrollView,
   Text,
+  useColorScheme,
   View,
 } from "react-native";
 
@@ -102,6 +103,7 @@ export default function TTS({
   translationLanguage,
   onTranslationLanguageChange,
 }: TTSProps) {
+  const isDark = useColorScheme() === "dark";
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voices, setVoices] = useState<AppleSpeechVoice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<string | undefined>();
@@ -279,22 +281,22 @@ export default function TTS({
 
   return (
     <View className="px-4 py-4">
-      <Text className="text-lg font-semibold text-slate-900">
+      <Text className="text-lg font-semibold text-slate-900 dark:text-[#F4F5F1]">
         Text to Speech
       </Text>
 
       <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600">Translated to:</Text>
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Translated to:</Text>
         <Pressable
           accessibilityLabel={`Choose translation language. Current language: ${translationLanguage?.label ?? "Original"}`}
           accessibilityRole="button"
           onPress={() => setIsLanguageMenuOpen(true)}
-          className="h-10 min-w-36 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5"
+          className="h-10 min-w-36 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5 dark:border-white/20 dark:bg-[#222720] dark:active:bg-white/5"
         >
-          <Text className="text-sm text-black">
+          <Text className="text-sm text-black dark:text-[#F4F5F1]">
             {translationLanguage?.label ?? "Original"}
           </Text>
-          <Icon as={ChevronDownIcon} size="xs" className="text-black/60" />
+          <Icon as={ChevronDownIcon} size="xs" className="text-black/60 dark:text-white/60" />
         </Pressable>
       </View>
       <Modal
@@ -308,8 +310,8 @@ export default function TTS({
           className="absolute inset-0 bg-black/20"
           onPress={() => setIsLanguageMenuOpen(false)}
         />
-        <View className="mx-6 my-auto max-h-[70%] overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg">
-          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900">
+        <View className="mx-6 my-auto max-h-[70%] overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1A1E18]">
+          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900 dark:text-[#F4F5F1]">
             Translate to
           </Text>
           <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
@@ -322,8 +324,8 @@ export default function TTS({
               }}
               className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
             >
-              <Text className="text-base text-black">Original</Text>
-              {!translationLanguage && <Check size={16} color="#000000" />}
+              <Text className="text-base text-black dark:text-[#F4F5F1]">Original</Text>
+              {!translationLanguage && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
             </Pressable>
             {translationLanguages.map((language) => {
               const isSelected = language.code === translationLanguage?.code;
@@ -339,8 +341,8 @@ export default function TTS({
                   }}
                   className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
                 >
-                  <Text className="text-base text-black">{language.label}</Text>
-                  {isSelected && <Check size={16} color="#000000" />}
+                  <Text className="text-base text-black dark:text-[#F4F5F1]">{language.label}</Text>
+                  {isSelected && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
                 </Pressable>
               );
             })}
@@ -349,22 +351,22 @@ export default function TTS({
       </Modal>
 
       <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600">Voice:</Text>
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Voice:</Text>
         <Pressable
           accessibilityLabel={`Choose voice. Current voice: ${selectedVoiceName}`}
           accessibilityRole="button"
           onPress={() => setIsVoiceMenuOpen(true)}
-          className="h-10 max-w-64 flex-row items-center gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5"
+          className="h-10 max-w-64 flex-row items-center gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5 dark:border-white/20 dark:bg-[#222720] dark:active:bg-white/5"
         >
-          <Text numberOfLines={1} className="shrink text-sm text-black">
+          <Text numberOfLines={1} className="shrink text-sm text-black dark:text-[#F4F5F1]">
             {voices.length ? selectedVoiceName : "Loading voices..."}
           </Text>
-          <Icon as={ChevronDownIcon} size="xs" className="text-black/60" />
+          <Icon as={ChevronDownIcon} size="xs" className="text-black/60 dark:text-white/60" />
         </Pressable>
       </View>
       {voices.length > 0 && (
         <View className="mt-2 flex-row items-center justify-end gap-3">
-          <Text className="text-xs text-slate-500">
+          <Text className="text-xs text-slate-500 dark:text-[#9EA69A]">
             {visibleVoices.length} relevant Apple voices · {visibleVoices.filter(
               (voice) => voice.quality !== "Default",
             ).length} high quality
@@ -390,8 +392,8 @@ export default function TTS({
           className="absolute inset-0 bg-black/20"
           onPress={() => setIsVoiceMenuOpen(false)}
         />
-        <View className="mx-6 my-auto max-h-[70%] overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg">
-          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900">
+        <View className="mx-6 my-auto max-h-[70%] overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1A1E18]">
+          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900 dark:text-[#F4F5F1]">
             Apple AVFoundation voices
           </Text>
           <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
@@ -403,8 +405,8 @@ export default function TTS({
               }}
               className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
             >
-              <Text className="text-base text-black">System default</Text>
-              {!selectedVoice && <Check size={16} color="#000000" />}
+              <Text className="text-base text-black dark:text-[#F4F5F1]">System default</Text>
+              {!selectedVoice && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
             </Pressable>
 
             {visibleVoices.map((voice) => {
@@ -421,12 +423,12 @@ export default function TTS({
                   className="min-h-12 flex-row items-center justify-between rounded px-3 py-2 active:bg-black/5"
                 >
                   <View className="mr-3 shrink">
-                    <Text className="text-base text-black">{voice.name}</Text>
-                    <Text className="text-xs text-slate-500">
+                    <Text className="text-base text-black dark:text-[#F4F5F1]">{voice.name}</Text>
+                    <Text className="text-xs text-slate-500 dark:text-[#9EA69A]">
                       {voice.language} · {voice.quality}
                     </Text>
                   </View>
-                  {isSelected && <Check size={16} color="#000000" />}
+                  {isSelected && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
                 </Pressable>
               );
             })}
@@ -435,15 +437,15 @@ export default function TTS({
       </Modal>
 
       <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600">Voice speed:</Text>
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Voice speed:</Text>
         <Pressable
           accessibilityLabel={`Choose voice speed. Current speed: ${speechRate}x`}
           accessibilityRole="button"
           onPress={() => setIsSpeedMenuOpen(true)}
-          className="h-10 min-w-24 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5"
+          className="h-10 min-w-24 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5 dark:border-white/20 dark:bg-[#222720] dark:active:bg-white/5"
         >
-          <Text className="text-sm text-black">{speechRate}x</Text>
-          <Icon as={ChevronDownIcon} size="xs" className="text-black/60" />
+          <Text className="text-sm text-black dark:text-[#F4F5F1]">{speechRate}x</Text>
+          <Icon as={ChevronDownIcon} size="xs" className="text-black/60 dark:text-white/60" />
         </Pressable>
       </View>
 
@@ -458,8 +460,8 @@ export default function TTS({
           className="absolute inset-0 bg-black/20"
           onPress={() => setIsSpeedMenuOpen(false)}
         />
-        <View className="mx-6 my-auto overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg">
-          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900">
+        <View className="mx-6 my-auto overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1A1E18]">
+          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900 dark:text-[#F4F5F1]">
             Choose voice speed
           </Text>
           {speedOptions.map((option) => {
@@ -475,8 +477,8 @@ export default function TTS({
                 }}
                 className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
               >
-                <Text className="text-base text-black">{option.label}</Text>
-                {isSelected && <Check size={16} color="#000000" />}
+                <Text className="text-base text-black dark:text-[#F4F5F1]">{option.label}</Text>
+                {isSelected && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
               </Pressable>
             );
           })}
@@ -484,21 +486,21 @@ export default function TTS({
       </Modal>
 
       <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600">Sleep timer:</Text>
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Sleep timer:</Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Choose sleep timer. Current setting: ${sleepTimerMinutes ? `${sleepTimerMinutes} minutes` : "Off"}`}
           onPress={() => setIsSleepTimerMenuOpen(true)}
-          className="h-10 min-w-28 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5"
+          className="h-10 min-w-28 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5 dark:border-white/20 dark:bg-[#222720] dark:active:bg-white/5"
         >
-          <Text className="text-sm text-black">
+          <Text className="text-sm text-black dark:text-[#F4F5F1]">
             {sleepTimerRemaining > 0
               ? `${Math.ceil(sleepTimerRemaining / 60)} min left`
               : sleepTimerMinutes
                 ? `${sleepTimerMinutes} min`
                 : "Off"}
           </Text>
-          <Icon as={ChevronDownIcon} size="xs" className="text-black/60" />
+          <Icon as={ChevronDownIcon} size="xs" className="text-black/60 dark:text-white/60" />
         </Pressable>
       </View>
 
@@ -513,8 +515,8 @@ export default function TTS({
           className="absolute inset-0 bg-black/20"
           onPress={() => setIsSleepTimerMenuOpen(false)}
         />
-        <View className="mx-6 my-auto overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg">
-          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900">
+        <View className="mx-6 my-auto overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1A1E18]">
+          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900 dark:text-[#F4F5F1]">
             Stop speaking after
           </Text>
           <Pressable
@@ -528,8 +530,8 @@ export default function TTS({
             }}
             className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
           >
-            <Text className="text-base text-black">Off</Text>
-            {!sleepTimerMinutes && <Check size={16} color="#000000" />}
+            <Text className="text-base text-black dark:text-[#F4F5F1]">Off</Text>
+            {!sleepTimerMinutes && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
           </Pressable>
           {sleepTimerOptions.map((minutes) => (
             <Pressable
@@ -546,12 +548,12 @@ export default function TTS({
               }}
               className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
             >
-              <Text className="text-base text-black">
+              <Text className="text-base text-black dark:text-[#F4F5F1]">
                 {minutes < 60
                   ? `${minutes} minutes`
                   : `${minutes / 60} ${minutes === 60 ? "hour" : "hours"}`}
               </Text>
-              {sleepTimerMinutes === minutes && <Check size={16} color="#000000" />}
+              {sleepTimerMinutes === minutes && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
             </Pressable>
           ))}
         </View>
@@ -569,13 +571,13 @@ export default function TTS({
         size="lg"
         onPress={handleTTS}
         isDisabled={!isAppleSpeechAvailable || !text.trim()}
-        className="mt-8 h-14 flex-row items-center justify-center rounded-xl bg-green-400 px-5"
+        className="mt-8 h-14 flex-row items-center justify-center rounded-xl bg-[#639922] px-5"
         accessibilityLabel={
           isSpeaking ? "Stop text to speech" : "Start text to speech"
         }
       >
         <ButtonText
-          className="font-lato-bold"
+          className="font-lato-bold text-white"
           style={{ fontFamily: "Lato_700Bold" }}
         >
           {isSpeaking ? "STOP TTS" : "START TTS"}

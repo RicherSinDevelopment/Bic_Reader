@@ -1,8 +1,8 @@
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { CheckCircle2, CircleAlert } from 'lucide-react-native';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createSessionFromAuthUrl } from '@/lib/auth-deep-link';
@@ -15,6 +15,8 @@ export default function AuthCallback() {
   const handledUrl = useRef<string | null>(null);
   const [status, setStatus] = useState<CallbackStatus>('loading');
   const [message, setMessage] = useState('Confirming your email…');
+  const isDark = useColorScheme() === 'dark';
+  const styles = useMemo(() => createStyles(isDark), [isDark]);
 
   useEffect(() => {
     if (!incomingUrl || handledUrl.current === incomingUrl) return;
@@ -69,13 +71,13 @@ export default function AuthCallback() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (isDark: boolean) => StyleSheet.create({
   safeArea: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: '#F7F5EF',
+    backgroundColor: isDark ? '#10120F' : '#F7F5EF',
   },
   card: {
     width: '100%',
@@ -83,9 +85,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 28,
     borderWidth: 1,
-    borderColor: '#E5E2D8',
+    borderColor: isDark ? '#343A31' : '#E5E2D8',
     borderRadius: 28,
-    backgroundColor: '#FFFEFB',
+    backgroundColor: isDark ? '#1A1E18' : '#FFFEFB',
   },
   iconShell: {
     width: 72,
@@ -93,19 +95,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 36,
-    backgroundColor: '#EAF3DE',
+    backgroundColor: isDark ? '#273321' : '#EAF3DE',
   },
-  errorIconShell: { backgroundColor: '#FEECEB' },
+  errorIconShell: { backgroundColor: isDark ? '#321E1C' : '#FEECEB' },
   title: {
     marginTop: 22,
-    color: '#2C2C2A',
+    color: isDark ? '#F4F5F1' : '#2C2C2A',
     fontFamily: 'Lato_700Bold',
     fontSize: 25,
     textAlign: 'center',
   },
   message: {
     marginTop: 10,
-    color: '#737270',
+    color: isDark ? '#A6ADA1' : '#737270',
     fontFamily: 'Lato_400Regular',
     fontSize: 15,
     lineHeight: 22,

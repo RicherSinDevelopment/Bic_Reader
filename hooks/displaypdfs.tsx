@@ -61,7 +61,7 @@ export default function PdfLibrary({
   // ========================================
 
   return (
-    <View className="flex-1 bg-[#F7F5EC]">
+    <View className="flex-1 bg-[#F7F5EC] dark:bg-[#10120F]">
       <FlatList
         data={pdfs}
         keyExtractor={(item) => item.id}
@@ -93,7 +93,7 @@ export default function PdfLibrary({
 
         ListEmptyComponent={
           <View className="flex-1 items-center justify-center pb-20">
-            <Text className="font-lato-bold text-base text-black/50">
+            <Text className="font-lato-bold text-base text-black/50 dark:text-white/50">
               No PDFs yet
             </Text>
           </View>
@@ -128,4 +128,3 @@ export default function PdfLibrary({
     </View>
   );
 }
-

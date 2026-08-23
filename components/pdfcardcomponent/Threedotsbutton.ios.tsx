@@ -13,6 +13,7 @@ import {
   Pressable,
   Text,
   TextInput,
+  useColorScheme,
   View,
 } from "react-native";
 
@@ -31,6 +32,7 @@ export default function ThreeDotsButton({
 }: ThreeDotsButtonProps) {
   const [isRenameOpen, setIsRenameOpen] = useState(false);
   const [draftName, setDraftName] = useState(fileName);
+  const isDark = useColorScheme() === "dark";
 
   const openRenameDialog = () => {
     void Haptics.selectionAsync();
@@ -87,7 +89,7 @@ export default function ThreeDotsButton({
             <Image
               systemName="ellipsis"
               size={18}
-              color="rgba(0, 0, 0, 0.6)"
+              color={isDark ? "rgba(255, 255, 255, 0.65)" : "rgba(0, 0, 0, 0.6)"}
               modifiers={[
                 rotationEffect(90),
                 frame({ width: 24, height: 32, alignment: "center" }),
@@ -111,8 +113,8 @@ export default function ThreeDotsButton({
             onPress={() => setIsRenameOpen(false)}
           />
 
-          <View className="rounded-lg bg-white p-5 shadow-lg">
-            <Text className="font-lato-bold text-lg text-black">Rename PDF</Text>
+          <View className="rounded-lg bg-white p-5 shadow-lg dark:bg-[#1A1E18]">
+            <Text className="font-lato-bold text-lg text-black dark:text-[#F4F5F1]">Rename PDF</Text>
 
             <TextInput
               autoFocus
@@ -121,7 +123,8 @@ export default function ThreeDotsButton({
               onChangeText={setDraftName}
               onSubmitEditing={saveName}
               returnKeyType="done"
-              className="mt-4 h-12 rounded-md border border-black/20 px-3 text-base text-black"
+              placeholderTextColor={isDark ? "#9EA69A" : "#737270"}
+              className="mt-4 h-12 rounded-md border border-black/20 px-3 text-base text-black dark:border-white/20 dark:text-[#F4F5F1]"
             />
 
             <View className="mt-5 flex-row justify-end gap-3">
@@ -129,15 +132,15 @@ export default function ThreeDotsButton({
                 onPress={() => setIsRenameOpen(false)}
                 className="h-10 justify-center px-3"
               >
-                <Text className="font-lato-bold text-black/60">Cancel</Text>
+                <Text className="font-lato-bold text-black/60 dark:text-white/60">Cancel</Text>
               </Pressable>
 
               <Pressable
                 disabled={!draftName.trim()}
                 onPress={saveName}
-                className="h-10 justify-center rounded-md bg-green-400 px-4 disabled:opacity-40"
+                className="h-10 justify-center rounded-md bg-[#639922] px-4 disabled:opacity-40"
               >
-                <Text className="font-lato-bold text-black">Save</Text>
+                <Text className="font-lato-bold text-white">Save</Text>
               </Pressable>
             </View>
           </View>

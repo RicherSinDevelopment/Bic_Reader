@@ -1,13 +1,8 @@
-import { Button, Host, HStack, Image, Text } from "@expo/ui/swift-ui";
-import {
-  buttonStyle,
-  disabled,
-  frame,
-  shadow,
-  tint,
-} from "@expo/ui/swift-ui/modifiers";
+import { homepageDepth } from "@/components/HomePageui/depthStyles";
 import * as Haptics from "expo-haptics";
+import { PlusCircle } from "lucide-react-native";
 import { useState } from "react";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
 import { type PickedPdf, useDocumentPicker } from "@/hooks/useDocumentPicker";
 
@@ -43,38 +38,39 @@ export default function AddButton({ onPdfPicked }: AddButtonProps) {
   };
 
   return (
-    <Host style={{ width: "100%", height: 48 }}>
-      <Button
+    <View style={[homepageDepth.primary, { borderRadius: 12 }]}>
+      <Pressable
+        accessibilityLabel="Add PDF"
+        accessibilityRole="button"
+        disabled={isPicking}
         onPress={handlePickPdf}
-        controlSize="large"
-        modifiers={[
-          buttonStyle("glassProminent"),
-          tint("#4ADE80"),
-          shadow({ color: "#176C3440", radius: 15, x: 0, y: 9 }),
-          shadow({ color: "#FFFFFF80", radius: 1, x: -1, y: -1 }),
-          disabled(isPicking),
-        ]}
+        style={({ pressed }) => ({
+          height: 64,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          borderRadius: 12,
+          backgroundColor: "#22C55E",
+          opacity: isPicking ? 0.65 : 1,
+          transform: [{ translateY: pressed && !isPicking ? 2 : 0 }],
+        })}
       >
-        <HStack
-          spacing={8}
-          alignment="center"
-          modifiers={[
-            frame({
-              maxWidth: 10_000,
-              minHeight: 38,
-              alignment: "center",
-            }),
-          ]}
+        {isPicking ? (
+          <ActivityIndicator color="#FFFFFF" size="small" />
+        ) : (
+          <PlusCircle color="#FFFFFF" size={20} fill="rgba(255,255,255,0.18)" />
+        )}
+        <Text
+          style={{
+            color: "#FFFFFF",
+            fontFamily: "Lato_700Bold",
+            fontSize: 17,
+          }}
         >
-          <Image
-            systemName={isPicking ? "hourglass" : "plus.circle.fill"}
-            size={20}
-          />
-          <Text size={17} weight="semibold">
-            {isPicking ? "Adding PDF" : "Add PDF"}
-          </Text>
-        </HStack>
-      </Button>
-    </Host>
+          {isPicking ? "Adding PDF" : "Add PDF"}
+        </Text>
+      </Pressable>
+    </View>
   );
 }

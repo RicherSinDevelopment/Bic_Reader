@@ -5,6 +5,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useColorScheme,
   View,
 } from "react-native";
 
@@ -36,6 +37,8 @@ export default function ReaderModeTabs({
   onValueChange,
   showTranslated = false,
 }: ReaderModeTabsProps) {
+  const isDark = useColorScheme() === "dark";
+  const styles = React.useMemo(() => createStyles(isDark), [isDark]);
   const modes = showTranslated
     ? READER_MODES
     : READER_MODES.filter((mode) => mode.value !== "translated");
@@ -114,11 +117,11 @@ export default function ReaderModeTabs({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (isDark: boolean) => StyleSheet.create({
   surface: {
     height: CONTROL_HEIGHT,
     borderRadius: 15,
-    backgroundColor: "#eeece3",
+    backgroundColor: isDark ? "#262B24" : "#eeece3",
     overflow: "hidden",
   },
   indicator: {
@@ -127,7 +130,7 @@ const styles = StyleSheet.create({
     left: CONTROL_PADDING,
     height: SEGMENT_HEIGHT,
     borderRadius: 12,
-    backgroundColor: "#171914",
+    backgroundColor: "#639922",
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.18,
@@ -149,7 +152,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.97 }],
   },
   label: {
-    color: "#77786f",
+    color: isDark ? "#A6ADA1" : "#77786f",
     fontFamily: Platform.OS === "ios" ? undefined : "Lato_700Bold",
     fontSize: 14,
     fontWeight: "500",

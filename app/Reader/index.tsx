@@ -34,7 +34,7 @@ import {
   type ExtractedPdfDocument,
 } from "@/modules/bic-pdf-reader";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Animated, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Animated, StyleSheet, useColorScheme, View } from "react-native";
 import Reanimated, {
   Easing,
   ReduceMotion,
@@ -48,6 +48,7 @@ import {
   translateAnchorText,
   translatePdfBlocks,
 } from "@/services/translationService";
+import { normalizeReaderBlocks } from "@/services/readerTypography";
 import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
 
 function isVisibleReaderBlock(block: ExtractedPdfBlock) {
@@ -123,7 +124,7 @@ function BookPageSkeleton() {
   ];
 
   return (
-    <View className="flex-1 bg-white px-6 py-8">
+    <View className="flex-1 bg-white px-6 py-8 dark:bg-[#151814]">
       <Skeleton
         speed={2}
         startColor="bg-[#E7E3D8]"
@@ -157,6 +158,7 @@ export default function ReaderScreen() {
   const { pdfId } = useLocalSearchParams<{ pdfId?: string }>();
   const db = useSQLiteContext();
   const readerTransition = useReaderSettingsStore((state) => state.transition);
+  const isDark = useColorScheme() === "dark";
   const [pdf, setPdf] = useState<PdfDocument | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -661,8 +663,10 @@ export default function ReaderScreen() {
           const publish = (value: ExtractedPdfDocument) => {
             if (!cancelled) {
               setReaderBlocks(
-                value.pages.flatMap((page) =>
-                  page.blocks.filter(isVisibleReaderBlock),
+                normalizeReaderBlocks(
+                  value.pages.flatMap((page) =>
+                    page.blocks.filter(isVisibleReaderBlock),
+                  ),
                 ),
               );
               setReaderPageCount(value.pageCount);
@@ -1021,7 +1025,7 @@ export default function ReaderScreen() {
 
   if (isLoading) {
     return (
-      <View className="flex-1 items-center justify-center bg-[#F7F5EC]">
+      <View className="flex-1 items-center justify-center bg-[#F7F5EC] dark:bg-[#10120F]">
         <ActivityIndicator size="large" color="#8fb996" />
       </View>
     );
@@ -1029,13 +1033,13 @@ export default function ReaderScreen() {
 
   if (!pdf || loadError) {
     return (
-      <View className="flex-1 bg-[#F7F5EC] px-6 pt-12">
+      <View className="flex-1 bg-[#F7F5EC] px-6 pt-12 dark:bg-[#10120F]">
         <BackButton />
         <View className="flex-1 items-center justify-center pb-20">
-          <Text className="text-center font-lato-bold text-lg text-black">
+          <Text className="text-center font-lato-bold text-lg text-black dark:text-[#F4F5F1]">
             PDF unavailable
           </Text>
-          <Text className="mt-2 text-center text-sm text-black/50">
+          <Text className="mt-2 text-center text-sm text-black/50 dark:text-white/50">
             {loadError ?? "Unable to find this PDF."}
           </Text>
         </View>
@@ -1044,7 +1048,7 @@ export default function ReaderScreen() {
   }
 
   return (
-    <Box className="flex-1">
+    <Box className="flex-1 bg-[#F7F5EC] dark:bg-[#10120F]">
       <Animated.View
         pointerEvents={isLandscape ? "none" : "auto"}
         accessibilityElementsHidden={isLandscape}
@@ -1057,9 +1061,9 @@ export default function ReaderScreen() {
           zIndex: 50,
           height: isLandscape ? 0 : headerHeight || undefined,
           overflow: "hidden",
-          backgroundColor: "#ffffff",
+          backgroundColor: isDark ? "#151814" : "#ffffff",
           borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: "#deddd7",
+          borderBottomColor: isDark ? "#343A31" : "#deddd7",
           transform: [{ translateY: isLandscape ? -Math.max(headerHeight, 120) : 0 }],
         }}
       >
@@ -1191,39 +1195,39 @@ export default function ReaderScreen() {
               useTranslatedTextDirection
             />
           ) : translationError ? (
-            <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8">
-              <Text className="text-center font-lato-bold text-lg text-black">
+            <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#10120F]">
+              <Text className="text-center font-lato-bold text-lg text-black dark:text-[#F4F5F1]">
                 Translation unavailable
               </Text>
-              <Text className="mt-2 text-center text-sm text-black/50">
+              <Text className="mt-2 text-center text-sm text-black/50 dark:text-white/50">
                 {translationError}
               </Text>
             </View>
           ) : (
-            <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8">
+            <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#10120F]">
               <ActivityIndicator size="large" color="#8fb996" />
-              <Text className="mt-4 text-center font-lato-bold text-base text-black">
+              <Text className="mt-4 text-center font-lato-bold text-base text-black dark:text-[#F4F5F1]">
                 Translating the first page to {translationLanguage?.label}…
               </Text>
-              <Text className="mt-2 text-center text-sm text-black/50">
+              <Text className="mt-2 text-center text-sm text-black/50 dark:text-white/50">
                 iOS may ask to download the required language models.
               </Text>
             </View>
           )}
           {translationLoading && translatedBlocks.length > 0 && (
-            <View className="absolute right-4 top-4 rounded-full bg-white/90 p-2 shadow-sm">
+            <View className="absolute right-4 top-4 rounded-full bg-white/90 p-2 shadow-sm dark:bg-[#1A1E18]/90">
               <ActivityIndicator size="small" color="#4f936b" />
             </View>
           )}
           {translatedChapterRequest && (
-            <View className="absolute inset-0 z-50 items-center justify-center bg-[#F7F5EC]/95 px-8">
+            <View className="absolute inset-0 z-50 items-center justify-center bg-[#F7F5EC]/95 px-8 dark:bg-[#10120F]/95">
               <ActivityIndicator size="large" color="#4f936b" />
-              <Text className="mt-4 text-center font-lato-bold text-base text-black">
+              <Text className="mt-4 text-center font-lato-bold text-base text-black dark:text-[#F4F5F1]">
                 {readerPageSizes[translatedChapterRequest.sourcePage]
                   ? "Translating this chapter…"
                   : "Preparing this chapter…"}
               </Text>
-              <Text className="mt-2 text-center text-sm text-black/50">
+              <Text className="mt-2 text-center text-sm text-black/50 dark:text-white/50">
                 Preparing page {translatedChapterRequest.sourcePage} and the
                 pages around it.
               </Text>
@@ -1271,22 +1275,22 @@ export default function ReaderScreen() {
               </Text>
             </View>
           ) : readerError ? (
-            <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8">
-              <Text className="text-center font-lato-bold text-base text-black">
+            <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#10120F]">
+              <Text className="text-center font-lato-bold text-base text-black dark:text-[#F4F5F1]">
                 Reader Mode is not ready
               </Text>
-              <Text className="mt-2 text-center text-sm text-black/50">
+              <Text className="mt-2 text-center text-sm text-black/50 dark:text-white/50">
                 {readerError}
               </Text>
               {!isPdfEngineLinked && (
-                <Text className="mt-3 text-center text-xs text-black/40">
+                <Text className="mt-3 text-center text-xs text-black/40 dark:text-white/40">
                   Install the iOS development build containing the Rust
                   extraction engine.
                 </Text>
               )}
             </View>
           ) : (
-            <View className="flex-1 bg-[#F7F5EC]" />
+            <View className="flex-1 bg-[#F7F5EC] dark:bg-[#10120F]" />
           )}
           {!readerError && (
             <Reanimated.View

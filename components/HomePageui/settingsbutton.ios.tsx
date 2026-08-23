@@ -23,7 +23,7 @@ export default function SettingsButton() {
         onPress={openSettings}
         modifiers={[
           buttonStyle("glass"),
-          accessibilityLabel("Open account settings"),
+          accessibilityLabel("Open settings"),
           shadow({ color: "#173A212E", radius: 9, x: 0, y: 5 }),
           shadow({ color: "#FFFFFF70", radius: 1, x: -1, y: -1 }),
         ]}

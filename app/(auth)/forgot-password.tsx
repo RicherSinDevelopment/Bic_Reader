@@ -1,7 +1,7 @@
 import * as Linking from 'expo-linking';
 import { Link } from 'expo-router';
 import { ArrowLeft, Mail } from 'lucide-react-native';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useColorScheme,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +21,8 @@ export default function ForgotPassword() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSent, setIsSent] = useState(false);
+  const isDark = useColorScheme() === 'dark';
+  const styles = useMemo(() => createStyles(isDark), [isDark]);
 
   const canSubmit = email.trim().length > 0 && !isSubmitting;
 
@@ -114,8 +117,8 @@ export default function ForgotPassword() {
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F7F5EF' },
+const createStyles = (isDark: boolean) => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: isDark ? '#10120F' : '#F7F5EF' },
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 },
   card: {
     width: '100%',
@@ -123,9 +126,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 26,
     borderWidth: 1,
-    borderColor: '#E5E2D8',
+    borderColor: isDark ? '#343A31' : '#E5E2D8',
     borderRadius: 28,
-    backgroundColor: '#FFFEFB',
+    backgroundColor: isDark ? '#1A1E18' : '#FFFEFB',
   },
   iconShell: {
     width: 64,
@@ -133,25 +136,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 32,
-    backgroundColor: '#EAF3DE',
+    backgroundColor: isDark ? '#273321' : '#EAF3DE',
   },
   title: {
     marginTop: 20,
-    color: '#2C2C2A',
+    color: isDark ? '#F4F5F1' : '#2C2C2A',
     fontFamily: 'Lato_700Bold',
     fontSize: 27,
     textAlign: 'center',
   },
   subtitle: {
     marginTop: 9,
-    color: '#737270',
+    color: isDark ? '#A6ADA1' : '#737270',
     fontFamily: 'Lato_400Regular',
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',
   },
   form: { width: '100%', gap: 10, marginTop: 26 },
-  label: { color: '#444441', fontFamily: 'Lato_700Bold', fontSize: 14 },
+  label: { color: isDark ? '#E5E8E1' : '#444441', fontFamily: 'Lato_700Bold', fontSize: 14 },
   inputShell: {
     height: 56,
     flexDirection: 'row',
@@ -159,14 +162,14 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#D3D1C7',
+    borderColor: isDark ? '#42483F' : '#D3D1C7',
     borderRadius: 16,
-    backgroundColor: '#FAFAF8',
+    backgroundColor: isDark ? '#222720' : '#FAFAF8',
   },
   input: {
     flex: 1,
     height: '100%',
-    color: '#2C2C2A',
+    color: isDark ? '#F4F5F1' : '#2C2C2A',
     fontFamily: 'Lato_400Regular',
     fontSize: 16,
   },

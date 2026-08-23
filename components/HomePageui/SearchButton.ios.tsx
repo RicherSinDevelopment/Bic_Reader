@@ -3,12 +3,12 @@ import {
   BottomSheet,
   BottomSheetBackdrop,
   BottomSheetContent,
-  BottomSheetDragIndicator,
   BottomSheetFlatList,
   BottomSheetPortal,
   BottomSheetTextInput,
   type BottomSheetRef,
 } from "@/components/ui/bottomsheet";
+import { BottomSheetHandle as NativeBottomSheetHandle } from "@gorhom/bottom-sheet";
 import { Icon, SearchIcon } from "@/components/ui/icon";
 import type { PdfLibraryItem } from "@/hooks/displaypdfs";
 import { Button, Host } from "@expo/ui/swift-ui";
@@ -20,7 +20,7 @@ import {
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useMemo, useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { Text, useColorScheme, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type SearchButtonProps = {
@@ -32,6 +32,7 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const insets = useSafeAreaInsets();
+  const isDark = useColorScheme() === "dark";
 
   const matchingPdfs = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -45,7 +46,7 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
 
   const openSearch = () => {
     void Haptics.selectionAsync();
-    bottomSheetRef.current?.open(0);
+    bottomSheetRef.current?.open(1);
   };
 
   return (
@@ -65,18 +66,45 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
       </Host>
 
       <BottomSheetPortal
-        snapPoints={["90%"]}
+        snapPoints={["45%", "90%"]}
         backdropComponent={BottomSheetBackdrop}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
         topInset={insets.top}
-        backgroundStyle={{ backgroundColor: "#F7F5EC" }}
+        handleComponent={(props) => (
+          <NativeBottomSheetHandle
+            {...props}
+            accessibilityLabel="Resize search panel"
+            indicatorStyle={{
+              width: 48,
+              height: 5,
+              borderRadius: 3,
+              backgroundColor: isDark ? "#9AA394" : "#686C65",
+            }}
+            style={{
+              height: 34,
+              paddingTop: 12,
+              borderTopLeftRadius: 28,
+              borderTopRightRadius: 28,
+              backgroundColor: isDark ? "#10120F" : "#F7F5EC",
+            }}
+          />
+        )}
+        style={{
+          overflow: "hidden",
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+        }}
+        backgroundStyle={{
+          backgroundColor: isDark ? "#10120F" : "#F7F5EC",
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+        }}
       >
-        <BottomSheetDragIndicator />
-        <BottomSheetContent className="flex-1 bg-[#F7F5EC] px-3 pb-0 pt-3">
-          <View className="relative h-16 w-full justify-center rounded-2xl bg-white shadow-sm">
+        <BottomSheetContent className="flex-1 bg-[#F7F5EC] px-3 pb-0 pt-3 dark:bg-[#10120F]">
+          <View className="relative h-16 w-full justify-center rounded-2xl bg-white shadow-sm dark:bg-[#1A1E18]">
             <View pointerEvents="none" className="absolute left-5 z-10">
-              <Icon as={SearchIcon} size="md" className="text-black/40" />
+              <Icon as={SearchIcon} size="md" className="text-black/40 dark:text-white/50" />
             </View>
             <BottomSheetTextInput
               accessibilityLabel="Search PDF names"
@@ -84,10 +112,10 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
               autoCorrect={false}
               clearButtonMode="while-editing"
               placeholder="Search your PDFs"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={isDark ? "#9EA69A" : "#9ca3af"}
               value={query}
               onChangeText={setQuery}
-              className="h-full w-full pl-14 pr-5 text-lg text-black"
+              className="h-full w-full pl-14 pr-5 text-lg text-black dark:text-[#F4F5F1]"
             />
           </View>
 
@@ -104,7 +132,7 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
             ItemSeparatorComponent={() => <View className="h-3" />}
             ListEmptyComponent={
               <View className="flex-1 items-center justify-center pb-24">
-                <Text className="font-lato-bold text-base text-black/50">
+                <Text className="font-lato-bold text-base text-black/50 dark:text-white/50">
                   {pdfs.length === 0 ? "No PDFs yet" : "No matching PDFs"}
                 </Text>
               </View>

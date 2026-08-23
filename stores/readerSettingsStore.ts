@@ -1,11 +1,18 @@
 import { create } from 'zustand';
 
 export type ReaderTransition = "scroll" | "pager";
+export type ReaderSpacingPreset =
+  | "compact"
+  | "comfortable"
+  | "relaxed"
+  | "custom";
 
 type ReaderSettingsState = {
   fontFamily: string;
   fontSize: number;
   lineHeight: number;
+  paragraphSpacing: number;
+  spacingPreset: ReaderSpacingPreset;
   letterSpacing: number;
   wordSpacing: number;
   bold: boolean;
@@ -20,12 +27,14 @@ type ReaderSettingsState = {
 
   backgroundColor: string;
   textColor: string;
+  colorsCustomized: boolean;
 
   increaseFontSize: () => void;
   decreaseFontSize: () => void;
 
   increaseLineHeight: () => void;
   decreaseLineHeight: () => void;
+  setSpacingPreset: (preset: Exclude<ReaderSpacingPreset, "custom">) => void;
 
   increaseLetterSpacing: () => void;
   decreaseLetterSpacing: () => void;
@@ -50,7 +59,9 @@ export const useReaderSettingsStore =
   create<ReaderSettingsState>((set) => ({
     fontFamily: 'SourceSans3_400Regular',
     fontSize: 22,
-    lineHeight: 1.72,
+    lineHeight: 1.6,
+    paragraphSpacing: 0.65,
+    spacingPreset: "comfortable",
     letterSpacing: 0,
     wordSpacing: 0,
     bold: false,
@@ -66,6 +77,7 @@ export const useReaderSettingsStore =
     // Default colors
     backgroundColor: '#f8fafc',
     textColor: '#1e293b',
+    colorsCustomized: false,
 
     increaseFontSize: () =>
       set((state) => ({
@@ -83,6 +95,7 @@ export const useReaderSettingsStore =
           state.lineHeight + 0.1,
           3
         ),
+        spacingPreset: "custom",
       })),
 
     decreaseLineHeight: () =>
@@ -91,7 +104,22 @@ export const useReaderSettingsStore =
           state.lineHeight - 0.1,
           1
         ),
+        spacingPreset: "custom",
       })),
+
+    setSpacingPreset: (preset) => {
+      const settings = {
+        compact: { lineHeight: 1.45, paragraphSpacing: 0.45 },
+        comfortable: { lineHeight: 1.6, paragraphSpacing: 0.65 },
+        relaxed: { lineHeight: 1.78, paragraphSpacing: 0.9 },
+      }[preset];
+      set({
+        ...settings,
+        letterSpacing: 0,
+        wordSpacing: 0,
+        spacingPreset: preset,
+      });
+    },
 
     increaseLetterSpacing: () =>
       set((state) => ({
@@ -99,6 +127,7 @@ export const useReaderSettingsStore =
           state.letterSpacing + 0.5,
           5
         ),
+        spacingPreset: "custom",
       })),
 
     decreaseLetterSpacing: () =>
@@ -107,6 +136,7 @@ export const useReaderSettingsStore =
           state.letterSpacing - 0.5,
           0
         ),
+        spacingPreset: "custom",
       })),
 
     increaseWordSpacing: () =>
@@ -115,6 +145,7 @@ export const useReaderSettingsStore =
           state.wordSpacing + 1,
           10
         ),
+        spacingPreset: "custom",
       })),
 
     decreaseWordSpacing: () =>
@@ -123,6 +154,7 @@ export const useReaderSettingsStore =
           state.wordSpacing - 1,
           0
         ),
+        spacingPreset: "custom",
       })),
 
     toggleBold: () =>
@@ -154,7 +186,7 @@ export const useReaderSettingsStore =
       set((state) =>
         color.toLowerCase() === state.textColor.toLowerCase()
           ? state
-          : { backgroundColor: color }
+          : { backgroundColor: color, colorsCustomized: true }
       ),
 
     // Change text color
@@ -162,13 +194,13 @@ export const useReaderSettingsStore =
       set((state) =>
         color.toLowerCase() === state.backgroundColor.toLowerCase()
           ? state
-          : { textColor: color }
+          : { textColor: color, colorsCustomized: true }
       ),
 
     setColorPreset: (backgroundColor, textColor) =>
       set((state) =>
         backgroundColor.toLowerCase() === textColor.toLowerCase()
           ? state
-          : { backgroundColor, textColor }
+          : { backgroundColor, textColor, colorsCustomized: true }
       ),
   }));

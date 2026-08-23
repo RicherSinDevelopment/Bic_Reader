@@ -38,11 +38,16 @@ type NativeResponse = { ok: boolean; data: ExtractedPdfDocument | null; error: s
 type BicPdfReaderNative = {
   extractDocument(path: string): Promise<string>;
   extractDocumentRange(path: string, firstPage: number, maxPages: number): Promise<string>;
+  hyphenateText?(text: string): string;
   isEngineLinked: boolean;
 };
 const native = requireOptionalNativeModule<BicPdfReaderNative>("BicPdfReader");
 
 export const isPdfEngineLinked = native?.isEngineLinked ?? false;
+
+export function hyphenateText(text: string): string {
+  return native?.hyphenateText?.(text) ?? text;
+}
 
 export async function extractPdfDocument(path: string): Promise<ExtractedPdfDocument> {
   if (!native) throw new Error("PDF extraction is available in the iOS development build.");

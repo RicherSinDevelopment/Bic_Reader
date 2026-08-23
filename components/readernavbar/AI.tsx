@@ -1,11 +1,11 @@
-import {
-  BottomSheetTextInput,
-} from "@/components/ui/bottomsheet";
+import { BottomSheetTextInput } from "@/components/ui/bottomsheet";
 import {
   BottomSheetFooter,
+  BottomSheetScrollView,
   BottomSheetTextInput as GorhomBottomSheetTextInput,
   INITIAL_LAYOUT_VALUE,
   KEYBOARD_STATUS,
+  type BottomSheetScrollViewMethods,
   useBottomSheetInternal,
 } from "@gorhom/bottom-sheet";
 import { supabase } from "@/lib/supabase";
@@ -14,16 +14,14 @@ import {
   ChevronDown,
   CircleHelp,
   FileText,
-  History,
   Lightbulb,
   Send,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react-native";
-import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { NativeViewGestureHandler } from "react-native-gesture-handler";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
 import { useDerivedValue } from "react-native-reanimated";
 
 type AIProps = {
@@ -42,12 +40,15 @@ type ChatMessage = {
   text: string;
   status?: "loading" | "error";
 };
+type MessageFeedback = "helpful" | "not-helpful";
 
 const quickActions = [
   { label: "Summarize this page", icon: FileText },
   { label: "Explain the key ideas", icon: Lightbulb },
   { label: "Create study questions", icon: CircleHelp },
 ];
+
+const AI_ACCENT = "#639922";
 
 export default function AI({
   selectedText = "",
@@ -57,6 +58,8 @@ export default function AI({
   isExpanded,
   onComposerActive,
 }: AIProps) {
+  const isDark = useColorScheme() === "dark";
+  const styles = useMemo(() => createStyles(isDark), [isDark]);
   const safeCurrentPage = Math.min(Math.max(currentPage, 1), Math.max(pageCount, 1));
   const [contextMode, setContextMode] = useState<ContextMode>("current");
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
@@ -65,14 +68,48 @@ export default function AI({
   const [rangeEnd, setRangeEnd] = useState(String(Math.min(safeCurrentPage + 4, pageCount || 1)));
   const [message, setMessage] = useState(selectedText ? `Explain this: ${selectedText}` : "");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messageFeedback, setMessageFeedback] = useState<
+    Record<string, MessageFeedback>
+  >({});
   const [isSending, setIsSending] = useState(false);
   const isSendingRef = useRef(false);
-  const conversationRef = useRef<ScrollView>(null);
+  const conversationRef = useRef<BottomSheetScrollViewMethods>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   const { animatedKeyboardState, animatedLayoutState, animatedPosition } =
     useBottomSheetInternal();
-  const showSetup = !composerFocused && !isExpanded;
-  const chatActive = composerFocused || isExpanded;
+  const showSetup = messages.length === 0;
+  const chatActive = composerFocused || isExpanded || messages.length > 0;
+  const firstQuestion = messages.find((chatMessage) =>
+    chatMessage.role === "user"
+  )?.text;
+
+  const toggleMessageFeedback = (
+    messageId: string,
+    feedback: MessageFeedback,
+  ) => {
+    setMessageFeedback((current) => {
+      if (current[messageId] === feedback) {
+        const next = { ...current };
+        delete next[messageId];
+        return next;
+      }
+      return { ...current, [messageId]: feedback };
+    });
+  };
+
+  useEffect(() => {
+    let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+    const keyboardSubscription = Keyboard.addListener("keyboardDidShow", () => {
+      if (scrollTimer) clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        conversationRef.current?.scrollToEnd({ animated: true });
+      }, 80);
+    });
+    return () => {
+      keyboardSubscription.remove();
+      if (scrollTimer) clearTimeout(scrollTimer);
+    };
+  }, []);
 
   const animatedFooterPosition = useDerivedValue(() => {
     const { containerHeight, footerHeight, handleHeight } =
@@ -195,29 +232,26 @@ export default function AI({
   };
 
   return (
-    <View style={styles.root}>
-      <NativeViewGestureHandler disallowInterruption>
-        <ScrollView
-          ref={conversationRef}
-          style={styles.scrollView}
-          contentContainerStyle={styles.content}
-          bounces
-          keyboardDismissMode="interactive"
-          keyboardShouldPersistTaps="handled"
-          nestedScrollEnabled
-          onContentSizeChange={() => {
-            if (messages.length > 0) {
-              conversationRef.current?.scrollToEnd({ animated: true });
-            }
-          }}
-          scrollEventThrottle={16}
-          showsVerticalScrollIndicator={false}
-        >
+    <>
+      <BottomSheetScrollView
+        ref={conversationRef}
+        style={styles.scrollView}
+        contentContainerStyle={styles.content}
+        alwaysBounceVertical={false}
+        bounces={false}
+        enableFooterMarginAdjustment
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => {
+          if (messages.length > 0) {
+            conversationRef.current?.scrollToEnd({ animated: true });
+          }
+        }}
+        showsVerticalScrollIndicator={false}
+        stickyHeaderIndices={[0]}
+      >
         <View style={styles.header}>
-          <View style={styles.titleRow}>
-            <Sparkles size={20} color="#416A48" />
-            <Text style={styles.title}>AI</Text>
-          </View>
+          <Text style={styles.title}>AI</Text>
           <Pressable
             accessibilityLabel="Show chat history"
             accessibilityRole="button"
@@ -228,18 +262,44 @@ export default function AI({
               pressed && styles.pressed,
             ]}
           >
-            <History size={16} color="#416A48" />
             <Text style={styles.historyText}>History</Text>
           </Pressable>
         </View>
 
-        {showSetup ? <>
+        <View style={styles.body}>
         {historyOpen ? (
+          messages.length === 0 ? (
           <View style={styles.noticeCard}>
             <Text style={styles.cardTitle}>No conversations yet</Text>
             <Text style={styles.noticeText}>Your conversations with this PDF will appear here.</Text>
           </View>
+          ) : (
+            <Pressable
+              accessibilityLabel="Open current conversation"
+              accessibilityRole="button"
+              onPress={() => {
+                setHistoryOpen(false);
+                requestAnimationFrame(() => {
+                  conversationRef.current?.scrollToEnd({ animated: false });
+                });
+              }}
+              style={({ pressed }) => [
+                styles.historyConversation,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.cardTitle}>Current conversation</Text>
+              <Text numberOfLines={2} style={styles.noticeText}>
+                {firstQuestion ?? "Conversation about this PDF"}
+              </Text>
+              <Text style={styles.historyMessageCount}>
+                {messages.length} {messages.length === 1 ? "message" : "messages"}
+              </Text>
+            </Pressable>
+          )
         ) : null}
+
+        {showSetup && !historyOpen ? <>
 
         {selectedText ? (
           <View style={styles.selectedCard}>
@@ -255,7 +315,7 @@ export default function AI({
           onPress={() => setContextMenuOpen((value) => !value)}
           style={({ pressed }) => [styles.contextButton, pressed && styles.pressed]}
         >
-          <FileText size={17} color="#416A48" />
+          <FileText size={17} color={AI_ACCENT} />
           <Text style={styles.contextText}>{contextLabel}</Text>
           <ChevronDown size={18} color="#64748B" />
         </Pressable>
@@ -306,7 +366,7 @@ export default function AI({
                   }}
                   style={({ pressed }) => [styles.suggestionButton, pressed && styles.pressed]}
                 >
-                  <ActionIcon size={17} color="#416A48" />
+                  <ActionIcon size={17} color={AI_ACCENT} />
                   <Text style={styles.suggestionText}>{label}</Text>
                 </Pressable>
               ))}
@@ -315,7 +375,7 @@ export default function AI({
         ) : null}
         </> : null}
 
-        {messages.map((chatMessage) =>
+        {!historyOpen && messages.map((chatMessage) =>
           chatMessage.role === "user" ? (
             <View key={chatMessage.id} style={styles.questionBubble}>
               <Text style={styles.questionText}>{chatMessage.text}</Text>
@@ -326,7 +386,7 @@ export default function AI({
               <View style={styles.answerColumn}>
                 <View style={[styles.answerCard, chatMessage.status === "error" && styles.answerCardError]}>
                   {chatMessage.status === "loading" ? (
-                    <ActivityIndicator color="#416A48" />
+                    <ActivityIndicator color={AI_ACCENT} />
                   ) : (
                     <Text selectable style={[styles.answerText, chatMessage.status === "error" && styles.answerTextError]}>
                       {chatMessage.text}
@@ -335,16 +395,46 @@ export default function AI({
                 </View>
                 {chatMessage.status !== "loading" && chatMessage.status !== "error" ? (
                   <View style={styles.feedbackRow}>
-                    <Pressable accessibilityLabel="Helpful answer" hitSlop={10}><ThumbsUp size={17} color="#64748B" /></Pressable>
-                    <Pressable accessibilityLabel="Not helpful" hitSlop={10}><ThumbsDown size={17} color="#64748B" /></Pressable>
+                    <Pressable
+                      accessibilityLabel="Helpful answer"
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: messageFeedback[chatMessage.id] === "helpful" }}
+                      hitSlop={8}
+                      onPress={() => toggleMessageFeedback(chatMessage.id, "helpful")}
+                      style={[
+                        styles.feedbackButton,
+                        messageFeedback[chatMessage.id] === "helpful" && styles.feedbackButtonSelected,
+                      ]}
+                    >
+                      <ThumbsUp
+                        size={17}
+                        color={messageFeedback[chatMessage.id] === "helpful" ? "#FFFFFF" : "#64748B"}
+                      />
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="Not helpful"
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: messageFeedback[chatMessage.id] === "not-helpful" }}
+                      hitSlop={8}
+                      onPress={() => toggleMessageFeedback(chatMessage.id, "not-helpful")}
+                      style={[
+                        styles.feedbackButton,
+                        messageFeedback[chatMessage.id] === "not-helpful" && styles.feedbackButtonSelected,
+                      ]}
+                    >
+                      <ThumbsDown
+                        size={17}
+                        color={messageFeedback[chatMessage.id] === "not-helpful" ? "#FFFFFF" : "#64748B"}
+                      />
+                    </Pressable>
                   </View>
                 ) : null}
               </View>
             </View>
           )
         )}
-        </ScrollView>
-      </NativeViewGestureHandler>
+        </View>
+      </BottomSheetScrollView>
 
       <BottomSheetFooter
         animatedFooterPosition={animatedFooterPosition}
@@ -370,7 +460,7 @@ export default function AI({
               onSubmitEditing={() => void handleSend()}
               multiline
               placeholder="Ask anything about your PDF…"
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={isDark ? "#9EA69A" : "#94A3B8"}
               returnKeyType="send"
               style={[styles.composerInput, chatActive && styles.composerInputExpanded]}
               submitBehavior="submit"
@@ -392,60 +482,63 @@ export default function AI({
           </View>
         </View>
       </BottomSheetFooter>
-    </View>
+    </>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { backgroundColor: "#FFFEFC", flex: 1 },
-  scrollView: { flex: 1, flexShrink: 1 },
-  content: { flexGrow: 1, paddingBottom: 82, paddingHorizontal: 16, paddingTop: 4 },
-  header: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  titleRow: { alignItems: "center", flexDirection: "row", gap: 8 },
-  title: { color: "#0F172A", fontSize: 21, fontWeight: "600" },
-  historyButton: { alignItems: "center", borderColor: "#DDE2E8", borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 7, height: 36, paddingHorizontal: 11 },
-  historyButtonActive: { backgroundColor: "#EEF4EE", borderColor: "#AABCAA" },
-  historyText: { color: "#416A48", fontSize: 13, fontWeight: "600" },
+const createStyles = (isDark: boolean) => StyleSheet.create({
+  scrollView: { backgroundColor: isDark ? "#151814" : "#FFFEFC", flex: 1 },
+  content: { flexGrow: 1, paddingBottom: 16 },
+  header: { alignItems: "center", backgroundColor: isDark ? "#151814" : "#FFFEFC", flexDirection: "row", justifyContent: "space-between", paddingBottom: 8, paddingHorizontal: 16, paddingTop: 4 },
+  body: { flexGrow: 1, paddingHorizontal: 16 },
+  title: { color: isDark ? "#F4F5F1" : "#0F172A", fontSize: 21, fontWeight: "600" },
+  historyButton: { alignItems: "center", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 10, borderWidth: 1, flexDirection: "row", flexGrow: 0, flexShrink: 0, height: 34, justifyContent: "center", width: 72 },
+  historyButtonActive: { backgroundColor: isDark ? "#28321E" : "#F0F5E9", borderColor: AI_ACCENT },
+  historyText: { color: AI_ACCENT, fontSize: 13, fontWeight: "600" },
   pressed: { opacity: 0.68 },
-  sectionLabel: { color: "#16202C", fontSize: 14, fontWeight: "600", marginBottom: 6, marginTop: 10 },
-  contextButton: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#DDE2E8", borderRadius: 10, borderWidth: 1, flexDirection: "row", height: 43, paddingHorizontal: 13 },
-  contextText: { color: "#334155", flex: 1, fontSize: 14, fontWeight: "600", marginLeft: 10 },
-  contextMenu: { backgroundColor: "#FFFFFF", borderColor: "#DDE2E8", borderRadius: 10, borderWidth: 1, marginTop: 6, overflow: "hidden" },
+  sectionLabel: { color: isDark ? "#E5E8E1" : "#16202C", fontSize: 14, fontWeight: "600", marginBottom: 6, marginTop: 10 },
+  contextButton: { alignItems: "center", backgroundColor: isDark ? "#222720" : "#FFFFFF", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 10, borderWidth: 1, flexDirection: "row", height: 43, paddingHorizontal: 13 },
+  contextText: { color: isDark ? "#E5E8E1" : "#334155", flex: 1, fontSize: 14, fontWeight: "600", marginLeft: 10 },
+  contextMenu: { backgroundColor: isDark ? "#222720" : "#FFFFFF", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 10, borderWidth: 1, marginTop: 6, overflow: "hidden" },
   contextOption: { alignItems: "center", flexDirection: "row", height: 44, paddingHorizontal: 13 },
-  contextOptionBorder: { borderTopColor: "#EEF1F4", borderTopWidth: StyleSheet.hairlineWidth },
-  contextOptionText: { color: "#334155", fontSize: 14 },
+  contextOptionBorder: { borderTopColor: isDark ? "#343A31" : "#EEF1F4", borderTopWidth: StyleSheet.hairlineWidth },
+  contextOptionText: { color: isDark ? "#E5E8E1" : "#334155", fontSize: 14 },
   radio: { borderColor: "#CBD5E1", borderRadius: 8, borderWidth: 1, height: 16, marginRight: 10, width: 16 },
-  radioSelected: { borderColor: "#6F9275", borderWidth: 5 },
+  radioSelected: { borderColor: AI_ACCENT, borderWidth: 5 },
   suggestions: { gap: 5 },
-  suggestionButton: { alignItems: "center", backgroundColor: "#EEF4EE", borderRadius: 9, flexDirection: "row", height: 38, paddingHorizontal: 13 },
-  suggestionText: { color: "#416A48", fontSize: 13.5, fontWeight: "600", marginLeft: 10 },
-  noticeCard: { backgroundColor: "#F8FAFC", borderRadius: 10, marginTop: 10, padding: 13 },
-  cardTitle: { color: "#334155", fontSize: 14, fontWeight: "600" },
-  noticeText: { color: "#64748B", fontSize: 13, marginTop: 4 },
-  selectedCard: { backgroundColor: "#EEF4EE", borderRadius: 10, marginTop: 10, padding: 12 },
-  selectedCaption: { color: "#58715D", fontSize: 11, fontWeight: "700", textTransform: "uppercase" },
-  selectedText: { color: "#334155", fontSize: 13, lineHeight: 19, marginTop: 4 },
+  suggestionButton: { alignItems: "center", backgroundColor: isDark ? "#28321E" : "#F0F5E9", borderRadius: 9, flexDirection: "row", height: 38, paddingHorizontal: 13 },
+  suggestionText: { color: AI_ACCENT, fontSize: 13.5, fontWeight: "600", marginLeft: 10 },
+  noticeCard: { backgroundColor: isDark ? "#222720" : "#F8FAFC", borderRadius: 10, marginTop: 10, padding: 13 },
+  historyConversation: { backgroundColor: isDark ? "#222720" : "#FFFFFF", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 12, borderWidth: 1, marginTop: 10, padding: 14 },
+  historyMessageCount: { color: AI_ACCENT, fontSize: 12, fontWeight: "600", marginTop: 8 },
+  cardTitle: { color: isDark ? "#E5E8E1" : "#334155", fontSize: 14, fontWeight: "600" },
+  noticeText: { color: isDark ? "#A6ADA1" : "#64748B", fontSize: 13, marginTop: 4 },
+  selectedCard: { backgroundColor: isDark ? "#28321E" : "#F0F5E9", borderRadius: 10, marginTop: 10, padding: 12 },
+  selectedCaption: { color: AI_ACCENT, fontSize: 11, fontWeight: "700", textTransform: "uppercase" },
+  selectedText: { color: isDark ? "#E5E8E1" : "#334155", fontSize: 13, lineHeight: 19, marginTop: 4 },
   rangeRow: { alignItems: "flex-end", flexDirection: "row", gap: 8, marginTop: 8 },
   rangeField: { flex: 1 },
-  rangeLabel: { color: "#64748B", fontSize: 12, marginBottom: 5 },
-  rangeInput: { backgroundColor: "#FFFFFF", borderColor: "#DDE2E8", borderRadius: 9, borderWidth: 1, color: "#334155", height: 42, paddingHorizontal: 11 },
+  rangeLabel: { color: isDark ? "#A6ADA1" : "#64748B", fontSize: 12, marginBottom: 5 },
+  rangeInput: { backgroundColor: isDark ? "#222720" : "#FFFFFF", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 9, borderWidth: 1, color: isDark ? "#F4F5F1" : "#334155", height: 42, paddingHorizontal: 11 },
   rangeTo: { color: "#94A3B8", paddingBottom: 12 },
-  questionBubble: { alignSelf: "flex-end", backgroundColor: "#E9F0EA", borderRadius: 14, marginLeft: 54, marginTop: 20, maxWidth: "82%", paddingHorizontal: 15, paddingVertical: 12 },
-  questionText: { color: "#26352A", fontSize: 14, lineHeight: 20 },
+  questionBubble: { alignSelf: "flex-end", backgroundColor: isDark ? "#28321E" : "#F0F5E9", borderRadius: 14, marginLeft: 54, marginTop: 20, maxWidth: "82%", paddingHorizontal: 15, paddingVertical: 12 },
+  questionText: { color: isDark ? "#E5E8E1" : "#26352A", fontSize: 14, lineHeight: 20 },
   answerRow: { alignItems: "flex-start", flexDirection: "row", marginTop: 18 },
-  aiAvatar: { alignItems: "center", backgroundColor: "#416A48", borderRadius: 14, height: 28, justifyContent: "center", marginRight: 8, marginTop: 4, width: 28 },
+  aiAvatar: { alignItems: "center", backgroundColor: AI_ACCENT, borderRadius: 14, height: 28, justifyContent: "center", marginRight: 8, marginTop: 4, width: 28 },
   answerColumn: { flex: 1 },
-  answerCard: { backgroundColor: "#FFFFFF", borderColor: "#DDE2E8", borderRadius: 12, borderWidth: 1, minHeight: 48, padding: 14 },
+  answerCard: { backgroundColor: isDark ? "#222720" : "#FFFFFF", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 12, borderWidth: 1, minHeight: 48, padding: 14 },
   answerCardError: { backgroundColor: "#FEF2F2", borderColor: "#FECACA" },
-  answerText: { color: "#26352A", fontSize: 14, lineHeight: 21 },
+  answerText: { color: isDark ? "#E5E8E1" : "#26352A", fontSize: 14, lineHeight: 21 },
   answerTextError: { color: "#B91C1C" },
-  feedbackRow: { flexDirection: "row", gap: 18, marginLeft: 8, marginTop: 10 },
+  feedbackRow: { flexDirection: "row", gap: 8, marginLeft: 8, marginTop: 10 },
+  feedbackButton: { alignItems: "center", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 16, borderWidth: 1, height: 32, justifyContent: "center", width: 32 },
+  feedbackButtonSelected: { backgroundColor: AI_ACCENT, borderColor: AI_ACCENT },
   composerFooter: { zIndex: 1000 },
-  composerArea: { backgroundColor: "#FFFEFC", paddingBottom: 9, paddingHorizontal: 15, paddingTop: 8 },
-  composer: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#D9D9D6", borderRadius: 26, borderWidth: StyleSheet.hairlineWidth, elevation: 2, flexDirection: "row", minHeight: 52, paddingLeft: 17, paddingRight: 6, shadowColor: "#0F172A", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8 },
+  composerArea: { backgroundColor: isDark ? "#151814" : "#FFFEFC", paddingBottom: 9, paddingHorizontal: 15, paddingTop: 8 },
+  composer: { alignItems: "center", backgroundColor: isDark ? "#222720" : "#FFFFFF", borderColor: isDark ? "#42483F" : "#D9D9D6", borderRadius: 26, borderWidth: StyleSheet.hairlineWidth, elevation: 2, flexDirection: "row", minHeight: 52, paddingLeft: 17, paddingRight: 6, shadowColor: "#0F172A", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8 },
   composerExpanded: { alignItems: "flex-end", borderRadius: 24, minHeight: 68, paddingBottom: 7, paddingTop: 6 },
-  composerInput: { backgroundColor: "transparent", borderWidth: 0, color: "#1F2937", flex: 1, fontSize: 15, height: 50, margin: 0, paddingHorizontal: 0, paddingLeft: 0, paddingRight: 10, paddingVertical: 9 },
+  composerInput: { backgroundColor: "transparent", borderWidth: 0, color: isDark ? "#F4F5F1" : "#1F2937", flex: 1, fontSize: 15, height: 50, lineHeight: 20, margin: 0, paddingBottom: 0, paddingHorizontal: 0, paddingLeft: 0, paddingRight: 10, paddingTop: 14 },
   composerInputExpanded: { height: 60, lineHeight: 21, paddingTop: 8 },
-  sendButton: { alignItems: "center", backgroundColor: "#416A48", borderRadius: 19, height: 38, justifyContent: "center", width: 38 },
+  sendButton: { alignItems: "center", backgroundColor: AI_ACCENT, borderRadius: 19, height: 38, justifyContent: "center", width: 38 },
   sendButtonDisabled: { backgroundColor: "#CBD5E1" },
 });

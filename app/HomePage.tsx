@@ -51,7 +51,7 @@ const HomePage = () => {
   };
 
   return (
-<View className="flex-1 bg-[#F7F5EC]">
+<View className="flex-1 bg-[#F7F5EC] dark:bg-[#10120F]">
 
   {/* ========================= */}
   {/* HEADER */}
@@ -64,7 +64,7 @@ const HomePage = () => {
 
       {/* App Title */}
       <Text
-        className="text-black"
+        className="text-black dark:text-[#F4F5F1]"
         style={{
           fontFamily: "Lato_700Bold",
           fontSize: 38,
@@ -72,7 +72,7 @@ const HomePage = () => {
           letterSpacing: -0.8,
         }}
       >
-        <Text style={{ color: "#22C55E" }}>Bic</Text>
+        <Text style={{ color: "#639922" }}>Bic</Text>
         <Text> Reader</Text>
       </Text>
 
@@ -140,11 +140,11 @@ const HomePage = () => {
         onPress={() => setDuplicatePdfName(null)}
       />
 
-      <View className="w-full max-w-sm rounded-lg bg-white p-5 shadow-lg">
-        <Text className="font-lato-bold text-lg text-black">
+      <View className="w-full max-w-sm rounded-lg bg-white p-5 shadow-lg dark:bg-[#1A1E18]">
+        <Text className="font-lato-bold text-lg text-black dark:text-[#F4F5F1]">
           PDF already added
         </Text>
-        <Text className="mt-2 text-sm leading-5 text-black/60">
+        <Text className="mt-2 text-sm leading-5 text-black/60 dark:text-white/60">
           {duplicatePdfName
             ? `\"${duplicatePdfName}\" matches a PDF already in your library.`
             : "This PDF is already in your library."}
@@ -154,9 +154,9 @@ const HomePage = () => {
           <Pressable
             accessibilityRole="button"
             onPress={() => setDuplicatePdfName(null)}
-            className="h-10 justify-center rounded-md bg-green-400 px-5 active:opacity-80"
+            className="h-10 justify-center rounded-md bg-[#639922] px-5 active:opacity-80"
           >
-            <Text className="font-lato-bold text-black">Close</Text>
+            <Text className="font-lato-bold text-white">Close</Text>
           </Pressable>
         </View>
       </View>

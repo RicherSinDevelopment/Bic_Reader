@@ -1,3 +1,4 @@
+import * as Haptics from "expo-haptics";
 import React from "react";
 import { Pressable, type PressableProps, StyleSheet, View } from "react-native";
 
@@ -9,12 +10,18 @@ type ReaderGlassIconButtonProps = Omit<PressableProps, "children" | "style"> & {
 export default function ReaderGlassIconButton({
   children,
   grouped = false,
+  onPress,
   ...pressableProps
 }: ReaderGlassIconButtonProps) {
   return (
     <Pressable
       {...pressableProps}
       accessibilityRole={pressableProps.accessibilityRole ?? "button"}
+      hitSlop={pressableProps.hitSlop ?? 4}
+      onPress={(event) => {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onPress?.(event);
+      }}
       style={({ pressed }) => [
         styles.pressable,
         grouped ? styles.groupedPressable : styles.soloPressable,
@@ -53,7 +60,7 @@ const styles = StyleSheet.create({
     height: 44,
   },
   pressablePressed: {
-    backgroundColor: "#f0efe9",
-    borderRadius: 14,
+    opacity: 0.52,
+    transform: [{ scale: 0.9 }],
   },
 });

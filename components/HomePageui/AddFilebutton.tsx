@@ -44,16 +44,16 @@ export default function AddButton({ onPdfPicked }: AddButtonProps) {
         size="lg"
         onPress={handlePickPdf}
         isDisabled={isPicking}
-        className="h-14 flex-row items-center justify-center rounded-xl bg-green-400 px-5 active:translate-y-0.5"
+        className="h-16 flex-row items-center justify-center rounded-xl bg-[#22C55E] px-5 active:translate-y-0.5"
       >
         {isPicking ? (
-          <ButtonSpinner color="#000000" />
+          <ButtonSpinner color="#FFFFFF" />
         ) : (
-          <Icon as={AddIcon} size="md" className="mr-2" />
+          <Icon as={AddIcon} size="md" className="mr-2 text-white" />
         )}
 
         <ButtonText
-          className="font-lato-bold"
+          className="font-lato-bold text-white"
           style={{
             fontFamily: "Lato_700Bold",
           }}

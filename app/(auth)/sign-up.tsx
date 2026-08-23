@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 import * as Linking from 'expo-linking';
 import { Link, useRouter } from 'expo-router';
 import { Eye, EyeOff, LockKeyhole, Mail, UserRound } from 'lucide-react-native';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Image,
   KeyboardAvoidingView,
@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useColorScheme,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,6 +30,8 @@ export default function SignUp() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const router = useRouter();
+  const isDark = useColorScheme() === 'dark';
+  const styles = useMemo(() => createStyles(isDark), [isDark]);
 
   const canSubmit =
     name.trim().length > 0 && email.trim().length > 0 && password.length >= 8 && !isSubmitting;
@@ -192,9 +195,9 @@ export default function SignUp() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (isDark: boolean) => StyleSheet.create({
   flex: { flex: 1 },
-  safeArea: { flex: 1, backgroundColor: '#F7F5EF' },
+  safeArea: { flex: 1, backgroundColor: isDark ? '#10120F' : '#F7F5EF' },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
@@ -209,13 +212,13 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: '#EAF3DE',
+    backgroundColor: isDark ? '#273321' : '#EAF3DE',
   },
   header: { alignItems: 'center', marginBottom: 20 },
   logo: { width: 64, height: 64, borderRadius: 18 },
   brand: {
     marginTop: 7,
-    color: '#2E5A0D',
+    color: isDark ? '#8FB85E' : '#2E5A0D',
     fontFamily: 'Lato_700Bold',
     fontSize: 16,
     letterSpacing: 0.2,
@@ -226,9 +229,9 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     padding: 24,
     borderWidth: 1,
-    borderColor: '#E5E2D8',
+    borderColor: isDark ? '#343A31' : '#E5E2D8',
     borderRadius: 28,
-    backgroundColor: '#FFFEFB',
+    backgroundColor: isDark ? '#1A1E18' : '#FFFEFB',
     shadowColor: '#173404',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.08,
@@ -236,21 +239,21 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   title: {
-    color: '#2C2C2A',
+    color: isDark ? '#F4F5F1' : '#2C2C2A',
     fontFamily: 'Lato_700Bold',
     fontSize: 28,
     lineHeight: 34,
   },
   subtitle: {
     marginTop: 8,
-    color: '#737270',
+    color: isDark ? '#A6ADA1' : '#737270',
     fontFamily: 'Lato_400Regular',
     fontSize: 15,
     lineHeight: 22,
   },
   form: { gap: 16, marginTop: 24 },
   fieldGroup: { gap: 8 },
-  label: { color: '#444441', fontFamily: 'Lato_700Bold', fontSize: 14 },
+  label: { color: isDark ? '#E5E8E1' : '#444441', fontFamily: 'Lato_700Bold', fontSize: 14 },
   inputShell: {
     height: 54,
     flexDirection: 'row',
@@ -258,18 +261,18 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#D3D1C7',
+    borderColor: isDark ? '#42483F' : '#D3D1C7',
     borderRadius: 16,
-    backgroundColor: '#FAFAF8',
+    backgroundColor: isDark ? '#222720' : '#FAFAF8',
   },
   input: {
     flex: 1,
     height: '100%',
-    color: '#2C2C2A',
+    color: isDark ? '#F4F5F1' : '#2C2C2A',
     fontFamily: 'Lato_400Regular',
     fontSize: 16,
   },
-  helperText: { color: '#888780', fontFamily: 'Lato_400Regular', fontSize: 12 },
+  helperText: { color: isDark ? '#9EA69A' : '#888780', fontFamily: 'Lato_400Regular', fontSize: 12 },
   primaryButton: {
     height: 56,
     alignItems: 'center',
@@ -293,7 +296,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   successText: {
-    color: '#2E5A0D',
+    color: isDark ? '#8FB85E' : '#2E5A0D',
     fontFamily: 'Lato_400Regular',
     fontSize: 13,
     lineHeight: 18,
@@ -307,6 +310,6 @@ const styles = StyleSheet.create({
     gap: 5,
     marginTop: 24,
   },
-  switchText: { color: '#737270', fontFamily: 'Lato_400Regular', fontSize: 14 },
+  switchText: { color: isDark ? '#A6ADA1' : '#737270', fontFamily: 'Lato_400Regular', fontSize: 14 },
   switchLink: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 14 },
 });

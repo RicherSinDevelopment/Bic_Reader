@@ -3,7 +3,7 @@ import type { SwitchHighlightTarget } from "@/hooks/switchhighlight";
 import { Asset } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, useColorScheme, View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
 // Metro exposes these generated binary files as numeric asset module IDs.
@@ -113,6 +113,7 @@ export default function OriginalPDF({
   const [html, setHtml] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const isDark = useColorScheme() === "dark";
 
   useEffect(() => {
     let cancelled = false;
@@ -179,8 +180,8 @@ export default function OriginalPDF({
 
   const source = useMemo(() => html ? { html, baseUrl: "https://bic-reader.local/" } : undefined, [html]);
 
-  if (errorMessage) return <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8"><Text className="text-center font-lato-bold text-base text-black">Could not open this PDF</Text><Text className="mt-2 text-center text-sm text-black/50">{errorMessage}</Text></View>;
-  if (!source) return <View className="flex-1 items-center justify-center bg-[#F7F5EC]"><ActivityIndicator size="large" color="#8fb996" /></View>;
+  if (errorMessage) return <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#10120F]"><Text className="text-center font-lato-bold text-base text-black dark:text-[#F4F5F1]">Could not open this PDF</Text><Text className="mt-2 text-center text-sm text-black/50 dark:text-white/50">{errorMessage}</Text></View>;
+  if (!source) return <View className="flex-1 items-center justify-center bg-[#F7F5EC] dark:bg-[#10120F]"><ActivityIndicator size="large" color="#8fb996" /></View>;
 
-  return <WebView ref={webViewRef} source={source} originWhitelist={["*"]} onMessage={handleMessage} javaScriptEnabled domStorageEnabled allowsInlineMediaPlayback bounces={false} style={{ flex: 1, backgroundColor: "#F7F5EC" }} />;
+  return <WebView ref={webViewRef} source={source} originWhitelist={["*"]} onMessage={handleMessage} javaScriptEnabled domStorageEnabled allowsInlineMediaPlayback bounces={false} style={{ flex: 1, backgroundColor: isDark ? "#10120F" : "#F7F5EC" }} />;
 }

@@ -5,8 +5,8 @@ import * as Crypto from 'expo-crypto';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { createSessionFromAuthUrl } from '@/lib/auth-deep-link';
 import { supabase } from '@/lib/supabase';
@@ -28,6 +28,8 @@ const providers: { icon: 'apple' | 'google'; label: string; provider: SocialProv
 export function SocialAuthButtons({ disabled = false, onError }: SocialAuthButtonsProps) {
   const [activeProvider, setActiveProvider] = useState<SocialProvider | null>(null);
   const router = useRouter();
+  const isDark = useColorScheme() === 'dark';
+  const styles = useMemo(() => createStyles(isDark), [isDark]);
 
   const handleNativeAppleAuth = async () => {
     const rawNonce = Crypto.randomUUID();
@@ -141,7 +143,7 @@ export function SocialAuthButtons({ disabled = false, onError }: SocialAuthButto
                 pressed && !isDisabled && styles.buttonPressed,
               ]}
             >
-              <FontAwesome color="#2C2C2A" name={icon} size={20} />
+              <FontAwesome color={isDark ? '#F4F5F1' : '#2C2C2A'} name={icon} size={20} />
               <Text style={styles.buttonText}>{isLoading ? 'Connecting…' : label}</Text>
             </Pressable>
           );
@@ -151,11 +153,11 @@ export function SocialAuthButtons({ disabled = false, onError }: SocialAuthButto
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (isDark: boolean) => StyleSheet.create({
   container: { gap: 14, marginTop: 22 },
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  divider: { flex: 1, height: 1, backgroundColor: '#E5E2D8' },
-  dividerText: { color: '#888780', fontFamily: 'Lato_400Regular', fontSize: 12 },
+  divider: { flex: 1, height: 1, backgroundColor: isDark ? '#343A31' : '#E5E2D8' },
+  dividerText: { color: isDark ? '#9EA69A' : '#888780', fontFamily: 'Lato_400Regular', fontSize: 12 },
   buttons: { gap: 10 },
   button: {
     height: 52,
@@ -164,11 +166,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 11,
     borderWidth: 1,
-    borderColor: '#D3D1C7',
+    borderColor: isDark ? '#42483F' : '#D3D1C7',
     borderRadius: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: isDark ? '#222720' : '#FFFFFF',
   },
   buttonDisabled: { opacity: 0.55 },
-  buttonPressed: { backgroundColor: '#F4F3EE', transform: [{ scale: 0.99 }] },
-  buttonText: { color: '#2C2C2A', fontFamily: 'Lato_700Bold', fontSize: 15 },
+  buttonPressed: { backgroundColor: isDark ? '#2A3027' : '#F4F3EE', transform: [{ scale: 0.99 }] },
+  buttonText: { color: isDark ? '#F4F5F1' : '#2C2C2A', fontFamily: 'Lato_700Bold', fontSize: 15 },
 });

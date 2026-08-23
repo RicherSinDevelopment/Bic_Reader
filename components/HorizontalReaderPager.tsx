@@ -1,6 +1,6 @@
-import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
-import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Text, useWindowDimensions, View } from "react-native";
+import { hyphenateText, type ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, Platform, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Destination = {
@@ -19,6 +19,8 @@ type Segment = {
   text: string;
   startOffset: number;
   kind: ExtractedPdfBlock["kind"];
+  spacingBefore: number;
+  spacingAfter: number;
 };
 
 type PageAnchor = {
@@ -33,9 +35,11 @@ type Props = {
   fontFamily: string;
   fontSize: number;
   lineHeight: number;
+  paragraphSpacing: number;
   letterSpacing: number;
   wordSpacing: number;
   bold: boolean;
+  automaticHyphenation: boolean;
   backgroundColor: string;
   textColor: string;
   onPageChange?: (
@@ -54,6 +58,8 @@ function buildPages(
   charactersPerLine: number,
   pageHeight: number,
   baseLineHeight: number,
+  baseFontSize: number,
+  paragraphSpacing: number,
 ) {
   const pages: Segment[][] = [[]];
   let usedHeight = 0;
@@ -61,17 +67,24 @@ function buildPages(
   blocks.forEach((block) => {
     let sourceOffset = 0;
     const textScale = block.kind === "title" ? 1.65 : block.kind === "heading" ? 1.3 : 1;
-    const spacing = block.kind === "title" || block.kind === "heading" ? 16 : 12;
     const scaledLineHeight = baseLineHeight * textScale;
     const scaledCharactersPerLine = Math.max(8, Math.floor(charactersPerLine / textScale));
 
     while (sourceOffset < block.text.length) {
-      let remainingHeight = pageHeight - usedHeight - spacing;
+      let spacingBefore = sourceOffset === 0 && usedHeight > 0
+        ? block.kind === "title"
+          ? baseFontSize * 1.15
+          : block.kind === "heading"
+            ? baseFontSize * 0.95
+            : 0
+        : 0;
+      let remainingHeight = pageHeight - usedHeight - spacingBefore;
       let availableLines = Math.floor(remainingHeight / scaledLineHeight);
       if (availableLines < 1 && usedHeight > 0) {
         pages.push([]);
         usedHeight = 0;
-        remainingHeight = pageHeight - spacing;
+        spacingBefore = 0;
+        remainingHeight = pageHeight;
         availableLines = Math.max(1, Math.floor(remainingHeight / scaledLineHeight));
       }
 
@@ -85,18 +98,27 @@ function buildPages(
 
       const text = block.text.slice(sourceOffset, end).trimEnd();
       if (text) {
+        const spacingAfter = end >= block.text.length
+          ? block.kind === "title"
+            ? baseFontSize * 0.7
+            : block.kind === "heading"
+              ? baseFontSize * 0.55
+              : baseFontSize * paragraphSpacing
+          : 0;
         pages[pages.length - 1].push({
           blockId: block.id,
           sourcePage: block.page,
           text,
           startOffset: sourceOffset,
           kind: block.kind,
+          spacingBefore,
+          spacingAfter,
         });
         const wrappedLines = Math.max(
           1,
           Math.ceil(text.length / scaledCharactersPerLine)
         );
-        usedHeight += wrappedLines * scaledLineHeight + spacing;
+        usedHeight += wrappedLines * scaledLineHeight + spacingBefore + spacingAfter;
       }
       sourceOffset = end;
     }
@@ -126,9 +148,11 @@ export default function HorizontalReaderPager({
   fontFamily,
   fontSize,
   lineHeight,
+  paragraphSpacing,
   letterSpacing,
   wordSpacing,
   bold,
+  automaticHyphenation,
   backgroundColor,
   textColor,
   onPageChange,
@@ -143,6 +167,7 @@ export default function HorizontalReaderPager({
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<number | null>(null);
   const [dismissedSwitchNonce, setDismissedSwitchNonce] = useState<number | null>(null);
   const touchStart = useRef({ x: 0, y: 0, time: 0 });
+  const hyphenationCache = useRef(new Map<string, string>());
   const { width, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const usableHeight = containerHeight || windowHeight;
@@ -151,12 +176,14 @@ export default function HorizontalReaderPager({
   // React repaginates in the background.
   const deferredFontSize = useDeferredValue(fontSize);
   const deferredLineHeight = useDeferredValue(lineHeight);
+  const deferredParagraphSpacing = useDeferredValue(paragraphSpacing);
   const deferredLetterSpacing = useDeferredValue(letterSpacing);
   const deferredWordSpacing = useDeferredValue(wordSpacing);
+  const horizontalPadding = Math.max(24, (width - 680) / 2);
   const charactersPerLine = Math.max(
     12,
     Math.floor(
-      (width - 40) /
+      (width - horizontalPadding * 2) /
       Math.max(
         7,
         deferredFontSize * 0.52 +
@@ -179,8 +206,17 @@ export default function HorizontalReaderPager({
       charactersPerLine,
       pageContentHeight,
       baseLineHeight,
+      deferredFontSize,
+      deferredParagraphSpacing,
     ),
-    [baseLineHeight, blocks, charactersPerLine, pageContentHeight]
+    [
+      baseLineHeight,
+      blocks,
+      charactersPerLine,
+      deferredFontSize,
+      deferredParagraphSpacing,
+      pageContentHeight,
+    ]
   );
   const sourcePageMap = useMemo(() => {
     const direct: Record<number, number> = {};
@@ -261,6 +297,16 @@ export default function HorizontalReaderPager({
     }
   }, [blocks, onPageChange, pages]);
 
+  const textForDisplay = useCallback((text: string) => {
+    if (!automaticHyphenation || Platform.OS !== "ios") return text;
+    const cached = hyphenationCache.current.get(text);
+    if (cached !== undefined) return cached;
+    const hyphenated = hyphenateText(text);
+    if (hyphenationCache.current.size >= 4000) hyphenationCache.current.clear();
+    hyphenationCache.current.set(text, hyphenated);
+    return hyphenated;
+  }, [automaticHyphenation]);
+
   const renderSegment = (segment: Segment, index: number) => {
     const isSearchTarget = destination?.nonce !== dismissedSearchNonce &&
       destination?.blockId === segment.blockId &&
@@ -291,6 +337,7 @@ export default function HorizontalReaderPager({
 
     return (
       <Text
+        android_hyphenationFrequency={automaticHyphenation ? "full" : "none"}
         key={`${segment.blockId}-${segment.startOffset}-${index}`}
         style={{
           color: textColor,
@@ -299,26 +346,27 @@ export default function HorizontalReaderPager({
           lineHeight: fontSize * headingScale * lineHeight,
           letterSpacing,
           fontWeight: bold ? "700" : "400",
-          marginBottom: segment.kind === "heading" || segment.kind === "title" ? 16 : 12,
+          marginBottom: segment.spacingAfter,
+          marginTop: segment.spacingBefore,
         }}
       >
         {localMatch >= 0 ? (
           <>
-            {segment.text.slice(0, localMatch)}
+            {textForDisplay(segment.text.slice(0, localMatch))}
             <Text style={{ backgroundColor: "#facc15" }}>
-              {segment.text.slice(localMatch, localMatch + queryLength)}
+              {textForDisplay(segment.text.slice(localMatch, localMatch + queryLength))}
             </Text>
-            {segment.text.slice(localMatch + queryLength)}
+            {textForDisplay(segment.text.slice(localMatch + queryLength))}
           </>
         ) : switchStart >= 0 ? (
           <>
-            {segment.text.slice(0, switchStart)}
+            {textForDisplay(segment.text.slice(0, switchStart))}
             <Text style={{ backgroundColor: "rgba(250, 204, 21, 0.68)" }}>
-              {segment.text.slice(switchStart, switchStart + switchLength)}
+              {textForDisplay(segment.text.slice(switchStart, switchStart + switchLength))}
             </Text>
-            {segment.text.slice(switchStart + switchLength)}
+            {textForDisplay(segment.text.slice(switchStart + switchLength))}
           </>
-        ) : segment.text}
+        ) : textForDisplay(segment.text)}
       </Text>
     );
   };
@@ -424,7 +472,7 @@ export default function HorizontalReaderPager({
             style={{
               backgroundColor,
               height: "100%",
-              paddingHorizontal: 20,
+              paddingHorizontal: horizontalPadding,
               paddingTop: 20,
               paddingBottom: 12 + insets.bottom,
               width,

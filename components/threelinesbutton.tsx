@@ -11,7 +11,7 @@ import { CloseIcon, Icon, MenuIcon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
 import { BookOpen, ChevronDown, ChevronRight } from "lucide-react-native";
 import React from "react";
-import { FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, TextInput, useColorScheme, View } from "react-native";
 
 export type ReaderChapter = {
   id: string;
@@ -46,6 +46,8 @@ export default function ThreeLinesButton({
   const [expandedChapterIds, setExpandedChapterIds] = React.useState<string[]>(
     [],
   );
+  const isDark = useColorScheme() === "dark";
+  const styles = React.useMemo(() => createStyles(isDark), [isDark]);
   const updatePageInput = (value: string) => {
     const digits = value.replace(/\D/g, "");
     setPageInput(digits);
@@ -94,22 +96,22 @@ export default function ThreeLinesButton({
           {depth > 0 ? (
             <View style={styles.sectionMarker} />
           ) : (
-            <BookOpen size={17} color="#64748b" />
+            <BookOpen size={17} color={isDark ? "#A6ADA1" : "#64748b"} />
           )}
-          <Text className="flex-1 text-sm text-black" numberOfLines={2}>
+          <Text className="flex-1 text-sm text-black dark:text-[#F4F5F1]" numberOfLines={2}>
             {chapter.title}
           </Text>
-          <Text className="text-xs text-black/45">{chapter.page}</Text>
+          <Text className="text-xs text-black/45 dark:text-white/45">{chapter.page}</Text>
           {hasChildren &&
             (isExpanded ? (
-              <ChevronDown size={16} color="#64748b" />
+              <ChevronDown size={16} color={isDark ? "#A6ADA1" : "#64748b"} />
             ) : (
-              <ChevronRight size={16} color="#64748b" />
+              <ChevronRight size={16} color={isDark ? "#A6ADA1" : "#64748b"} />
             ))}
         </Pressable>
       );
     },
-    [expandedChapterIds, onGoToChapter],
+    [expandedChapterIds, isDark, onGoToChapter, styles],
   );
 
   return (
@@ -123,7 +125,7 @@ export default function ThreeLinesButton({
           setShowDrawer(true);
         }}
       >
-        <Icon as={MenuIcon} size="lg" className="text-[#242424]" />
+        <Icon as={MenuIcon} size="lg" className="text-[#242424] dark:text-[#F4F5F1]" />
       </ReaderGlassIconButton>
 
       {/* Drawer */}
@@ -150,7 +152,7 @@ export default function ThreeLinesButton({
 
           {totalPages > 0 && (
             <View style={styles.pageControl}>
-              <Text className="font-lato-bold text-sm text-black/70">Page</Text>
+              <Text className="font-lato-bold text-sm text-black/70 dark:text-white/70">Page</Text>
               <View style={styles.pageRow}>
                 <TextInput
                   value={pageInput}
@@ -160,7 +162,7 @@ export default function ThreeLinesButton({
                   accessibilityLabel="Page number"
                   style={styles.pageInput}
                 />
-                <Text className="text-base text-black/60">of {totalPages}</Text>
+                <Text className="text-base text-black/60 dark:text-white/60">of {totalPages}</Text>
               </View>
             </View>
           )}
@@ -176,7 +178,7 @@ export default function ThreeLinesButton({
             windowSize={5}
             removeClippedSubviews
             ListEmptyComponent={
-              <Text className="px-5 py-6 text-sm text-black/50">
+              <Text className="px-5 py-6 text-sm text-black/50 dark:text-white/50">
                 This PDF does not contain an embedded table of contents.
               </Text>
             }
@@ -187,13 +189,13 @@ export default function ThreeLinesButton({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (isDark: boolean) => StyleSheet.create({
   pageControl: {
     marginHorizontal: 16,
     marginBottom: 12,
     padding: 14,
     borderRadius: 14,
-    backgroundColor: "#f1f5f9",
+    backgroundColor: isDark ? "#222720" : "#f1f5f9",
   },
   pageRow: {
     marginTop: 8,
@@ -205,12 +207,12 @@ const styles = StyleSheet.create({
     width: 72,
     height: 42,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: isDark ? "#42483F" : "#cbd5e1",
     borderRadius: 10,
-    backgroundColor: "#ffffff",
+    backgroundColor: isDark ? "#1A1E18" : "#ffffff",
     textAlign: "center",
     fontSize: 16,
-    color: "#0f172a",
+    color: isDark ? "#F4F5F1" : "#0f172a",
   },
   chapterList: { paddingHorizontal: 12, paddingBottom: 24 },
   chapter: {
@@ -227,7 +229,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#94a3b8",
+    backgroundColor: isDark ? "#788174" : "#94a3b8",
   },
-  pressed: { backgroundColor: "#f1f5f9" },
+  pressed: { backgroundColor: isDark ? "#2A3027" : "#f1f5f9" },
 });

@@ -10,6 +10,7 @@ import {
   Pressable,
   Text,
   TextInput,
+  useColorScheme,
   View,
 } from "react-native";
 
@@ -34,6 +35,7 @@ export default function ThreeDotsButton({
   const [isRenameOpen, setIsRenameOpen] = useState(false);
   const [draftName, setDraftName] = useState(fileName);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: SCREEN_PADDING });
+  const isDark = useColorScheme() === "dark";
 
   const openMenu = () => {
     buttonRef.current?.measureInWindow((x, y, width, height) => {
@@ -93,9 +95,9 @@ export default function ThreeDotsButton({
         accessibilityRole="button"
         hitSlop={10}
         onPress={openMenu}
-        className="h-8 w-6 items-center justify-center rounded-md active:bg-black/10"
+        className="h-8 w-6 items-center justify-center rounded-md active:bg-black/10 dark:active:bg-white/10"
       >
-        <EllipsisVertical size={18} color="rgba(0, 0, 0, 0.6)" />
+        <EllipsisVertical size={18} color={isDark ? "rgba(255, 255, 255, 0.65)" : "rgba(0, 0, 0, 0.6)"} />
       </Pressable>
 
       <Modal
@@ -116,7 +118,7 @@ export default function ThreeDotsButton({
             left: menuPosition.left,
             width: MENU_WIDTH,
           }}
-          className="absolute rounded-md border border-black/10 bg-white p-1 shadow-lg"
+          className="absolute rounded-md border border-black/10 bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1A1E18]"
         >
           <Pressable
             accessibilityRole="menuitem"
@@ -124,10 +126,10 @@ export default function ThreeDotsButton({
               setIsMenuOpen(false);
               openRenameDialog();
             }}
-            className="h-11 flex-row items-center gap-3 rounded px-3 active:bg-black/5"
+            className="h-11 flex-row items-center gap-3 rounded px-3 active:bg-black/5 dark:active:bg-white/5"
           >
-            <Icon as={EditIcon} size="sm" className="text-black/70" />
-            <Text className="text-base text-black">Rename</Text>
+            <Icon as={EditIcon} size="sm" className="text-black/70 dark:text-white/70" />
+            <Text className="text-base text-black dark:text-[#F4F5F1]">Rename</Text>
           </Pressable>
 
           <Pressable
@@ -160,8 +162,8 @@ export default function ThreeDotsButton({
             onPress={() => setIsRenameOpen(false)}
           />
 
-          <View className="rounded-lg bg-white p-5 shadow-lg">
-            <Text className="font-lato-bold text-lg text-black">Rename PDF</Text>
+          <View className="rounded-lg bg-white p-5 shadow-lg dark:bg-[#1A1E18]">
+            <Text className="font-lato-bold text-lg text-black dark:text-[#F4F5F1]">Rename PDF</Text>
 
             <TextInput
               autoFocus
@@ -170,7 +172,8 @@ export default function ThreeDotsButton({
               onChangeText={setDraftName}
               onSubmitEditing={saveName}
               returnKeyType="done"
-              className="mt-4 h-12 rounded-md border border-black/20 px-3 text-base text-black"
+              placeholderTextColor={isDark ? "#9EA69A" : "#737270"}
+              className="mt-4 h-12 rounded-md border border-black/20 px-3 text-base text-black dark:border-white/20 dark:text-[#F4F5F1]"
             />
 
             <View className="mt-5 flex-row justify-end gap-3">
@@ -178,15 +181,15 @@ export default function ThreeDotsButton({
                 onPress={() => setIsRenameOpen(false)}
                 className="h-10 justify-center px-3"
               >
-                <Text className="font-lato-bold text-black/60">Cancel</Text>
+                <Text className="font-lato-bold text-black/60 dark:text-white/60">Cancel</Text>
               </Pressable>
 
               <Pressable
                 disabled={!draftName.trim()}
                 onPress={saveName}
-                className="h-10 justify-center rounded-md bg-green-400 px-4 disabled:opacity-40"
+                className="h-10 justify-center rounded-md bg-[#639922] px-4 disabled:opacity-40"
               >
-                <Text className="font-lato-bold text-black">Save</Text>
+                <Text className="font-lato-bold text-white">Save</Text>
               </Pressable>
             </View>
           </View>

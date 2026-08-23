@@ -19,6 +19,7 @@ import {
   BottomSheetPortal,
   type BottomSheetRef,
 } from "@/components/ui/bottomsheet";
+import { BottomSheetHandle as NativeBottomSheetHandle } from "@gorhom/bottom-sheet";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -27,6 +28,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useColorScheme,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -139,6 +141,7 @@ const ReaderView = ({
   useTranslatedTextDirection = false,
 }: ReaderViewProps) => {
   const { height: windowHeight } = useWindowDimensions();
+  const isDark = useColorScheme() === "dark";
   const [fontAssets] = useAssets([Lato_700Bold, SourceSans3_400Regular]);
   const [latoBoldBase64, setLatoBoldBase64] = useState<string | null>(null);
   const [sourceSansBase64, setSourceSansBase64] = useState<string | null>(null);
@@ -360,6 +363,9 @@ const ReaderView = ({
   const lineHeight = useReaderSettingsStore(
   (state) => state.lineHeight
   );
+  const paragraphSpacing = useReaderSettingsStore(
+    (state) => state.paragraphSpacing
+  );
   const letterSpacing = useReaderSettingsStore(
   (state) => state.letterSpacing
 );
@@ -376,14 +382,23 @@ const automaticHyphenation = useReaderSettingsStore(
   (state) => state.automaticHyphenation
 );
 
-const backgroundColor = useReaderSettingsStore(
+const configuredBackgroundColor = useReaderSettingsStore(
   (state) => state.backgroundColor
 );
 
-const textColor =
+const configuredTextColor =
   useReaderSettingsStore(
     (state) => state.textColor
   );
+const colorsCustomized = useReaderSettingsStore(
+  (state) => state.colorsCustomized
+);
+const backgroundColor = isDark && !colorsCustomized
+  ? "#151814"
+  : configuredBackgroundColor;
+const textColor = isDark && !colorsCustomized
+  ? "#E5E8E1"
+  : configuredTextColor;
 
   const lineGuideEnabled = useReaderSettingsStore(
     (state) => state.lineGuideEnabled
@@ -496,6 +511,7 @@ const textColor =
       fontFamily: fontFamily,
       fontSize: fontSize,
       lineHeight: lineHeight,
+      paragraphSpacing: paragraphSpacing,
       letterSpacing: letterSpacing,
       wordSpacing: wordSpacing,
       bold: bold,
@@ -504,7 +520,7 @@ const textColor =
       textColor: textColor,
     })
     );
-  }, [fontFamily, fontSize, lineHeight, letterSpacing, wordSpacing, bold, automaticHyphenation, backgroundColor, textColor]);
+  }, [fontFamily, fontSize, lineHeight, paragraphSpacing, letterSpacing, wordSpacing, bold, automaticHyphenation, backgroundColor, textColor]);
 
   useEffect(() => {
     sendReaderSettings();
@@ -616,6 +632,11 @@ const textColor =
             -webkit-tap-highlight-color: transparent;
           }
 
+          :root {
+            --paragraph-spacing: 0.65em;
+            --reader-side-padding: clamp(24px, 5vw, 32px);
+          }
+
           html,
           body {
             margin: 0;
@@ -631,7 +652,7 @@ const textColor =
           }
 
           body {
-            padding: 20px;
+            padding: 24px var(--reader-side-padding);
             padding-bottom: 160px;
 
             color: #1e293b;
@@ -640,7 +661,7 @@ const textColor =
 
             font-size: 18px;
 
-            line-height: 1.72;
+            line-height: 1.6;
 
             /*
              * Allow text selection.
@@ -690,42 +711,51 @@ const textColor =
           }
 
           body.reader-paged {
-            padding: 20px;
+            padding: 20px var(--reader-side-padding);
             padding-bottom: 20px;
           }
 
           #reader-pages {
             min-height: 100%;
+            margin-inline: auto;
+            max-width: 680px;
           }
 
           #reader-pages.reader-paged {
             height: 100%;
             min-height: 0;
-            column-width: calc(100vw - 40px);
-            column-gap: 40px;
+            margin-inline: 0;
+            max-width: none;
+            column-width: calc(100vw - var(--reader-side-padding) - var(--reader-side-padding));
+            column-gap: calc(var(--reader-side-padding) + var(--reader-side-padding));
             column-fill: auto;
             transform-style: preserve-3d;
             backface-visibility: hidden;
             will-change: transform, opacity;
           }
           p {
-            margin-top: 0;
-            margin-bottom: 24px;
+            margin: 0 0 var(--paragraph-spacing);
+            orphans: 3;
+            widows: 3;
           }
           h1 {
             font-size: 1.7em;
             font-weight: inherit;
-            line-height: 1.2;
-            margin: 0 0 1em;
+            line-height: 1.18;
+            margin: 0 0 0.7em;
+            break-after: avoid;
+            -webkit-column-break-after: avoid;
           }
           h2 {
             font-size: 1.3em;
             font-weight: inherit;
-            line-height: 1.3;
-            margin: 1.3em 0 0.65em;
+            line-height: 1.25;
+            margin: 1.5em 0 0.55em;
+            break-after: avoid;
+            -webkit-column-break-after: avoid;
           }
           li {
-            margin: 0 0 0.65em 1.2em;
+            margin: 0 0 0.45em 1.2em;
           }
           aside {
             font-size: 0.82em;
@@ -747,7 +777,7 @@ const textColor =
             align-items: center;
             gap: 12px;
             clear: both;
-            margin: 34px -20px 30px;
+            margin: 34px 0 30px;
             color: rgba(71, 85, 105, 0.65);
             font-size: 12px;
             white-space: nowrap;
@@ -1162,6 +1192,11 @@ const textColor =
 
         document.body.style.lineHeight =
           message.lineHeight;
+
+        document.documentElement.style.setProperty(
+          '--paragraph-spacing',
+          message.paragraphSpacing + 'em'
+        );
 
         document.body.style.letterSpacing =
           message.letterSpacing + 'px';
@@ -1679,9 +1714,11 @@ const textColor =
                 fontFamily={fontFamily.split(",")[0].replaceAll("'", "").trim()}
                 fontSize={fontSize}
                 lineHeight={lineHeight}
+                paragraphSpacing={paragraphSpacing}
                 letterSpacing={letterSpacing}
                 wordSpacing={wordSpacing}
                 bold={bold}
+                automaticHyphenation={automaticHyphenation}
                 backgroundColor={backgroundColor}
                 textColor={textColor}
                 onPageChange={handlePagerPageChange}
@@ -2760,26 +2797,40 @@ const textColor =
 
         <BottomSheetPortal
           snapPoints={bottomSheetSnapPoints}
-          keyboardBehavior={activeItem === "ai" ? "extend" : undefined}
+          handleComponent={
+            activeItem === "ai"
+              ? (props) => (
+                  <NativeBottomSheetHandle
+                    {...props}
+                    accessibilityLabel="Resize AI panel"
+                    style={{
+                      borderTopLeftRadius: 12,
+                      borderTopRightRadius: 12,
+                      paddingVertical: 12,
+                    }}
+                  />
+                )
+              : () => null
+          }
+          keyboardBehavior={activeItem === "ai" ? "interactive" : undefined}
           keyboardBlurBehavior={activeItem === "ai" ? "restore" : undefined}
           android_keyboardInputMode={activeItem === "ai" ? "adjustResize" : undefined}
-          enableContentPanningGesture={activeItem !== "ai"}
-          enableHandlePanningGesture={activeItem !== "ai"}
+          enableContentPanningGesture
+          enableHandlePanningGesture
           backdropComponent={
             BottomSheetBackdrop
           }
         >
 
-          <BottomSheetDragIndicator />
+          {activeItem !== "ai" && <BottomSheetDragIndicator />}
 
-          <BottomSheetContent
-            className={activeItem === "ai" ? "flex-1 px-0 gap-0" : undefined}
-            style={activeItem === "ai" ? styles.aiSheetContent : undefined}
-          >
-
-            {renderBottomSheetContent()}
-
-          </BottomSheetContent>
+          {activeItem === "ai" ? (
+            renderBottomSheetContent()
+          ) : (
+            <BottomSheetContent>
+              {renderBottomSheetContent()}
+            </BottomSheetContent>
+          )}
 
         </BottomSheetPortal>
 
@@ -2792,10 +2843,6 @@ const textColor =
 export default ReaderView;
 
 const styles = StyleSheet.create({
-  aiSheetContent: {
-    flex: 1,
-    paddingHorizontal: 0,
-  },
   lineGuideClose: {
     position: "absolute",
     bottom: 24,

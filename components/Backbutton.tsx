@@ -10,7 +10,7 @@ export default function BackButton() {
       accessibilityLabel="Go back"
       onPress={() => router.back()}
     >
-      <Icon as={ArrowLeftIcon} size="lg" className="text-[#242424]" />
+      <Icon as={ArrowLeftIcon} size="lg" className="text-[#242424] dark:text-[#F4F5F1]" />
     </ReaderGlassIconButton>
   );
 }

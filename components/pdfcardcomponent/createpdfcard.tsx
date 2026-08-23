@@ -99,12 +99,12 @@ export default function PdfCoverCard({
         accessibilityRole="button"
         accessibilityLabel={`Open ${displayName}`}
         onPress={onOpen}
-        className="h-28 flex-row items-center rounded-2xl border border-black/5 bg-white p-3 shadow-sm active:opacity-80"
+        className="h-28 flex-row items-center rounded-2xl border border-black/5 bg-white p-3 shadow-sm active:opacity-80 dark:border-white/10 dark:bg-[#1A1E18]"
       >
         <View className="min-w-0 flex-1 px-1 pr-5">
           <Text
             numberOfLines={2}
-            className="font-lato-bold text-base text-black"
+            className="font-lato-bold text-base text-black dark:text-[#F4F5F1]"
           >
             {displayName}
           </Text>
@@ -172,7 +172,7 @@ export default function PdfCoverCard({
       {/* Meta row: name, completion %, date opened */}
       <View className="mt-2 flex-row items-start">
         <View className="min-w-0 flex-1">
-          <Text numberOfLines={1} className="font-lato-bold text-black text-sm">
+          <Text numberOfLines={1} className="font-lato-bold text-black text-sm dark:text-[#F4F5F1]">
             {displayName}
           </Text>
           <View className="flex-row items-center justify-between mt-0.5">

@@ -14,6 +14,7 @@ import {
   Pressable,
   Text,
   TouchableWithoutFeedback,
+  useColorScheme,
   View,
 } from "react-native";
 
@@ -92,6 +93,7 @@ type BackgroundSettingsProps = {
 export default function BackgroundSettings({
   onSelectedTypeChange,
 }: BackgroundSettingsProps) {
+  const isDark = useColorScheme() === "dark";
 
   // Controls which tab is selected
   const [selectedType, setSelectedType] =
@@ -151,7 +153,7 @@ export default function BackgroundSettings({
 
       {/* TITLE */}
 
-      <Text className="text-lg font-semibold text-slate-900">
+      <Text className="text-lg font-semibold text-slate-900 dark:text-[#F4F5F1]">
         Select Color
       </Text>
 
@@ -265,7 +267,7 @@ export default function BackgroundSettings({
                     />
                   ))}
                 </View>
-                <Text className="mt-1 text-center text-xs text-slate-600">
+                <Text className="mt-1 text-center text-xs text-slate-600 dark:text-[#A6ADA1]">
                   {preset.name}
                 </Text>
               </Pressable>
@@ -274,7 +276,7 @@ export default function BackgroundSettings({
         </View>
       ) : (
         <>
-          <Text className="mt-6 mb-4 text-base font-medium text-slate-700">
+          <Text className="mt-6 mb-4 text-base font-medium text-slate-700 dark:text-[#E5E8E1]">
             {selectedType === "font" ? "Font Color" : "Background Color"}
           </Text>
 
@@ -309,7 +311,7 @@ export default function BackgroundSettings({
 
                   borderRadius: 9999,
 
-                  backgroundColor: "white",
+                  backgroundColor: isDark ? "#1A1E18" : "white",
 
                   borderWidth:
                     CIRCLE_RING_SIZE,
@@ -317,7 +319,7 @@ export default function BackgroundSettings({
                   borderColor:
                     isActive
                       ? item
-                      : "#cbd5e1",
+                      : isDark ? "#4A5146" : "#cbd5e1",
 
                   marginBottom: 12,
                 }}

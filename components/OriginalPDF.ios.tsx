@@ -2,7 +2,7 @@ import { Text } from "@/components/ui/text";
 import type { SwitchHighlightTarget } from "@/hooks/switchhighlight";
 import { usePdfKitHighlight } from "@/hooks/usePdfKitHighlight";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, useColorScheme, View } from "react-native";
 import Pdf, { type TableContent } from "react-native-pdf";
 
 type OriginalPdfProps = {
@@ -51,6 +51,7 @@ export default function OriginalPDF({
 }: OriginalPdfProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const isDark = useColorScheme() === "dark";
   const source = useMemo(() => ({ uri: pdfUri, cache: false }), [pdfUri]);
   const { markDocumentReady, pdfRef } = usePdfKitHighlight({
     documentKey: pdfUri,
@@ -84,11 +85,11 @@ export default function OriginalPDF({
 
   if (errorMessage) {
     return (
-      <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8">
-        <Text className="text-center font-lato-bold text-base text-black">
+      <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#10120F]">
+        <Text className="text-center font-lato-bold text-base text-black dark:text-[#F4F5F1]">
           Could not open this PDF
         </Text>
-        <Text className="mt-2 text-center text-sm text-black/50">
+        <Text className="mt-2 text-center text-sm text-black/50 dark:text-white/50">
           {errorMessage}
         </Text>
       </View>
@@ -97,11 +98,11 @@ export default function OriginalPDF({
 
   return (
     <View
-      className="flex-1 bg-[#F7F5EC]"
+      className="flex-1 bg-[#F7F5EC] dark:bg-[#10120F]"
       pointerEvents={outlineOnly ? "none" : "auto"}
     >
       {loading && !outlineOnly && (
-        <View className="absolute inset-0 z-10 items-center justify-center bg-[#F7F5EC]">
+        <View className="absolute inset-0 z-10 items-center justify-center bg-[#F7F5EC] dark:bg-[#10120F]">
           <ActivityIndicator size="large" color="#8fb996" />
         </View>
       )}
@@ -136,7 +137,7 @@ export default function OriginalPDF({
         style={{
           flex: 1,
           width: "100%",
-          backgroundColor: "#F7F5EC",
+          backgroundColor: isDark ? "#10120F" : "#F7F5EC",
           opacity: outlineOnly ? 0 : 1,
         }}
       />

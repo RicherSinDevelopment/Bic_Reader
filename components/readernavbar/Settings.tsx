@@ -4,11 +4,12 @@ import { Switch } from "@/components/ui/switch";
 import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
 import { Check } from "lucide-react-native";
 import React from "react";
-import { Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, useColorScheme, View } from "react-native";
 
 const dimmingOptions = Array.from({ length: 10 }, (_, index) => index * 10);
 
 export default function Settings() {
+  const isDark = useColorScheme() === "dark";
   const [isDimmingMenuOpen, setIsDimmingMenuOpen] = React.useState(false);
   const disableRotation = useReaderSettingsStore(
     (state) => state.disableRotation
@@ -45,12 +46,12 @@ export default function Settings() {
 
   return (
     <View className="px-4 py-4">
-      <Text className="text-lg font-semibold text-slate-900">
+      <Text className="text-lg font-semibold text-slate-900 dark:text-[#F4F5F1]">
         Reader Settings
       </Text>
 
       <View className="mt-6 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600">Disable rotation:</Text>
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Disable rotation:</Text>
         <Center>
           <Switch
             size="md"
@@ -59,7 +60,7 @@ export default function Settings() {
             isDisabled={false}
             trackColor={{
               false: "#d4d4d4",
-              true: "#525252",
+              true: "#639922",
             }}
             thumbColor="#fafafa"
             ios_backgroundColor="#d4d4d4"
@@ -69,8 +70,8 @@ export default function Settings() {
 
       <View className="mt-4 flex-row items-center justify-between">
         <View className="mr-4 flex-1">
-          <Text className="text-m text-slate-600">Automatic hyphenation:</Text>
-          <Text className="mt-1 text-xs text-slate-500">
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Automatic hyphenation:</Text>
+          <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
             Break long words at natural points when space is tight.
           </Text>
         </View>
@@ -81,7 +82,7 @@ export default function Settings() {
             value={automaticHyphenation}
             onValueChange={setAutomaticHyphenation}
             isDisabled={false}
-            trackColor={{ false: "#d4d4d4", true: "#525252" }}
+            trackColor={{ false: "#d4d4d4", true: "#639922" }}
             thumbColor="#fafafa"
             ios_backgroundColor="#d4d4d4"
           />
@@ -90,8 +91,8 @@ export default function Settings() {
 
       <View className="mt-4 flex-row items-center justify-between">
         <View className="mr-4 flex-1">
-          <Text className="text-m text-slate-600">Line guide:</Text>
-          <Text className="mt-1 text-xs text-slate-500">
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Line guide:</Text>
+          <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
             Tap anywhere to move down one line.
           </Text>
         </View>
@@ -104,7 +105,7 @@ export default function Settings() {
               setLineGuideEnabled(enabled);
             }}
             isDisabled={false}
-            trackColor={{ false: "#d4d4d4", true: "#525252" }}
+            trackColor={{ false: "#d4d4d4", true: "#639922" }}
             thumbColor="#fafafa"
             ios_backgroundColor="#d4d4d4"
           />
@@ -113,8 +114,8 @@ export default function Settings() {
 
       <View className="mt-4 flex-row items-center justify-between">
         <View className="mr-4 flex-1">
-          <Text className="text-m text-slate-600">Word guide:</Text>
-          <Text className="mt-1 text-xs text-slate-500">
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Word guide:</Text>
+          <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
             Tap above or below to move one word.
           </Text>
         </View>
@@ -127,7 +128,7 @@ export default function Settings() {
               setWordGuideEnabled(enabled);
             }}
             isDisabled={false}
-            trackColor={{ false: "#d4d4d4", true: "#525252" }}
+            trackColor={{ false: "#d4d4d4", true: "#639922" }}
             thumbColor="#fafafa"
             ios_backgroundColor="#d4d4d4"
           />
@@ -135,22 +136,22 @@ export default function Settings() {
       </View>
 
       <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600">Background dimming:</Text>
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Background dimming:</Text>
         <Pressable
           accessibilityLabel={`Choose background dimming. Current value: ${guideBackgroundDimming}%`}
           accessibilityRole="button"
           onPress={() => setIsDimmingMenuOpen(true)}
-          className="h-10 min-w-24 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5"
+          className="h-10 min-w-24 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5 dark:border-white/20 dark:bg-[#222720] dark:active:bg-white/5"
         >
-          <Text className="text-sm text-black">{guideBackgroundDimming}%</Text>
-          <Icon as={ChevronDownIcon} size="xs" className="text-black/60" />
+          <Text className="text-sm text-black dark:text-[#F4F5F1]">{guideBackgroundDimming}%</Text>
+          <Icon as={ChevronDownIcon} size="xs" className="text-black/60 dark:text-white/60" />
         </Pressable>
       </View>
 
       <View className="mt-4 flex-row items-center justify-between">
         <View className="mr-4 flex-1">
-          <Text className="text-m text-slate-600">Horizontal swipe:</Text>
-          <Text className="mt-1 text-xs text-slate-500">
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Horizontal swipe:</Text>
+          <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
             Turn off to read with vertical scrolling.
           </Text>
         </View>
@@ -163,7 +164,7 @@ export default function Settings() {
               setTransition(enabled ? "pager" : "scroll")
             }
             isDisabled={false}
-            trackColor={{ false: "#d4d4d4", true: "#525252" }}
+            trackColor={{ false: "#d4d4d4", true: "#639922" }}
             thumbColor="#fafafa"
             ios_backgroundColor="#d4d4d4"
           />
@@ -181,8 +182,8 @@ export default function Settings() {
           className="absolute inset-0 bg-black/20"
           onPress={() => setIsDimmingMenuOpen(false)}
         />
-        <View className="mx-6 my-auto overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg">
-          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900">
+        <View className="mx-6 my-auto overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1A1E18]">
+          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900 dark:text-[#F4F5F1]">
             Background dimming
           </Text>
           <ScrollView style={{ maxHeight: 400 }}>
@@ -196,10 +197,10 @@ export default function Settings() {
                     setGuideBackgroundDimming(percentage);
                     setIsDimmingMenuOpen(false);
                   }}
-                  className="h-10 flex-row items-center justify-between rounded px-3 active:bg-black/5"
+                  className="h-10 flex-row items-center justify-between rounded px-3 active:bg-black/5 dark:active:bg-white/5"
                 >
-                  <Text className="text-base text-black">{percentage}%</Text>
-                  {isSelected && <Check size={16} color="#000000" />}
+                  <Text className="text-base text-black dark:text-[#F4F5F1]">{percentage}%</Text>
+                  {isSelected && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
                 </Pressable>
               );
             })}

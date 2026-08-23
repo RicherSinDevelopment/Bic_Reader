@@ -24,6 +24,8 @@ interface PdfCoverCardProps {
   onOpen?: () => void;
   /** Render a horizontal row for compact lists such as search. */
   compact?: boolean;
+  /** Render a spacious library row with the cover on the left. */
+  list?: boolean;
 }
 
 function deriveFileName(path: string) {
@@ -58,6 +60,7 @@ export default function PdfCoverCard({
   onRename,
   onOpen,
   compact = false,
+  list = false,
 }: PdfCoverCardProps) {
   const [thumbnailUri, setThumbnailUri] = useState<string | null>(() =>
     getCachedPdfThumbnail(pdfPath),
@@ -92,6 +95,63 @@ export default function PdfCoverCard({
     ? stripPdfExtension(fileName)
     : deriveFileName(pdfPath);
   const clampedPercent = Math.max(0, Math.min(100, completionPercentage));
+
+  if (list) {
+    return (
+      <View className="h-32 flex-row items-center rounded-2xl border border-black/5 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-[#1A1E18]">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${displayName}`}
+          onPress={onOpen}
+          className="min-w-0 flex-1 flex-row items-center active:opacity-75"
+        >
+          <View className="h-24 w-[68px] overflow-hidden rounded-xl bg-black shadow-sm">
+            {thumbnailUri ? (
+              <Image
+                source={{ uri: thumbnailUri }}
+                style={{ width: "100%", height: "100%" }}
+                resizeMode="cover"
+              />
+            ) : (
+              <View className="flex-1 items-center justify-center bg-black">
+                {!error ? (
+                  <ActivityIndicator color="#8fb996" size="small" />
+                ) : (
+                  <Text className="px-1 text-center text-[10px] text-white/40">Unavailable</Text>
+                )}
+              </View>
+            )}
+          </View>
+
+          <View className="min-w-0 flex-1 px-4">
+            <Text
+              numberOfLines={2}
+              className="font-lato-bold text-base leading-5 text-black dark:text-[#F4F5F1]"
+            >
+              {displayName}
+            </Text>
+            <Text className="mt-2 text-xs text-gray-400">
+              Opened {formatDateOpened(dateOpened)}
+            </Text>
+            <View className="mt-3 flex-row items-center gap-3">
+              <Progress value={clampedPercent} className="h-1.5 flex-1 bg-black/10 dark:bg-white/10">
+                <ProgressFilledTrack className="bg-[#639922]" />
+              </Progress>
+              <Text className="w-9 text-right text-xs text-gray-400">{clampedPercent}%</Text>
+            </View>
+          </View>
+        </Pressable>
+
+        {onDelete && onRename ? (
+          <ThreeDotsButton
+            fileName={displayName}
+            onDelete={onDelete}
+            onRename={onRename}
+          />
+        ) : null}
+      </View>
+    );
+  }
 
   if (compact) {
     return (

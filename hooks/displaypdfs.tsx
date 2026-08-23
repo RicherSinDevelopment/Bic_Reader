@@ -44,6 +44,8 @@ export default function PdfLibrary({
   const horizontalPadding = 20;
 
   const { width: screenWidth } = useWindowDimensions();
+  const isListView = numColumns === 3;
+  const effectiveColumns = isListView ? 1 : numColumns;
 
   // ========================================
   // CALCULATE CARD WIDTH
@@ -52,9 +54,9 @@ export default function PdfLibrary({
   const availableWidth =
     screenWidth -
     horizontalPadding * 2 -
-    gap * (numColumns - 1);
+    gap * (effectiveColumns - 1);
 
-  const cardWidth = availableWidth / numColumns;
+  const cardWidth = availableWidth / effectiveColumns;
 
   // ========================================
   // RENDER
@@ -67,11 +69,11 @@ export default function PdfLibrary({
         keyExtractor={(item) => item.id}
 
         // Number of columns comes from HomePage
-        numColumns={numColumns}
+        numColumns={effectiveColumns}
 
         // Forces FlatList to rebuild when switching
         // between 1, 2, and 3 columns
-        key={`columns-${numColumns}`}
+        key={isListView ? "layout-list" : `columns-${numColumns}`}
 
         // Overall spacing around the grid
         contentContainerStyle={{
@@ -83,7 +85,7 @@ export default function PdfLibrary({
 
         // Spacing between columns and rows
         columnWrapperStyle={
-          numColumns > 1
+          effectiveColumns > 1
             ? {
                 gap: gap,
                 marginBottom: gap,
@@ -104,13 +106,14 @@ export default function PdfLibrary({
           <View
             style={{
               width: cardWidth,
-              marginBottom: numColumns === 1 ? gap : 0,
+              marginBottom: effectiveColumns === 1 ? gap : 0,
             }}
           >
             <PdfCoverCard
               pdfPath={item.uri}
               fileName={item.name}
               width={cardWidth}
+              list={isListView}
               dateOpened={item.dateOpened}
               completionPercentage={item.completionPercentage}
               onDelete={() => onDeletePdf(item.id)}

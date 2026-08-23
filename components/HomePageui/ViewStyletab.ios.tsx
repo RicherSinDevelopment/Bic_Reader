@@ -26,8 +26,8 @@ const COLUMN_OPTIONS = [
   },
   {
     columns: 3,
-    label: "Three-column PDF layout",
-    icon: "rectangle.split.3x1",
+    label: "PDF list layout",
+    icon: "list.bullet",
   },
 ] as const;
 
@@ -67,31 +67,13 @@ export default function PdfLayoutTabs({ onColumnsChange }: PdfLayoutTabsProps) {
           <View style={[StyleSheet.absoluteFill, styles.fallbackBackground]} />
         )}
 
-        {canUseGlass ? (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.indicator,
-              { transform: [{ translateX: indicatorX }] },
-            ]}
-          >
-            <GlassView
-              pointerEvents="none"
-              glassEffectStyle="regular"
-              tintColor="#4ADE80"
-              style={StyleSheet.absoluteFill}
-            />
-          </Animated.View>
-        ) : (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.indicator,
-              styles.fallbackIndicator,
-              { transform: [{ translateX: indicatorX }] },
-            ]}
-          />
-        )}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.indicator,
+            { transform: [{ translateX: indicatorX }] },
+          ]}
+        />
 
         <View style={styles.buttons}>
           {COLUMN_OPTIONS.map((option) => {
@@ -152,9 +134,7 @@ const styles = StyleSheet.create({
     height: CONTROL_HEIGHT - CONTROL_PADDING * 2,
     borderRadius: 10,
     overflow: "hidden",
-  },
-  fallbackIndicator: {
-    backgroundColor: "#A7D7B0",
+    backgroundColor: "#639922",
   },
   buttons: {
     position: "absolute",

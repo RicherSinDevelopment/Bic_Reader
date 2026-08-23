@@ -59,6 +59,7 @@ type ReaderViewProps = {
     blockId?: string;
     searchQuery?: string;
     searchMatchIndex?: number;
+    switchHighlightOffset?: number;
     switchHighlightWordIndex?: number;
     switchHighlightWordProgress?: number;
     switchHighlightQuery?: string;
@@ -178,6 +179,7 @@ const ReaderView = ({
     blockOffset: number;
     wordIndex: number;
   } | null>(null);
+  const pendingPagerAnchorRef = useRef(false);
   const [currentSourcePage, setCurrentSourcePage] = useState(1);
   const [pagerModeDestination, setPagerModeDestination] = useState<{
     page: number;
@@ -447,26 +449,41 @@ const textColor = isDark && !colorsCustomized
     anchor?: { blockId: string; blockOffset: number; wordIndex: number },
   ) => {
     lastSourcePageRef.current = sourcePage;
-    if (anchor) modeTextAnchorRef.current = anchor;
+    if (anchor) {
+      modeTextAnchorRef.current = anchor;
+      const block = blocks.find((candidate) => candidate.id === anchor.blockId);
+      const word = block
+        ? Array.from(block.text.matchAll(/\S+/g))[anchor.wordIndex]?.[0] ?? ""
+        : "";
+      onSwitchAnchorChange?.(anchor.blockId, word, anchor.wordIndex);
+    }
     setCurrentSourcePage(sourcePage);
     onPaginationChange?.(current, total);
     onPageChange?.(sourcePage);
-  }, [onPageChange, onPaginationChange]);
+  }, [blocks, onPageChange, onPaginationChange, onSwitchAnchorChange]);
 
   const previousPagedModeRef = useRef(isPaged);
   useEffect(() => {
     const wasPaged = previousPagedModeRef.current;
     previousPagedModeRef.current = isPaged;
     if (!wasPaged && isPaged) {
-      const anchor = modeTextAnchorRef.current;
-      setPagerModeDestination({
-        page: Math.max(1, lastSourcePageRef.current),
-        blockId: anchor?.blockId,
-        searchMatchIndex: anchor?.blockOffset,
-        switchHighlightOffset: anchor?.blockOffset,
-        nonce: Date.now(),
-      });
-      return;
+      pendingPagerAnchorRef.current = true;
+      webViewRef.current?.injectJavaScript(
+        `window.__reportSwitchAnchor?.(true); true;`,
+      );
+      const timer = setTimeout(() => {
+        if (!pendingPagerAnchorRef.current) return;
+        pendingPagerAnchorRef.current = false;
+        const anchor = modeTextAnchorRef.current;
+        setPagerModeDestination({
+          page: Math.max(1, lastSourcePageRef.current),
+          blockId: anchor?.blockId,
+          searchMatchIndex: anchor?.blockOffset,
+          switchHighlightOffset: anchor?.blockOffset,
+          nonce: Date.now(),
+        });
+      }, 300);
+      return () => clearTimeout(timer);
     }
     if (!wasPaged || isPaged || !webViewReady) return;
 
@@ -1489,6 +1506,16 @@ const textColor = isDark && !colorsCustomized
             blockOffset,
             wordIndex,
           };
+          if (pendingPagerAnchorRef.current) {
+            pendingPagerAnchorRef.current = false;
+            setPagerModeDestination({
+              page: Math.max(1, sourceBlock?.page ?? lastSourcePageRef.current),
+              blockId: data.blockId,
+              searchMatchIndex: blockOffset,
+              switchHighlightOffset: blockOffset,
+              nonce: Date.now(),
+            });
+          }
         }
         if (typeof data.ttsOffset === "number") {
           setTtsStartOffset(Math.max(0, data.ttsOffset));
@@ -1938,7 +1965,79 @@ const textColor = isDark && !colorsCustomized
                 }
               };
 
-              function reportSwitchAnchor() {
+              function reportPreciseSwitchAnchor(force) {
+                const isRtl = document.documentElement.dir === 'rtl';
+                const blocksInView = Array.from(
+                  document.querySelectorAll('[data-reader-block]')
+                ).filter(function(block) {
+                  const rect = block.getBoundingClientRect();
+                  return rect.bottom > 0 && rect.top < window.innerHeight &&
+                    rect.right > 0 && rect.left < window.innerWidth;
+                }).sort(function(first, second) {
+                  const firstRect = first.getBoundingClientRect();
+                  const secondRect = second.getBoundingClientRect();
+                  const vertical = Math.max(0, firstRect.top) - Math.max(0, secondRect.top);
+                  if (Math.abs(vertical) > 1) return vertical;
+                  return isRtl
+                    ? secondRect.right - firstRect.right
+                    : firstRect.left - secondRect.left;
+                }).slice(0, 4);
+
+                let selected = null;
+                blocksInView.forEach(function(block) {
+                  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+                  let textNode = walker.nextNode();
+                  while (textNode) {
+                    const text = textNode.textContent || '';
+                    Array.from(text.matchAll(/\\S+/g)).forEach(function(match) {
+                      const range = document.createRange();
+                      range.setStart(textNode, match.index);
+                      range.setEnd(textNode, match.index + match[0].length);
+                      const rect = Array.from(range.getClientRects()).find(function(item) {
+                        return item.width > 0 && item.height > 0 && item.bottom > 0 &&
+                          item.top < window.innerHeight && item.right > 0 &&
+                          item.left < window.innerWidth;
+                      });
+                      if (!rect) return;
+                      const visibleTop = Math.max(0, rect.top);
+                      const horizontal = isRtl ? -rect.right : rect.left;
+                      if (!selected || visibleTop < selected.visibleTop - 1 ||
+                        (Math.abs(visibleTop - selected.visibleTop) <= 1 &&
+                          horizontal < selected.horizontal)) {
+                        selected = { block, textNode, match, range, visibleTop, horizontal };
+                      }
+                    });
+                    textNode = walker.nextNode();
+                  }
+                });
+                if (!selected) return false;
+
+                const prefix = document.createRange();
+                prefix.selectNodeContents(selected.block);
+                prefix.setEnd(selected.textNode, selected.match.index);
+                const characterOffset = prefix.toString().length;
+                const wordIndex = (prefix.toString().match(/\\S+/g) || []).length;
+                const blockId = selected.block.dataset.blockId;
+                const anchorKey = blockId + ':' + wordIndex;
+                if (blockId && window.__showReaderSwitchHighlight) {
+                  drawReaderSwitchHighlight(selected.range);
+                }
+                if (blockId && (force || anchorKey !== lastSwitchAnchorKey)) {
+                  lastSwitchAnchorKey = anchorKey;
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'switchAnchor',
+                    blockId: blockId,
+                    word: selected.match[0],
+                    wordIndex: wordIndex,
+                    blockOffset: characterOffset,
+                    ttsOffset: Number(selected.block.dataset.ttsStart || 0) + characterOffset
+                  }));
+                }
+                return Boolean(blockId);
+              }
+
+              function reportSwitchAnchor(force) {
+                if (reportPreciseSwitchAnchor(force)) return;
                 let block = null;
                 for (let y = 12; y < window.innerHeight && !block; y += 36) {
                   const edgeX = document.documentElement.dir === 'rtl'
@@ -2002,7 +2101,7 @@ const textColor = isDark && !colorsCustomized
                 if (blockId && window.__showReaderSwitchHighlight) {
                   drawReaderSwitchHighlight(switchHighlightRange);
                 }
-                if (blockId && anchorKey !== lastSwitchAnchorKey) {
+                if (blockId && (force || anchorKey !== lastSwitchAnchorKey)) {
                   lastSwitchAnchorKey = anchorKey;
                   window.ReactNativeWebView.postMessage(JSON.stringify({
                     type: 'switchAnchor',

@@ -44,7 +44,7 @@ export default function AddButton({ onPdfPicked }: AddButtonProps) {
         size="lg"
         onPress={handlePickPdf}
         isDisabled={isPicking}
-        className="h-16 flex-row items-center justify-center rounded-xl bg-[#22C55E] px-5 active:translate-y-0.5"
+        className="h-16 flex-row items-center justify-center rounded-xl bg-[#639922] px-5 active:translate-y-0.5"
       >
         {isPicking ? (
           <ButtonSpinner color="#FFFFFF" />

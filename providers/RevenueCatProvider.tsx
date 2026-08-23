@@ -2,6 +2,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import type { CustomerInfo } from 'react-native-purchases';
 import Purchases, { LOG_LEVEL } from 'react-native-purchases';
 import RevenueCatUI, { PAYWALL_RESULT } from 'react-native-purchases-ui';
+import { useSegments } from 'expo-router';
 import {
   createContext,
   type PropsWithChildren,
@@ -36,6 +37,8 @@ function hasPremiumEntitlement(customerInfo: CustomerInfo) {
 
 export function RevenueCatProvider({ children }: PropsWithChildren) {
   const { isLoading: isAuthLoading, session } = useAuth();
+  const segments = useSegments();
+  const isAuthActionRoute = segments[0] === 'auth';
   const [isLoading, setIsLoading] = useState(true);
   const [isReady, setIsReady] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
@@ -61,6 +64,14 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (isAuthLoading) return;
+
+    // Password-recovery links create a temporary authenticated session. Do not
+    // initialize purchases while that session is only being used to set a new
+    // password; purchase setup belongs to the app routes after recovery.
+    if (isAuthActionRoute) {
+      setIsLoading(false);
+      return;
+    }
 
     if (Platform.OS === 'web') {
       setIsLoading(false);
@@ -118,7 +129,7 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
     return () => {
       isMounted = false;
     };
-  }, [applyCustomerInfo, isAuthLoading, session?.user.id]);
+  }, [applyCustomerInfo, isAuthActionRoute, isAuthLoading, session?.user.id]);
 
   useEffect(() => {
     if (!isReady || Platform.OS === 'web') return;

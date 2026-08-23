@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from '@/providers/AuthProvider';
 import { RevenueCatProvider } from '@/providers/RevenueCatProvider';
 import { Lato_400Regular, Lato_700Bold, useFonts } from "@expo-google-fonts/lato";
 import { SourceSans3_400Regular } from "@expo-google-fonts/source-sans-3/400Regular";
-import { Redirect, Stack, useSegments } from "expo-router";
+import { Stack } from "expo-router";
 import { SQLiteProvider } from "expo-sqlite";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, useColorScheme, View } from "react-native";
@@ -79,17 +79,9 @@ function StartupLoadingScreen() {
 
 function RootNavigator() {
   const { isLoading, session } = useAuth();
-  const segments = useSegments();
 
   if (isLoading) {
     return <StartupLoadingScreen />;
-  }
-
-  // A development reload can restore the last deep-link route even after the
-  // password recovery is finished. Resolve that stale route here, before the
-  // reset screen mounts, so authenticated users return directly to the app.
-  if (session && segments[0] === "auth" && segments[1] === "reset-password") {
-    return <Redirect href="/HomePage" />;
   }
 
   return (

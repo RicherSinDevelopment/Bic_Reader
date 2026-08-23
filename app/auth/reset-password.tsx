@@ -17,11 +17,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createSessionFromAuthUrl } from '@/lib/auth-deep-link';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/providers/AuthProvider';
 
 type RecoveryStatus = 'loading' | 'ready' | 'error';
 
+const CONSUMED_RECOVERY_URL_KEY = 'bicreader.auth.consumedRecoveryUrl';
+
 export default function ResetPassword() {
   const incomingUrl = Linking.useLinkingURL();
+  const { session } = useAuth();
   const router = useRouter();
   const handledUrl = useRef<string | null>(null);
   const [status, setStatus] = useState<RecoveryStatus>('loading');
@@ -34,20 +38,32 @@ export default function ResetPassword() {
   const styles = useMemo(() => createStyles(isDark), [isDark]);
 
   useEffect(() => {
-    if (!incomingUrl || handledUrl.current === incomingUrl) return;
+    if (!incomingUrl) {
+      if (session) router.replace('/HomePage');
+      return;
+    }
+
+    if (handledUrl.current === incomingUrl) return;
 
     handledUrl.current = incomingUrl;
+
+    if (session || localStorage.getItem(CONSUMED_RECOVERY_URL_KEY) === incomingUrl) {
+      localStorage.setItem(CONSUMED_RECOVERY_URL_KEY, incomingUrl);
+      router.replace('/HomePage');
+      return;
+    }
 
     void createSessionFromAuthUrl(incomingUrl)
       .then((session) => {
         if (!session) throw new Error('The reset link did not create a recovery session.');
+        localStorage.setItem(CONSUMED_RECOVERY_URL_KEY, incomingUrl);
         setStatus('ready');
       })
       .catch((error: unknown) => {
         setStatus('error');
         setErrorMessage(error instanceof Error ? error.message : 'The reset link is invalid.');
       });
-  }, [incomingUrl]);
+  }, [incomingUrl, router, session]);
 
   const passwordsMatch = password === confirmPassword;
   const canSubmit = password.length >= 8 && passwordsMatch && !isSubmitting;

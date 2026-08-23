@@ -51,7 +51,7 @@ export default function AddButton({ onPdfPicked }: AddButtonProps) {
           justifyContent: "center",
           gap: 8,
           borderRadius: 12,
-          backgroundColor: "#22C55E",
+          backgroundColor: "#639922",
           opacity: isPicking ? 0.65 : 1,
           transform: [{ translateY: pressed && !isPicking ? 2 : 0 }],
         })}

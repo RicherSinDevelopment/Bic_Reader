@@ -7,6 +7,7 @@ export type SwitchHighlightTarget = {
   blockId: string;
   word: string;
   wordIndex: number;
+  blockOffset: number;
   sourceWordCount: number;
   page: number;
   sourceBounds: ExtractedPdfBlock["sourceBounds"];
@@ -36,10 +37,12 @@ export function useSwitchHighlight(
     const pageSize = block ? pageSizes[block.page] : undefined;
     if (!block || !pageSize) return null;
     const exactWordBounds = block.wordBounds?.[anchor?.wordIndex ?? 0];
+    const wordMatch = Array.from(block.text.matchAll(/\S+/g))[anchor?.wordIndex ?? 0];
     return {
       blockId: block.id,
       word: anchor?.word || block.text.trim().split(/\s+/, 1)[0] || "",
       wordIndex: anchor?.wordIndex ?? 0,
+      blockOffset: wordMatch?.index ?? 0,
       sourceWordCount: block.text.trim().split(/\s+/).filter(Boolean).length,
       page: block.page,
       sourceBounds: exactWordBounds ? {

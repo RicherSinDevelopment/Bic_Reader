@@ -162,7 +162,7 @@ export default function HorizontalReaderPager({
 }: Props) {
   const pagerRef = useRef<FlatList<Segment[]>>(null);
   const currentPageRef = useRef(0);
-  const navigatedDestinationNonceRef = useRef<number | null>(null);
+  const navigatedDestinationKeyRef = useRef<string | null>(null);
   const [containerHeight, setContainerHeight] = useState(0);
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<number | null>(null);
   const [dismissedSwitchNonce, setDismissedSwitchNonce] = useState<number | null>(null);
@@ -249,7 +249,7 @@ export default function HorizontalReaderPager({
       segment.blockId === destination.blockId &&
       (destination.searchMatchIndex === undefined || (
         destination.searchMatchIndex >= segment.startOffset &&
-        destination.searchMatchIndex <= segment.startOffset + segment.text.length
+        destination.searchMatchIndex < segment.startOffset + segment.text.length
       ))
     ));
     if (exactIndex >= 0) return exactIndex;
@@ -270,19 +270,29 @@ export default function HorizontalReaderPager({
   }, [blocks, destination, destinationPage, onPageChange, pages]);
 
   useEffect(() => {
-    if (
-      !destination ||
-      navigatedDestinationNonceRef.current === destination.nonce
-    ) return;
+    if (!destination || !pages.length) return;
+    // Pagination is rebuilt after the pager receives its measured height and
+    // whenever typography changes. The same destination nonce can therefore
+    // resolve to a different horizontal page; include the resolved layout in
+    // the key so the exact word is repositioned after pagination settles.
+    const navigationKey = [
+      destination.nonce,
+      destinationPage,
+      pages.length,
+      Math.round(width),
+      Math.round(pageContentHeight),
+    ].join(':');
+    if (navigatedDestinationKeyRef.current === navigationKey) return;
     const timer = setTimeout(() => {
       pagerRef.current?.scrollToIndex({
         animated: false,
         index: destinationPage,
       });
-      navigatedDestinationNonceRef.current = destination.nonce;
+      currentPageRef.current = destinationPage;
+      navigatedDestinationKeyRef.current = navigationKey;
     }, 0);
     return () => clearTimeout(timer);
-  }, [destination, destinationPage]);
+  }, [destination, destinationPage, pageContentHeight, pages.length, width]);
 
   useEffect(() => {
     if (pages.length) {

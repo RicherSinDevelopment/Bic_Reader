@@ -211,6 +211,8 @@ export default function ReaderScreen() {
     blockId?: string;
     searchQuery?: string;
     searchMatchIndex?: number;
+    switchHighlightOffset?: number;
+    switchHighlightWordIndex?: number;
     nonce: number;
   } | null>(null);
   const [translatedDestination, setTranslatedDestination] = useState<{
@@ -783,6 +785,15 @@ export default function ReaderScreen() {
   const handleTabChange = (value: ReaderMode) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (value === "original") setHasVisitedOriginal(true);
+    if (switchHighlightTarget && value === "reader") {
+      setReaderDestination({
+        page: switchHighlightTarget.page,
+        blockId: switchHighlightTarget.blockId,
+        switchHighlightOffset: switchHighlightTarget.blockOffset,
+        switchHighlightWordIndex: switchHighlightTarget.wordIndex,
+        nonce: Date.now(),
+      });
+    }
     if (switchHighlightTarget && value === "translated" && translationLanguage) {
       const destinationBase = {
         page: switchHighlightTarget.page,

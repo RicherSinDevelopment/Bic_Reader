@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 
 import { createSessionFromAuthUrl } from '@/lib/auth-deep-link';
+import { getNativeGoogleCredential } from '@/lib/native-google-auth';
 import { supabase } from '@/lib/supabase';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -75,6 +76,22 @@ export function SocialAuthButtons({ disabled = false, onError }: SocialAuthButto
     router.replace('/HomePage');
   };
 
+  const handleNativeGoogleAuth = async () => {
+    const credential = await getNativeGoogleCredential();
+    if (!credential) return;
+
+    const { data, error } = await supabase.auth.signInWithIdToken({
+      provider: 'google',
+      token: credential.idToken,
+      nonce: credential.nonce,
+    });
+
+    if (error) throw error;
+    if (!data.session) throw new Error('Google sign-in completed, but no session was created.');
+
+    router.replace('/HomePage');
+  };
+
   const handleSocialAuth = async (provider: SocialProvider) => {
     onError(null);
     setActiveProvider(provider);
@@ -82,6 +99,11 @@ export function SocialAuthButtons({ disabled = false, onError }: SocialAuthButto
     try {
       if (provider === 'apple' && Platform.OS === 'ios') {
         await handleNativeAppleAuth();
+        return;
+      }
+
+      if (provider === 'google' && Platform.OS !== 'web') {
+        await handleNativeGoogleAuth();
         return;
       }
 

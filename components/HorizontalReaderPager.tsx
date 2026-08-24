@@ -33,6 +33,12 @@ type PageAnchor = {
 
 type Props = {
   blocks: ExtractedPdfBlock[];
+  readingDirection?: "ltr" | "rtl";
+  spokenWordHighlight?: {
+    blockId: string;
+    offset: number;
+    length: number;
+  } | null;
   destination?: Destination;
   stationarySwitchHighlight?: {
     blockId: string;
@@ -157,6 +163,8 @@ function pageAnchor(
 
 export default function HorizontalReaderPager({
   blocks,
+  readingDirection = "ltr",
+  spokenWordHighlight,
   destination,
   stationarySwitchHighlight,
   fontFamily,
@@ -174,6 +182,7 @@ export default function HorizontalReaderPager({
   onReaderTap,
   onSwipeStart,
 }: Props) {
+  const isRtl = readingDirection === "rtl";
   const pagerRef = useRef<FlatList<Segment[]>>(null);
   const currentPageRef = useRef(0);
   const navigatedDestinationKeyRef = useRef<string | null>(null);
@@ -321,6 +330,25 @@ export default function HorizontalReaderPager({
     }
   }, [blocks, onPageChange, pages]);
 
+  useEffect(() => {
+    if (!spokenWordHighlight || !pages.length) return;
+    const pageIndex = pages.findIndex((page) => page.some((segment) =>
+      segment.blockId === spokenWordHighlight.blockId &&
+      spokenWordHighlight.offset >= segment.startOffset &&
+      spokenWordHighlight.offset < segment.startOffset + segment.text.length
+    ));
+    if (pageIndex < 0 || pageIndex === currentPageRef.current) return;
+    pagerRef.current?.scrollToIndex({ animated: true, index: pageIndex });
+    currentPageRef.current = pageIndex;
+    const sourcePage = pages[pageIndex]?.[0]?.sourcePage ?? 1;
+    onPageChange?.(
+      pageIndex + 1,
+      pages.length,
+      sourcePage,
+      pageAnchor(pages[pageIndex], blocks),
+    );
+  }, [blocks, onPageChange, pages, spokenWordHighlight]);
+
   const textForDisplay = useCallback((text: string) => {
     if (!automaticHyphenation || Platform.OS !== "ios") return text;
     const cached = hyphenationCache.current.get(text);
@@ -370,6 +398,13 @@ export default function HorizontalReaderPager({
       : undefined;
     const switchStart = switchMatch?.index ?? -1;
     const switchLength = switchMatch?.[0].length ?? 0;
+    const isSpokenTarget = spokenWordHighlight?.blockId === segment.blockId &&
+      spokenWordHighlight.offset >= segment.startOffset &&
+      spokenWordHighlight.offset < segment.startOffset + segment.text.length;
+    const spokenStart = isSpokenTarget
+      ? spokenWordHighlight!.offset - segment.startOffset
+      : -1;
+    const spokenLength = isSpokenTarget ? spokenWordHighlight!.length : 0;
     const headingScale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
     const openingWord = segment.sectionOpening
       ? segment.text.match(/^\S+/)?.[0] ?? ""
@@ -377,24 +412,65 @@ export default function HorizontalReaderPager({
     const paragraphIndent = segment.paragraphStart && !segment.sectionOpening
       ? "\u2003\u2002"
       : "";
+    const typographyStyle = {
+      color: textColor,
+      writingDirection: readingDirection,
+      textAlign: isRtl ? "right" as const : "left" as const,
+      fontFamily,
+      fontSize: fontSize * headingScale,
+      lineHeight: fontSize * headingScale * lineHeight,
+      letterSpacing,
+      fontWeight: bold ? "700" as const : "400" as const,
+    };
+    const openingWordStyle = {
+      fontSize: fontSize * headingScale * 1.24,
+      fontWeight: "700" as const,
+      letterSpacing: letterSpacing + 0.15,
+    };
+    const highlightStyle = {
+      ...typographyStyle,
+      backgroundColor: "rgba(250, 204, 21, 0.82)",
+    };
 
     return (
       <Text
         android_hyphenationFrequency={automaticHyphenation ? "full" : "none"}
         key={`${segment.blockId}-${segment.startOffset}-${index}`}
         style={{
-          color: textColor,
-          fontFamily,
-          fontSize: fontSize * headingScale,
-          lineHeight: fontSize * headingScale * lineHeight,
-          letterSpacing,
-          fontWeight: bold ? "700" : "400",
+          ...typographyStyle,
           marginBottom: segment.spacingAfter,
           marginTop: segment.spacingBefore,
         }}
       >
         {paragraphIndent}
-        {localMatch >= 0 ? (
+        {spokenStart >= 0 && openingWord ? (
+          <>
+            <Text style={openingWordStyle}>
+              {spokenStart < openingWord.length ? (
+                <Text style={[highlightStyle, openingWordStyle]}>
+                  {textForDisplay(openingWord)}
+                </Text>
+              ) : textForDisplay(openingWord)}
+            </Text>
+            {spokenStart >= openingWord.length ? (
+              <>
+                {textForDisplay(segment.text.slice(openingWord.length, spokenStart))}
+                <Text style={highlightStyle}>
+                  {textForDisplay(segment.text.slice(spokenStart, spokenStart + spokenLength))}
+                </Text>
+                {textForDisplay(segment.text.slice(spokenStart + spokenLength))}
+              </>
+            ) : textForDisplay(segment.text.slice(openingWord.length))}
+          </>
+        ) : spokenStart >= 0 ? (
+          <>
+            {textForDisplay(segment.text.slice(0, spokenStart))}
+            <Text style={highlightStyle}>
+              {textForDisplay(segment.text.slice(spokenStart, spokenStart + spokenLength))}
+            </Text>
+            {textForDisplay(segment.text.slice(spokenStart + spokenLength))}
+          </>
+        ) : localMatch >= 0 ? (
           <>
             {textForDisplay(segment.text.slice(0, localMatch))}
             <Text style={{ backgroundColor: "#facc15" }}>
@@ -413,11 +489,7 @@ export default function HorizontalReaderPager({
         ) : openingWord ? (
           <>
             <Text
-              style={{
-                fontSize: fontSize * 1.24,
-                fontWeight: "700",
-                letterSpacing: letterSpacing + 0.15,
-              }}
+              style={openingWordStyle}
             >
               {textForDisplay(openingWord)}
             </Text>
@@ -464,6 +536,7 @@ export default function HorizontalReaderPager({
         style={{ flex: 1, backgroundColor }}
         data={pages}
         horizontal
+        inverted={isRtl}
         pagingEnabled
         initialScrollIndex={pages.length ? destinationPage : undefined}
         bounces={false}

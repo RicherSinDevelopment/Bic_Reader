@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 
 export async function migrateDatabase(db: SQLiteDatabase) {
   await db.execAsync(`
@@ -49,6 +49,30 @@ export async function migrateDatabase(db: SQLiteDatabase) {
         engine_version INTEGER NOT NULL,
         document_json TEXT NOT NULL,
         extracted_at TEXT NOT NULL,
+        FOREIGN KEY (pdf_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
+      );
+    `);
+  }
+
+  if (currentVersion < 3) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS pdf_translations (
+        pdf_id TEXT NOT NULL,
+        language_code TEXT NOT NULL,
+        source_block_id TEXT NOT NULL,
+        block_json TEXT NOT NULL,
+        translated_at TEXT NOT NULL,
+        PRIMARY KEY (pdf_id, language_code, source_block_id),
+        FOREIGN KEY (pdf_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_pdf_translations_document_language
+      ON pdf_translations(pdf_id, language_code);
+
+      CREATE TABLE IF NOT EXISTS pdf_translation_preferences (
+        pdf_id TEXT PRIMARY KEY NOT NULL,
+        language_code TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
         FOREIGN KEY (pdf_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
       );
     `);

@@ -100,6 +100,60 @@ const highlightColors = [
 
 const rightToLeftLanguageCodes = new Set(["ar", "fa", "he", "ur"]);
 
+function containsRightToLeftText(blocks: ExtractedPdfBlock[]) {
+  const sample = blocks.slice(0, 80).map((block) => block.text).join(" ");
+  const rtlCharacters = sample.match(/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g)?.length ?? 0;
+  const letterCharacters = sample.match(/\p{L}/gu)?.length ?? 0;
+  return letterCharacters > 0 && rtlCharacters / letterCharacters >= 0.3;
+}
+
+function ttsPositionForBlock(
+  blocks: ExtractedPdfBlock[],
+  blockId: string,
+  blockOffset: number,
+) {
+  let globalOffset = 0;
+  for (const block of blocks) {
+    const text = block.text.trim();
+    if (block.id === blockId) {
+      const leadingWhitespace = block.text.length - block.text.trimStart().length;
+      return globalOffset + Math.max(
+        0,
+        Math.min(text.length, blockOffset - leadingWhitespace),
+      );
+    }
+    globalOffset += text.length + 2;
+  }
+  return 0;
+}
+
+function spokenWordForTtsOffset(
+  blocks: ExtractedPdfBlock[],
+  charIndex: number,
+  charLength: number,
+) {
+  let globalOffset = 0;
+  for (const block of blocks) {
+    const text = block.text.trim();
+    const blockEnd = globalOffset + text.length;
+    if (charIndex >= globalOffset && charIndex < blockEnd) {
+      const leadingWhitespace = block.text.length - block.text.trimStart().length;
+      const localOffset = charIndex - globalOffset;
+      const word = Array.from(text.matchAll(/\S+/g)).find((match) =>
+        localOffset >= (match.index ?? 0) &&
+        localOffset < (match.index ?? 0) + match[0].length
+      );
+      return {
+        blockId: block.id,
+        offset: leadingWhitespace + (word?.index ?? localOffset),
+        length: word?.[0].length ?? charLength,
+      };
+    }
+    globalOffset = blockEnd + 2;
+  }
+  return null;
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -164,19 +218,25 @@ const ReaderView = ({
   const [backgroundSettingsTab, setBackgroundSettingsTab] = useState<
     "presets" | "font" | "background"
   >("presets");
-  const [readerText, setReaderText] = useState("");
   const [ttsStartOffset, setTtsStartOffset] = useState(0);
+  const [spokenWordHighlight, setSpokenWordHighlight] = useState<{
+    blockId: string;
+    offset: number;
+    length: number;
+  } | null>(null);
   const speechStartOffsetRef = useRef(0);
   const readerLanguageCode = useTranslatedTextDirection
     ? translationLanguage?.code ?? "en"
     : "en";
-  const readerDirection = useTranslatedTextDirection &&
-    rightToLeftLanguageCodes.has(readerLanguageCode)
+  const originalTextIsRtl = useMemo(() => containsRightToLeftText(blocks), [blocks]);
+  const readerDirection = (useTranslatedTextDirection &&
+    rightToLeftLanguageCodes.has(readerLanguageCode)) ||
+    (!useTranslatedTextDirection && originalTextIsRtl)
     ? "rtl"
     : "ltr";
   const ttsText = useMemo(
-    () => readerText.trim() || blocks.map((block) => block.text).join("\n\n"),
-    [blocks, readerText],
+    () => blocks.map((block) => block.text.trim()).join("\n\n"),
+    [blocks],
   );
   const [initialBlocks] = useState(() => {
     const firstPage = blocks[0]?.page ?? 1;
@@ -301,6 +361,7 @@ const ReaderView = ({
 
   const highlightSpokenWord = useCallback(
     (charIndex: number, charLength: number) => {
+      setSpokenWordHighlight(spokenWordForTtsOffset(blocks, charIndex, charLength));
       webViewRef.current?.postMessage(
         JSON.stringify({
           type: "ttsHighlight",
@@ -309,10 +370,11 @@ const ReaderView = ({
         })
       );
     },
-    []
+    [blocks]
   );
 
   const clearSpokenWordHighlight = useCallback(() => {
+    setSpokenWordHighlight(null);
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: "ttsClearHighlight",
@@ -463,6 +525,7 @@ const textColor = isDark && !colorsCustomized
     lastSourcePageRef.current = sourcePage;
     if (anchor) {
       modeTextAnchorRef.current = anchor;
+      setTtsStartOffset(ttsPositionForBlock(blocks, anchor.blockId, anchor.blockOffset));
       const block = blocks.find((candidate) => candidate.id === anchor.blockId);
       const word = block
         ? Array.from(block.text.matchAll(/\S+/g))[anchor.wordIndex]?.[0] ?? ""
@@ -1534,7 +1597,6 @@ const textColor = isDark && !colorsCustomized
       }
 
       if (data.type === "readerText") {
-        setReaderText(typeof data.text === "string" ? data.text : "");
         return;
       }
 
@@ -1638,7 +1700,7 @@ const textColor = isDark && !colorsCustomized
       setAiExpanded(false);
     }
 
-    if (item === "tts") {
+    if (item === "tts" && !isPaged) {
       webViewRef.current?.postMessage(JSON.stringify({ type: "requestReaderText" }));
     }
 
@@ -1812,6 +1874,8 @@ const textColor = isDark && !colorsCustomized
             <View style={StyleSheet.absoluteFill}>
               <HorizontalReaderPager
                 blocks={blocks}
+                readingDirection={readerDirection}
+                spokenWordHighlight={spokenWordHighlight}
                 destination={effectivePagerDestination}
                 stationarySwitchHighlight={stationarySwitchHighlight}
                 fontFamily={fontFamily.split(",")[0].replaceAll("'", "").trim()}

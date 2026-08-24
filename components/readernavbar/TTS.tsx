@@ -35,7 +35,7 @@ export type TranslationLanguage = {
   label: string;
 };
 
-const translationLanguages: TranslationLanguage[] = [
+export const translationLanguages: TranslationLanguage[] = [
   { code: "ar", label: "Arabic" },
   { code: "zh", label: "Chinese" },
   { code: "nl", label: "Dutch" },

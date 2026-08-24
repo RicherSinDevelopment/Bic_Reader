@@ -102,7 +102,7 @@ index de46c98..37cdf89 100644
  }
  
  #ifdef RCT_NEW_ARCH_ENABLED
-@@ -234,6 +237,111 @@ - (void)setNativePage:(NSInteger)page
+@@ -234,6 +237,122 @@ - (void)setNativePage:(NSInteger)page
      [self didSetProps:[NSArray arrayWithObject:@"page"]];
  }
  
@@ -186,7 +186,18 @@ index de46c98..37cdf89 100644
 +    _switchHighlightAnnotation = annotation;
 +    _switchHighlightPage = pdfPage;
 +
-+    [_pdfView goToRect:CGRectInset(highlightRect, -8.0, -24.0) onPage:pdfPage];
++    // Keep enough page content above the marker so PDFKit does not align the
++    // highlighted word against the top edge of the visible document area.
++    // PDF coordinates grow upward, so extend the navigation rectangle much
++    // farther above the word than below it.
++    CGRect revealRect = CGRectMake(
++        CGRectGetMinX(highlightRect) - 8.0,
++        CGRectGetMinY(highlightRect) - 20.0,
++        CGRectGetWidth(highlightRect) + 16.0,
++        CGRectGetHeight(highlightRect) + 116.0
++    );
++    revealRect = CGRectIntersection(revealRect, crop);
++    [_pdfView goToRect:revealRect onPage:pdfPage];
 +    [_pdfView setNeedsDisplay];
 +    RLog(@"switch highlight applied: page=%ld text=%@ sourceSize=%@ rect=%@",
 +         (long)page,

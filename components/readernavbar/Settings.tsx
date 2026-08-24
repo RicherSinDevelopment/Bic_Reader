@@ -17,6 +17,12 @@ export default function Settings() {
   const toggleDisableRotation = useReaderSettingsStore(
     (state) => state.toggleDisableRotation
   );
+  const hideTopBarOnScroll = useReaderSettingsStore(
+    (state) => state.hideTopBarOnScroll
+  );
+  const setHideTopBarOnScroll = useReaderSettingsStore(
+    (state) => state.setHideTopBarOnScroll
+  );
   const transition = useReaderSettingsStore((state) => state.transition);
   const automaticHyphenation = useReaderSettingsStore(
     (state) => state.automaticHyphenation
@@ -62,6 +68,27 @@ export default function Settings() {
               false: "#d4d4d4",
               true: "#639922",
             }}
+            thumbColor="#fafafa"
+            ios_backgroundColor="#d4d4d4"
+          />
+        </Center>
+      </View>
+
+      <View className="mt-4 flex-row items-center justify-between">
+        <View className="mr-4 flex-1">
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Hide top bar:</Text>
+          <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
+            Hide the header and iPhone status icons while scrolling down.
+          </Text>
+        </View>
+        <Center>
+          <Switch
+            accessibilityLabel="Hide top bar while scrolling"
+            size="md"
+            value={hideTopBarOnScroll}
+            onValueChange={setHideTopBarOnScroll}
+            isDisabled={false}
+            trackColor={{ false: "#d4d4d4", true: "#639922" }}
             thumbColor="#fafafa"
             ios_backgroundColor="#d4d4d4"
           />

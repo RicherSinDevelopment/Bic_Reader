@@ -18,6 +18,7 @@ type ReaderSettingsState = {
   bold: boolean;
   automaticHyphenation: boolean;
   disableRotation: boolean;
+  hideTopBarOnScroll: boolean;
   lineGuideEnabled: boolean;
   wordGuideEnabled: boolean;
   guideBackgroundDimming: number;
@@ -45,6 +46,7 @@ type ReaderSettingsState = {
   toggleBold: () => void;
   setAutomaticHyphenation: (enabled: boolean) => void;
   toggleDisableRotation: () => void;
+  setHideTopBarOnScroll: (enabled: boolean) => void;
   setLineGuideEnabled: (enabled: boolean) => void;
   setWordGuideEnabled: (enabled: boolean) => void;
   setGuideBackgroundDimming: (percentage: number) => void;
@@ -67,6 +69,7 @@ export const useReaderSettingsStore =
     bold: false,
     automaticHyphenation: true,
     disableRotation: false,
+    hideTopBarOnScroll: false,
     lineGuideEnabled: false,
     wordGuideEnabled: false,
     guideBackgroundDimming: 60,
@@ -168,6 +171,7 @@ export const useReaderSettingsStore =
       set((state) => ({
         disableRotation: !state.disableRotation,
       })),
+    setHideTopBarOnScroll: (enabled) => set({ hideTopBarOnScroll: enabled }),
     setLineGuideEnabled: (enabled) => set({
       lineGuideEnabled: enabled,
       ...(enabled ? { wordGuideEnabled: false } : {}),

@@ -489,10 +489,10 @@ export default function AI({
 const createStyles = (isDark: boolean) => StyleSheet.create({
   scrollView: { backgroundColor: isDark ? "#151814" : "#FFFEFC", flex: 1 },
   content: { flexGrow: 1, paddingBottom: 16 },
-  header: { alignItems: "center", backgroundColor: isDark ? "#151814" : "#FFFEFC", flexDirection: "row", justifyContent: "space-between", paddingBottom: 8, paddingHorizontal: 16, paddingTop: 4 },
+  header: { alignItems: "center", backgroundColor: isDark ? "#151814" : "#FFFEFC", flexDirection: "row", height: 42, paddingHorizontal: 16, position: "relative" },
   body: { flexGrow: 1, paddingHorizontal: 16 },
   title: { color: isDark ? "#F4F5F1" : "#0F172A", fontSize: 21, fontWeight: "600" },
-  historyButton: { alignItems: "center", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 10, borderWidth: 1, flexDirection: "row", flexGrow: 0, flexShrink: 0, height: 34, justifyContent: "center", width: 72 },
+  historyButton: { alignItems: "center", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 10, borderWidth: 1, flexDirection: "row", height: 34, justifyContent: "center", position: "absolute", right: 16, top: 4, width: 72 },
   historyButtonActive: { backgroundColor: isDark ? "#28321E" : "#F0F5E9", borderColor: AI_ACCENT },
   historyText: { color: AI_ACCENT, fontSize: 13, fontWeight: "600" },
   pressed: { opacity: 0.68 },

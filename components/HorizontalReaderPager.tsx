@@ -21,6 +21,8 @@ type Segment = {
   kind: ExtractedPdfBlock["kind"];
   spacingBefore: number;
   spacingAfter: number;
+  paragraphStart: boolean;
+  sectionOpening: boolean;
 };
 
 type PageAnchor = {
@@ -69,8 +71,12 @@ function buildPages(
   const pages: Segment[][] = [[]];
   let usedHeight = 0;
 
-  blocks.forEach((block) => {
+  blocks.forEach((block, blockIndex) => {
     let sourceOffset = 0;
+    const previousKind = blocks[blockIndex - 1]?.kind;
+    const sectionOpening = block.kind === "paragraph" && (
+      blockIndex === 0 || previousKind === "title" || previousKind === "heading"
+    );
     const textScale = block.kind === "title" ? 1.65 : block.kind === "heading" ? 1.3 : 1;
     const scaledLineHeight = baseLineHeight * textScale;
     const scaledCharactersPerLine = Math.max(8, Math.floor(charactersPerLine / textScale));
@@ -118,6 +124,8 @@ function buildPages(
           kind: block.kind,
           spacingBefore,
           spacingAfter,
+          paragraphStart: block.kind === "paragraph" && sourceOffset === 0,
+          sectionOpening: sectionOpening && sourceOffset === 0,
         });
         const wrappedLines = Math.max(
           1,
@@ -363,6 +371,12 @@ export default function HorizontalReaderPager({
     const switchStart = switchMatch?.index ?? -1;
     const switchLength = switchMatch?.[0].length ?? 0;
     const headingScale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
+    const openingWord = segment.sectionOpening
+      ? segment.text.match(/^\S+/)?.[0] ?? ""
+      : "";
+    const paragraphIndent = segment.paragraphStart && !segment.sectionOpening
+      ? "\u2003\u2002"
+      : "";
 
     return (
       <Text
@@ -379,6 +393,7 @@ export default function HorizontalReaderPager({
           marginTop: segment.spacingBefore,
         }}
       >
+        {paragraphIndent}
         {localMatch >= 0 ? (
           <>
             {textForDisplay(segment.text.slice(0, localMatch))}
@@ -395,6 +410,19 @@ export default function HorizontalReaderPager({
             </Text>
             {textForDisplay(segment.text.slice(switchStart + switchLength))}
           </>
+        ) : openingWord ? (
+          <>
+            <Text
+              style={{
+                fontSize: fontSize * 1.24,
+                fontWeight: "700",
+                letterSpacing: letterSpacing + 0.15,
+              }}
+            >
+              {textForDisplay(openingWord)}
+            </Text>
+            {textForDisplay(segment.text.slice(openingWord.length))}
+          </>
         ) : textForDisplay(segment.text)}
       </Text>
     );
@@ -405,7 +433,14 @@ export default function HorizontalReaderPager({
       style={{ flex: 1, backgroundColor }}
       onLayout={(event) => {
         const nextHeight = Math.round(event.nativeEvent.layout.height);
-        if (nextHeight > 0 && nextHeight !== containerHeight) {
+        // Showing or hiding the iOS status bar changes the reported viewport
+        // by a small amount. Repaginating for that chrome-only change moves
+        // text even though the reader has not changed position. Preserve the
+        // established page geometry; still accept larger changes such as an
+        // orientation change or split-screen resize.
+        const isMeaningfulResize =
+          containerHeight === 0 || Math.abs(nextHeight - containerHeight) > 80;
+        if (nextHeight > 0 && isMeaningfulResize) {
           setContainerHeight(nextHeight);
         }
       }}

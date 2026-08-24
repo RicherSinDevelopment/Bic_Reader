@@ -50,6 +50,8 @@ import * as FileSystem from "expo-file-system/legacy";
 type ReaderViewProps = {
   isActive?: boolean;
   isLandscape: boolean;
+  headerOverlayHeight?: number;
+  topBarVisible?: boolean;
   blocks: ExtractedPdfBlock[];
   pageCount: number;
   sourcePageCount?: number;
@@ -76,6 +78,7 @@ type ReaderViewProps = {
   onSwitchAnchorChange?: (blockId: string, word: string, wordIndex: number) => void;
   showSwitchHighlight?: boolean;
   onReady?: () => void;
+  onToolbarVisibilityChange?: (visible: boolean) => void;
   translationLanguage?: TranslationLanguage;
   onTranslationLanguageChange?: (language?: TranslationLanguage) => void;
   useTranslatedTextDirection?: boolean;
@@ -132,6 +135,8 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
 const ReaderView = ({
   isActive = true,
   isLandscape,
+  headerOverlayHeight = 0,
+  topBarVisible = true,
   blocks,
   pageCount,
   sourcePageCount,
@@ -143,6 +148,7 @@ const ReaderView = ({
   onSwitchAnchorChange,
   showSwitchHighlight = false,
   onReady,
+  onToolbarVisibilityChange,
   translationLanguage,
   onTranslationLanguageChange,
   useTranslatedTextDirection = false,
@@ -552,6 +558,15 @@ const textColor = isDark && !colorsCustomized
   useEffect(() => {
     if (!webViewReady) return;
     webViewRef.current?.postMessage(JSON.stringify({
+      type: "setTopBarVisibility",
+      visible: topBarVisible,
+      topBoundary: topBarVisible ? headerOverlayHeight : 0,
+    }));
+  }, [headerOverlayHeight, topBarVisible, webViewReady]);
+
+  useEffect(() => {
+    if (!webViewReady) return;
+    webViewRef.current?.postMessage(JSON.stringify({
       type: "setSwitchHighlightVisible",
       visible: showSwitchHighlight,
     }));
@@ -611,6 +626,7 @@ const textColor = isDark && !colorsCustomized
   // Track toolbar visibility
   const toolbarHidden =
     useRef(false);
+  const chromeResizeGuardUntil = useRef(0);
 
   // Prevent multiple animations from running
   const toolbarAnimation =
@@ -945,6 +961,21 @@ const textColor = isDark && !colorsCustomized
           window.__clearReaderSwitchHighlight?.();
         } else {
           window.__reportSwitchAnchor?.();
+        }
+        return;
+      }
+
+      if (message.type === 'setTopBarVisibility') {
+        window.__readerTopBarVisible = Boolean(message.visible);
+        window.__readerTopBoundary = window.__readerTopBarVisible
+          ? Math.max(0, Number(message.topBoundary) || 0)
+          : 0;
+        if (window.__readerTopBarVisible) {
+          requestAnimationFrame(function() {
+            window.__reportSwitchAnchor?.(true);
+          });
+        } else {
+          window.__clearReaderSwitchHighlight?.();
         }
         return;
       }
@@ -1343,6 +1374,7 @@ const textColor = isDark && !colorsCustomized
 
   const showToolbar = useCallback(() => {
     if (!toolbarHidden.current) {
+      onToolbarVisibilityChange?.(true);
       return;
     }
 
@@ -1361,10 +1393,13 @@ const textColor = isDark && !colorsCustomized
       );
 
     toolbarAnimation.current.start();
-  }, [toolbarTranslateY]);
+    chromeResizeGuardUntil.current = Date.now() + 400;
+    onToolbarVisibilityChange?.(true);
+  }, [onToolbarVisibilityChange, toolbarTranslateY]);
 
   const hideToolbar = useCallback(() => {
     if (toolbarHidden.current) {
+      onToolbarVisibilityChange?.(false);
       return;
     }
 
@@ -1383,7 +1418,9 @@ const textColor = isDark && !colorsCustomized
       );
 
     toolbarAnimation.current.start();
-  }, [toolbarTranslateY]);
+    chromeResizeGuardUntil.current = Date.now() + 400;
+    onToolbarVisibilityChange?.(false);
+  }, [onToolbarVisibilityChange, toolbarTranslateY]);
 
   // --------------------------------
   // WEBVIEW MESSAGE HANDLER
@@ -1419,6 +1456,14 @@ const textColor = isDark && !colorsCustomized
         const difference =
           currentScrollY -
           lastScrollY.current;
+
+        // Hiding the header changes the WebView viewport height. WebKit emits
+        // a synthetic scroll update for that resize; treating it as a real
+        // upward gesture immediately re-shows the header and causes flicker.
+        if (Date.now() < chromeResizeGuardUntil.current) {
+          lastScrollY.current = currentScrollY;
+          return;
+        }
 
         /*
          * Ignore tiny movements.
@@ -1728,7 +1773,14 @@ const textColor = isDark && !colorsCustomized
 
         <SafeAreaView
           edges={isLandscape ? ["left", "right"] : []}
-          style={{ flex: 1, backgroundColor }}
+          style={{
+            flex: 1,
+            backgroundColor,
+            // Horizontal pages keep one stable reading frame. Reserving the
+            // header space even while its controls are hidden prevents both
+            // text movement and the restored bar from covering the first line.
+            paddingTop: isPaged && !isLandscape ? headerOverlayHeight : 0,
+          }}
         >
           <View className="flex-1">
           {isPaged && (
@@ -1788,6 +1840,14 @@ const textColor = isDark && !colorsCustomized
            * Native scrolling.
            */
           scrollEnabled={!isPaged}
+
+          contentInset={
+            !isPaged && !isLandscape
+              ? { top: headerOverlayHeight, left: 0, bottom: 0, right: 0 }
+              : undefined
+          }
+
+          contentInsetAdjustmentBehavior="never"
 
           /*
            * Native bounce behavior.
@@ -1964,18 +2024,33 @@ const textColor = isDark && !colorsCustomized
                 }
               };
 
+              function readerVisibleTopBoundary() {
+                if (!window.__readerTopBarVisible) return 0;
+                // At the document start, the native WebView contentInset has
+                // already placed the first line below the header. Applying the
+                // header boundary again would skip the opening text. Once the
+                // document has scrolled, content can pass behind the overlay
+                // and the real header boundary is required.
+                return window.scrollY <= 1
+                  ? 0
+                  : Math.max(0, Number(window.__readerTopBoundary) || 0);
+              }
+
               function reportPreciseSwitchAnchor(force) {
+                if (!window.__readerTopBarVisible) return false;
                 const isRtl = document.documentElement.dir === 'rtl';
+                const topBoundary = readerVisibleTopBoundary();
                 const blocksInView = Array.from(
                   document.querySelectorAll('[data-reader-block]')
                 ).filter(function(block) {
                   const rect = block.getBoundingClientRect();
-                  return rect.bottom > 0 && rect.top < window.innerHeight &&
+                  return rect.bottom > topBoundary && rect.top < window.innerHeight &&
                     rect.right > 0 && rect.left < window.innerWidth;
                 }).sort(function(first, second) {
                   const firstRect = first.getBoundingClientRect();
                   const secondRect = second.getBoundingClientRect();
-                  const vertical = Math.max(0, firstRect.top) - Math.max(0, secondRect.top);
+                  const vertical = Math.max(topBoundary, firstRect.top) -
+                    Math.max(topBoundary, secondRect.top);
                   if (Math.abs(vertical) > 1) return vertical;
                   return isRtl
                     ? secondRect.right - firstRect.right
@@ -1993,12 +2068,15 @@ const textColor = isDark && !colorsCustomized
                       range.setStart(textNode, match.index);
                       range.setEnd(textNode, match.index + match[0].length);
                       const rect = Array.from(range.getClientRects()).find(function(item) {
-                        return item.width > 0 && item.height > 0 && item.bottom > 0 &&
+                        return item.width > 0 && item.height > 0 &&
+                          item.bottom > topBoundary &&
                           item.top < window.innerHeight && item.right > 0 &&
                           item.left < window.innerWidth;
                       });
                       if (!rect) return;
-                      const visibleTop = Math.max(0, rect.top);
+                      // Preserve the original GitHub selection rule, but make
+                      // the bottom of the visible header act as viewport y=0.
+                      const visibleTop = Math.max(0, rect.top - topBoundary);
                       const horizontal = isRtl ? -rect.right : rect.left;
                       if (!selected || visibleTop < selected.visibleTop - 1 ||
                         (Math.abs(visibleTop - selected.visibleTop) <= 1 &&
@@ -2036,9 +2114,11 @@ const textColor = isDark && !colorsCustomized
               }
 
               function reportSwitchAnchor(force) {
+                if (!window.__readerTopBarVisible) return;
                 if (reportPreciseSwitchAnchor(force)) return;
                 let block = null;
-                for (let y = 12; y < window.innerHeight && !block; y += 36) {
+                const topBoundary = readerVisibleTopBoundary();
+                for (let y = topBoundary + 12; y < window.innerHeight && !block; y += 36) {
                   const edgeX = document.documentElement.dir === 'rtl'
                     ? window.innerWidth - 24
                     : 24;
@@ -2057,7 +2137,7 @@ const textColor = isDark && !colorsCustomized
                 ));
                 const probeY = Math.max(8, Math.min(
                   window.innerHeight - 8,
-                  Math.max(0, blockRect.top) + 8
+                  Math.max(topBoundary, blockRect.top) + 8
                 ));
                 const caret = document.caretRangeFromPoint
                   ? document.caretRangeFromPoint(probeX, probeY)

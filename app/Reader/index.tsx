@@ -25,6 +25,7 @@ import type { PdfDocument } from "@/database/types";
 import { useScreenRotation } from "@/hooks/screenRotation";
 import { useSwitchHighlight, type PdfPageSize } from "@/hooks/switchhighlight";
 import * as Haptics from "expo-haptics";
+import { StatusBar } from "expo-status-bar";
 import { useLocalSearchParams } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import {
@@ -158,6 +159,10 @@ export default function ReaderScreen() {
   const { pdfId } = useLocalSearchParams<{ pdfId?: string }>();
   const db = useSQLiteContext();
   const readerTransition = useReaderSettingsStore((state) => state.transition);
+  const hideTopBarOnScroll = useReaderSettingsStore(
+    (state) => state.hideTopBarOnScroll,
+  );
+  const [readerChromeHidden, setReaderChromeHidden] = useState(false);
   const isDark = useColorScheme() === "dark";
   const [pdf, setPdf] = useState<PdfDocument | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -778,17 +783,18 @@ export default function ReaderScreen() {
 
   useEffect(() => {
     const animation = Animated.timing(headerVisibility, {
-      toValue: isLandscape ? 0 : 1,
-      duration: 250,
-      useNativeDriver: false,
+      toValue: isLandscape || readerChromeHidden ? 0 : 1,
+      duration: 140,
+      useNativeDriver: true,
     });
 
     animation.start();
     return () => animation.stop();
-  }, [headerVisibility, isLandscape]);
+  }, [headerVisibility, isLandscape, readerChromeHidden]);
 
   const handleTabChange = (value: ReaderMode) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (value !== "reader") setReaderChromeHidden(false);
     if (value === "original") setHasVisitedOriginal(true);
     if (value === "reader") {
       // Returning from Original must not navigate the horizontal reader. Its
@@ -843,6 +849,27 @@ export default function ReaderScreen() {
     }
     setActiveTab(value);
   };
+
+  useEffect(() => {
+    if (
+      activeTab !== "reader" ||
+      (!hideTopBarOnScroll && readerTransition !== "pager")
+    ) {
+      setReaderChromeHidden(false);
+    }
+  }, [activeTab, hideTopBarOnScroll, readerTransition]);
+
+  const handleReaderToolbarVisibilityChange = useCallback(
+    (visible: boolean) => {
+      if (
+        activeTab === "reader" &&
+        (hideTopBarOnScroll || readerTransition === "pager")
+      ) {
+        setReaderChromeHidden(!visible);
+      }
+    },
+    [activeTab, hideTopBarOnScroll, readerTransition],
+  );
 
   const handleTranslationLanguageChange = (language?: TranslationLanguage) => {
     setTranslationLanguage(language);
@@ -1069,6 +1096,15 @@ export default function ReaderScreen() {
 
   return (
     <Box className="flex-1 bg-[#F7F5EC] dark:bg-[#10120F]">
+      <StatusBar
+        animated
+        hidden={
+          activeTab === "reader" &&
+          readerChromeHidden &&
+          (hideTopBarOnScroll || readerTransition === "pager")
+        }
+        style="auto"
+      />
       <Animated.View
         pointerEvents={isLandscape ? "none" : "auto"}
         accessibilityElementsHidden={isLandscape}
@@ -1084,7 +1120,12 @@ export default function ReaderScreen() {
           backgroundColor: isDark ? "#151814" : "#ffffff",
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: isDark ? "#343A31" : "#deddd7",
-          transform: [{ translateY: isLandscape ? -Math.max(headerHeight, 120) : 0 }],
+          transform: [{
+            translateY: headerVisibility.interpolate({
+              inputRange: [0, 1],
+              outputRange: [-Math.max(headerHeight, 120), 0],
+            }),
+          }],
         }}
       >
         <Animated.View
@@ -1261,7 +1302,7 @@ export default function ReaderScreen() {
           }
           style={{
             position: "absolute",
-            top: isLandscape ? 0 : headerHeight,
+            top: 0,
             right: 0,
             bottom: 0,
             left: 0,
@@ -1273,6 +1314,8 @@ export default function ReaderScreen() {
               <ReaderView
                 isActive={activeTab === "reader"}
                 isLandscape={isLandscape}
+                headerOverlayHeight={isLandscape ? 0 : headerHeight}
+                topBarVisible={isLandscape || !readerChromeHidden}
                 blocks={readerBlocks}
                 pageCount={readerPageCount}
                 destination={readerDestination}
@@ -1285,6 +1328,7 @@ export default function ReaderScreen() {
                   hasVisitedOriginal && activeTab === "reader"
                 }
                 onReady={() => setReaderContentReady(true)}
+                onToolbarVisibilityChange={handleReaderToolbarVisibilityChange}
                 translationLanguage={translationLanguage}
                 onTranslationLanguageChange={handleTranslationLanguageChange}
               />

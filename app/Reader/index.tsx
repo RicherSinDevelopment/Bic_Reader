@@ -162,6 +162,13 @@ export default function ReaderScreen() {
   const hideTopBarOnScroll = useReaderSettingsStore(
     (state) => state.hideTopBarOnScroll,
   );
+  const lineGuideEnabled = useReaderSettingsStore(
+    (state) => state.lineGuideEnabled,
+  );
+  const wordGuideEnabled = useReaderSettingsStore(
+    (state) => state.wordGuideEnabled,
+  );
+  const readerGuideEnabled = lineGuideEnabled || wordGuideEnabled;
   const [readerChromeHidden, setReaderChromeHidden] = useState(false);
   const isDark = useColorScheme() === "dark";
   const [pdf, setPdf] = useState<PdfDocument | null>(null);
@@ -851,24 +858,28 @@ export default function ReaderScreen() {
   };
 
   useEffect(() => {
-    if (
-      activeTab !== "reader" ||
-      (!hideTopBarOnScroll && readerTransition !== "pager")
-    ) {
-      setReaderChromeHidden(false);
-    }
-  }, [activeTab, hideTopBarOnScroll, readerTransition]);
+    // A newly activated guide starts in the reader's current visible frame.
+    // Scrolling can hide the chrome afterward through the callback below.
+    setReaderChromeHidden(false);
+  }, [
+    activeTab,
+    hideTopBarOnScroll,
+    readerGuideEnabled,
+    readerTransition,
+  ]);
 
   const handleReaderToolbarVisibilityChange = useCallback(
     (visible: boolean) => {
       if (
         activeTab === "reader" &&
-        (hideTopBarOnScroll || readerTransition === "pager")
+        (hideTopBarOnScroll ||
+          readerTransition === "pager" ||
+          readerGuideEnabled)
       ) {
         setReaderChromeHidden(!visible);
       }
     },
-    [activeTab, hideTopBarOnScroll, readerTransition],
+    [activeTab, hideTopBarOnScroll, readerGuideEnabled, readerTransition],
   );
 
   const handleTranslationLanguageChange = (language?: TranslationLanguage) => {
@@ -1101,7 +1112,9 @@ export default function ReaderScreen() {
         hidden={
           activeTab === "reader" &&
           readerChromeHidden &&
-          (hideTopBarOnScroll || readerTransition === "pager")
+          (hideTopBarOnScroll ||
+            readerTransition === "pager" ||
+            readerGuideEnabled)
         }
         style="auto"
       />

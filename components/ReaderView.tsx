@@ -627,6 +627,7 @@ const textColor = isDark && !colorsCustomized
   const toolbarHidden =
     useRef(false);
   const chromeResizeGuardUntil = useRef(0);
+  const wordGuideScrollArmed = useRef(false);
 
   // Prevent multiple animations from running
   const toolbarAnimation =
@@ -973,9 +974,13 @@ const textColor = isDark && !colorsCustomized
         if (window.__readerTopBarVisible) {
           requestAnimationFrame(function() {
             window.__reportSwitchAnchor?.(true);
+            window.__refreshReaderGuideForTopBar?.();
           });
         } else {
           window.__clearReaderSwitchHighlight?.();
+          requestAnimationFrame(function() {
+            window.__refreshReaderGuideForTopBar?.();
+          });
         }
         return;
       }
@@ -1422,6 +1427,13 @@ const textColor = isDark && !colorsCustomized
     onToolbarVisibilityChange?.(false);
   }, [onToolbarVisibilityChange, toolbarTranslateY]);
 
+  useEffect(() => {
+    if (!readerGuideMode) return;
+    wordGuideScrollArmed.current = false;
+    chromeResizeGuardUntil.current = Date.now() + 400;
+    showToolbar();
+  }, [readerGuideMode, showToolbar]);
+
   // --------------------------------
   // WEBVIEW MESSAGE HANDLER
   // --------------------------------
@@ -1438,6 +1450,11 @@ const textColor = isDark && !colorsCustomized
       // ------------------------------
       // SCROLL
       // ------------------------------
+
+      if (data.type === "wordGuideWillScroll") {
+        wordGuideScrollArmed.current = true;
+        return;
+      }
 
       if (data.type === "scroll") {
 
@@ -1465,6 +1482,11 @@ const textColor = isDark && !colorsCustomized
           return;
         }
 
+        if (wordGuideEnabled && !wordGuideScrollArmed.current) {
+          lastScrollY.current = currentScrollY;
+          return;
+        }
+
         /*
          * Ignore tiny movements.
          */
@@ -1480,6 +1502,7 @@ const textColor = isDark && !colorsCustomized
           currentScrollY > 30
         ) {
           hideToolbar();
+          wordGuideScrollArmed.current = false;
         }
 
         /*
@@ -1487,6 +1510,7 @@ const textColor = isDark && !colorsCustomized
          */
         else if (difference < 0) {
           showToolbar();
+          wordGuideScrollArmed.current = false;
         }
 
         lastScrollY.current =
@@ -1693,11 +1717,12 @@ const textColor = isDark && !colorsCustomized
   };
 
   const usesFixedSettingsSheet =
-    activeItem === "tts" ||
-    (activeItem === "background" && backgroundSettingsTab !== "presets");
+    activeItem === "background" && backgroundSettingsTab !== "presets";
 
   const bottomSheetSnapPoints =
-    activeItem === "ai"
+    activeItem === "tts"
+      ? undefined
+      : activeItem === "ai"
       ? ["40%", "90%"]
       : activeItem === "font"
       ? ["40%", "82%"]
@@ -2309,24 +2334,54 @@ const textColor = isDark && !colorsCustomized
               }
 
               function initializeWordGuide() {
-                let block = null;
-                for (let y = 12; y < window.innerHeight - 72 && !block; y += 24) {
-                  block = document.elementFromPoint(window.innerWidth / 2, y)
-                    ?.closest?.('[data-reader-block]') || null;
+                const topLimit = readerVisibleTopBoundary() + 12;
+                const bottomLimit = window.innerHeight - 72;
+                const blocks = new Set();
+                const sampleXs = [
+                  16,
+                  window.innerWidth * 0.25,
+                  window.innerWidth * 0.5,
+                  window.innerWidth * 0.75,
+                  window.innerWidth - 16
+                ];
+                for (let y = topLimit; y < bottomLimit; y += 20) {
+                  sampleXs.forEach(function(x) {
+                    const block = document.elementFromPoint(x, y)
+                      ?.closest?.('[data-reader-block]');
+                    if (block) blocks.add(block);
+                  });
                 }
-                if (!block) return;
-                const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
-                let node = walker.nextNode();
-                while (node) {
-                  if (isGuideTextNode(node)) {
-                    const matches = wordMatches(node);
-                    const match = matches.find(function(item) {
-                      const rect = wordRange(node, item).getBoundingClientRect();
-                      return rect.bottom >= 12 && rect.top <= window.innerHeight - 72;
-                    });
-                    if (match && drawWordGuide(node, match)) return;
+                const candidates = [];
+                Array.from(blocks).forEach(function(block) {
+                  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+                  let node = walker.nextNode();
+                  while (node) {
+                    if (isGuideTextNode(node)) {
+                      wordMatches(node).forEach(function(match) {
+                        const rect = wordRange(node, match).getBoundingClientRect();
+                        if (
+                          rect.width > 0 &&
+                          rect.height > 0 &&
+                          rect.top >= topLimit &&
+                          rect.bottom <= bottomLimit
+                        ) {
+                          candidates.push({ node: node, match: match, rect: rect });
+                        }
+                      });
+                    }
+                    node = walker.nextNode();
                   }
-                  node = walker.nextNode();
+                });
+                candidates.sort(function(first, second) {
+                  const vertical = first.rect.top - second.rect.top;
+                  if (Math.abs(vertical) > 2) return vertical;
+                  return document.documentElement.dir === 'rtl'
+                    ? second.rect.right - first.rect.right
+                    : first.rect.left - second.rect.left;
+                });
+                const first = candidates[0];
+                if (first) {
+                  drawWordGuide(first.node, first.match);
                 }
               }
 
@@ -2377,7 +2432,7 @@ const textColor = isDark && !colorsCustomized
                 const target = adjacentWord(direction);
                 if (!target) return;
                 const targetRect = wordRange(target.node, target.match).getBoundingClientRect();
-                const topLimit = 12;
+                const topLimit = readerVisibleTopBoundary() + 12;
                 const bottomLimit = window.innerHeight - 76;
                 if (targetRect.top >= topLimit && targetRect.bottom <= bottomLimit) {
                   drawWordGuide(target.node, target.match);
@@ -2390,6 +2445,9 @@ const textColor = isDark && !colorsCustomized
                 const scrollDistance = direction < 0
                   ? Math.min(0, currentRect.bottom - bottomLimit)
                   : Math.max(0, currentRect.top - 16);
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'wordGuideWillScroll'
+                }));
                 window.scrollBy({ top: scrollDistance, left: 0, behavior: 'smooth' });
               }
 
@@ -2500,8 +2558,9 @@ const textColor = isDark && !colorsCustomized
               }
 
               function initializeLineGuide() {
+                const topLimit = readerVisibleTopBoundary() + 12;
                 const firstLine = collectGuideItems().find(function(line) {
-                  return line.top >= 12 && line.bottom <= window.innerHeight - 72;
+                  return line.top >= topLimit && line.bottom <= window.innerHeight - 72;
                 });
                 if (firstLine) drawLineGuide(firstLine);
               }
@@ -2547,7 +2606,7 @@ const textColor = isDark && !colorsCustomized
                 if (!currentLine) return;
                 const currentIndex = lines.indexOf(currentLine);
                 const nextLine = lines[currentIndex + (direction < 0 ? -1 : 1)];
-                const topLimit = 12;
+                const topLimit = readerVisibleTopBoundary() + 12;
                 const bottomLimit = window.innerHeight - 76;
 
                 if (
@@ -2579,6 +2638,10 @@ const textColor = isDark && !colorsCustomized
                   lineGuideRedrawFrame = null;
                 });
               }
+
+              window.__refreshReaderGuideForTopBar = function() {
+                redrawLineGuideDuringScroll();
+              };
 
               // --------------------------------
               // PAGINATED READER
@@ -2766,14 +2829,17 @@ const textColor = isDark && !colorsCustomized
                   refreshReaderPages();
                   if (readerGuideMode) {
                     if (readerGuideMode === 'word') {
-                      currentWordNode = null;
-                      currentWordStart = -1;
-                      currentWordEnd = -1;
-                      initializeWordGuide();
+                      if (currentWordNode && currentWordStart >= 0) {
+                        redrawWordGuide();
+                      } else {
+                        initializeWordGuide();
+                      }
                     } else {
-                      currentGuideDocumentTop = null;
-                      currentGuideLeft = null;
-                      initializeLineGuide();
+                      if (currentGuideDocumentTop !== null) {
+                        redrawLineGuideDuringScroll();
+                      } else {
+                        initializeLineGuide();
+                      }
                     }
                   }
                 }, 50);
@@ -2943,18 +3009,16 @@ const textColor = isDark && !colorsCustomized
   </Animated.View>
 )}
 
-        {readerGuideMode && (
+        {readerGuideMode && !isPaged && (
           <View
             pointerEvents="box-none"
             style={StyleSheet.absoluteFill}
           >
             <Pressable
-              accessibilityLabel="Move reading line guide. Tap upper half for up, lower half for down"
+              accessibilityLabel="Move reading guide. Tap upper half for up, lower half for down"
               accessibilityRole="button"
               onPress={(event) => {
-                moveLineGuide(
-                  event.nativeEvent.pageY < windowHeight / 2 ? -1 : 1
-                );
+                moveLineGuide(event.nativeEvent.pageY < windowHeight / 2 ? -1 : 1);
               }}
               style={StyleSheet.absoluteFill}
             />
@@ -2975,6 +3039,8 @@ const textColor = isDark && !colorsCustomized
 
         <BottomSheetPortal
           snapPoints={bottomSheetSnapPoints}
+          enableDynamicSizing={activeItem === "tts"}
+          maxDynamicContentSize={windowHeight * 0.9}
           handleComponent={
             activeItem === "ai"
               ? (props) => (

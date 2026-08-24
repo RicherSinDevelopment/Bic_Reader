@@ -1,5 +1,5 @@
 import { Button, ButtonText } from "@/components/ui/button";
-import { ChevronDownIcon, Icon } from "@/components/ui/icon";
+import SteppedSlider from "@/components/ui/SteppedSlider";
 import {
   appleSpeech,
   clearAppleSpeechSleepTimer,
@@ -8,13 +8,14 @@ import {
   startAppleSpeechSleepTimer,
   type AppleSpeechVoice,
 } from "@/services/appleSpeechService";
-import { Check } from "lucide-react-native";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, ChevronDown } from "lucide-react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AppState,
   Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   useColorScheme,
   View,
@@ -59,6 +60,8 @@ const speedOptions = [
   { label: "2x", value: 2 },
 ] as const;
 const sleepTimerOptions = [15, 30, 45, 60, 90, 120] as const;
+const speedLevels = speedOptions.map((option) => option.value);
+const sleepTimerLevels = [0, ...sleepTimerOptions] as const;
 
 function detectTextLanguage(text: string) {
   const sample = text.slice(0, 12_000);
@@ -104,15 +107,14 @@ export default function TTS({
   onTranslationLanguageChange,
 }: TTSProps) {
   const isDark = useColorScheme() === "dark";
+  const styles = useMemo(() => createStyles(isDark), [isDark]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voices, setVoices] = useState<AppleSpeechVoice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<string | undefined>();
   const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
   const [speechRate, setSpeechRate] = useState(1);
-  const [isSpeedMenuOpen, setIsSpeedMenuOpen] = useState(false);
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState<number>();
   const [sleepTimerRemaining, setSleepTimerRemaining] = useState(0);
-  const [isSleepTimerMenuOpen, setIsSleepTimerMenuOpen] = useState(false);
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
   const detectedLanguage = useMemo(() => detectTextLanguage(text), [text]);
@@ -279,6 +281,30 @@ export default function TTS({
     voices.find((voice) => voice.identifier === selectedVoice)?.name ??
     "System default";
 
+  const handleSleepTimerChange = useCallback((minutes: number) => {
+    if (minutes === 0) {
+      setSleepTimerMinutes(undefined);
+      clearAppleSpeechSleepTimer();
+      setSleepTimerRemaining(0);
+      return;
+    }
+    setSleepTimerMinutes(minutes);
+    if (isSpeaking) {
+      startAppleSpeechSleepTimer(minutes);
+      setSleepTimerRemaining(minutes * 60);
+    }
+  }, [isSpeaking]);
+
+  const formatSleepTimer = useCallback((minutes: number) => {
+    if (minutes === 0) return "Off";
+    if (sleepTimerRemaining > 0 && minutes === sleepTimerMinutes) {
+      return `${Math.ceil(sleepTimerRemaining / 60)} min left`;
+    }
+    return minutes < 60
+      ? `${minutes} min`
+      : `${minutes / 60} ${minutes === 60 ? "hour" : "hours"}`;
+  }, [sleepTimerMinutes, sleepTimerRemaining]);
+
   return (
     <View className="px-4 py-4">
       <Text className="text-lg font-semibold text-slate-900 dark:text-[#F4F5F1]">
@@ -291,12 +317,12 @@ export default function TTS({
           accessibilityLabel={`Choose translation language. Current language: ${translationLanguage?.label ?? "Original"}`}
           accessibilityRole="button"
           onPress={() => setIsLanguageMenuOpen(true)}
-          className="h-10 min-w-36 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5 dark:border-white/20 dark:bg-[#222720] dark:active:bg-white/5"
+          style={({ pressed }) => [styles.picker, pressed && styles.pressed]}
         >
-          <Text className="text-sm text-black dark:text-[#F4F5F1]">
+          <Text numberOfLines={1} style={styles.pickerText}>
             {translationLanguage?.label ?? "Original"}
           </Text>
-          <Icon as={ChevronDownIcon} size="xs" className="text-black/60 dark:text-white/60" />
+          <ChevronDown color={isDark ? "#F4F5F1" : "#111827"} size={20} />
         </Pressable>
       </View>
       <Modal
@@ -306,15 +332,16 @@ export default function TTS({
         onRequestClose={() => setIsLanguageMenuOpen(false)}
       >
         <Pressable
-          accessibilityLabel="Close translation language menu"
-          className="absolute inset-0 bg-black/20"
+          style={styles.modalBackdrop}
           onPress={() => setIsLanguageMenuOpen(false)}
-        />
-        <View className="mx-6 my-auto max-h-[70%] overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1A1E18]">
-          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900 dark:text-[#F4F5F1]">
-            Translate to
-          </Text>
-          <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
+        >
+          <Pressable
+            accessibilityRole="menu"
+            onPress={(event) => event.stopPropagation()}
+            style={styles.menu}
+          >
+            <Text style={styles.menuTitle}>Translate to</Text>
+            <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
             <Pressable
               accessibilityRole="menuitem"
               accessibilityState={{ selected: !translationLanguage }}
@@ -322,10 +349,10 @@ export default function TTS({
                 onTranslationLanguageChange(undefined);
                 setIsLanguageMenuOpen(false);
               }}
-              className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
+              style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
             >
-              <Text className="text-base text-black dark:text-[#F4F5F1]">Original</Text>
-              {!translationLanguage && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
+              <Text style={styles.menuItemText}>Original</Text>
+              {!translationLanguage && <Check size={18} color={isDark ? "#F4F5F1" : "#111827"} />}
             </Pressable>
             {translationLanguages.map((language) => {
               const isSelected = language.code === translationLanguage?.code;
@@ -339,15 +366,16 @@ export default function TTS({
                     onTranslationLanguageChange(language);
                     setIsLanguageMenuOpen(false);
                   }}
-                  className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
+                  style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
                 >
-                  <Text className="text-base text-black dark:text-[#F4F5F1]">{language.label}</Text>
-                  {isSelected && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
+                  <Text style={styles.menuItemText}>{language.label}</Text>
+                  {isSelected && <Check size={18} color={isDark ? "#F4F5F1" : "#111827"} />}
                 </Pressable>
               );
             })}
-          </ScrollView>
-        </View>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       <View className="mt-4 flex-row items-center justify-between">
@@ -356,12 +384,12 @@ export default function TTS({
           accessibilityLabel={`Choose voice. Current voice: ${selectedVoiceName}`}
           accessibilityRole="button"
           onPress={() => setIsVoiceMenuOpen(true)}
-          className="h-10 max-w-64 flex-row items-center gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5 dark:border-white/20 dark:bg-[#222720] dark:active:bg-white/5"
+          style={({ pressed }) => [styles.picker, styles.voicePicker, pressed && styles.pressed]}
         >
-          <Text numberOfLines={1} className="shrink text-sm text-black dark:text-[#F4F5F1]">
+          <Text numberOfLines={1} style={styles.pickerText}>
             {voices.length ? selectedVoiceName : "Loading voices..."}
           </Text>
-          <Icon as={ChevronDownIcon} size="xs" className="text-black/60 dark:text-white/60" />
+          <ChevronDown color={isDark ? "#F4F5F1" : "#111827"} size={20} />
         </Pressable>
       </View>
       {voices.length > 0 && (
@@ -388,25 +416,27 @@ export default function TTS({
         onRequestClose={() => setIsVoiceMenuOpen(false)}
       >
         <Pressable
-          accessibilityLabel="Close voice menu"
-          className="absolute inset-0 bg-black/20"
+          style={styles.modalBackdrop}
           onPress={() => setIsVoiceMenuOpen(false)}
-        />
-        <View className="mx-6 my-auto max-h-[70%] overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1A1E18]">
-          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900 dark:text-[#F4F5F1]">
-            Apple AVFoundation voices
-          </Text>
-          <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
+        >
+          <Pressable
+            accessibilityRole="menu"
+            onPress={(event) => event.stopPropagation()}
+            style={styles.menu}
+          >
+            <Text style={styles.menuTitle}>Choose a voice</Text>
+            <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
             <Pressable
               accessibilityRole="menuitem"
+              accessibilityState={{ selected: !selectedVoice }}
               onPress={() => {
                 setSelectedVoice(undefined);
                 setIsVoiceMenuOpen(false);
               }}
-              className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
+              style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
             >
-              <Text className="text-base text-black dark:text-[#F4F5F1]">System default</Text>
-              {!selectedVoice && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
+              <Text style={styles.menuItemText}>System default</Text>
+              {!selectedVoice && <Check size={18} color={isDark ? "#F4F5F1" : "#111827"} />}
             </Pressable>
 
             {visibleVoices.map((voice) => {
@@ -420,144 +450,65 @@ export default function TTS({
                     setSelectedVoice(voice.identifier);
                     setIsVoiceMenuOpen(false);
                   }}
-                  className="min-h-12 flex-row items-center justify-between rounded px-3 py-2 active:bg-black/5"
+                  style={({ pressed }) => [styles.voiceMenuItem, pressed && styles.menuItemPressed]}
                 >
-                  <View className="mr-3 shrink">
-                    <Text className="text-base text-black dark:text-[#F4F5F1]">{voice.name}</Text>
-                    <Text className="text-xs text-slate-500 dark:text-[#9EA69A]">
+                  <View style={styles.voiceDetails}>
+                    <Text style={styles.menuItemText}>{voice.name}</Text>
+                    <Text style={styles.menuItemDescription}>
                       {voice.language} · {voice.quality}
                     </Text>
                   </View>
-                  {isSelected && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
+                  {isSelected && <Check size={18} color={isDark ? "#F4F5F1" : "#111827"} />}
                 </Pressable>
               );
             })}
-          </ScrollView>
-        </View>
-      </Modal>
-
-      <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Voice speed:</Text>
-        <Pressable
-          accessibilityLabel={`Choose voice speed. Current speed: ${speechRate}x`}
-          accessibilityRole="button"
-          onPress={() => setIsSpeedMenuOpen(true)}
-          className="h-10 min-w-24 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5 dark:border-white/20 dark:bg-[#222720] dark:active:bg-white/5"
-        >
-          <Text className="text-sm text-black dark:text-[#F4F5F1]">{speechRate}x</Text>
-          <Icon as={ChevronDownIcon} size="xs" className="text-black/60 dark:text-white/60" />
-        </Pressable>
-      </View>
-
-      <Modal
-        animationType="fade"
-        transparent
-        visible={isSpeedMenuOpen}
-        onRequestClose={() => setIsSpeedMenuOpen(false)}
-      >
-        <Pressable
-          accessibilityLabel="Close voice speed menu"
-          className="absolute inset-0 bg-black/20"
-          onPress={() => setIsSpeedMenuOpen(false)}
-        />
-        <View className="mx-6 my-auto overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1A1E18]">
-          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900 dark:text-[#F4F5F1]">
-            Choose voice speed
-          </Text>
-          {speedOptions.map((option) => {
-            const isSelected = option.value === speechRate;
-
-            return (
-              <Pressable
-                key={option.value}
-                accessibilityRole="menuitem"
-                onPress={() => {
-                  setSpeechRate(option.value);
-                  setIsSpeedMenuOpen(false);
-                }}
-                className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
-              >
-                <Text className="text-base text-black dark:text-[#F4F5F1]">{option.label}</Text>
-                {isSelected && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
-              </Pressable>
-            );
-          })}
-        </View>
-      </Modal>
-
-      <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Sleep timer:</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Choose sleep timer. Current setting: ${sleepTimerMinutes ? `${sleepTimerMinutes} minutes` : "Off"}`}
-          onPress={() => setIsSleepTimerMenuOpen(true)}
-          className="h-10 min-w-28 flex-row items-center justify-between gap-2 rounded-md border border-black/20 bg-white px-3 active:bg-black/5 dark:border-white/20 dark:bg-[#222720] dark:active:bg-white/5"
-        >
-          <Text className="text-sm text-black dark:text-[#F4F5F1]">
-            {sleepTimerRemaining > 0
-              ? `${Math.ceil(sleepTimerRemaining / 60)} min left`
-              : sleepTimerMinutes
-                ? `${sleepTimerMinutes} min`
-                : "Off"}
-          </Text>
-          <Icon as={ChevronDownIcon} size="xs" className="text-black/60 dark:text-white/60" />
-        </Pressable>
-      </View>
-
-      <Modal
-        animationType="fade"
-        transparent
-        visible={isSleepTimerMenuOpen}
-        onRequestClose={() => setIsSleepTimerMenuOpen(false)}
-      >
-        <Pressable
-          accessibilityLabel="Close sleep timer menu"
-          className="absolute inset-0 bg-black/20"
-          onPress={() => setIsSleepTimerMenuOpen(false)}
-        />
-        <View className="mx-6 my-auto overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1A1E18]">
-          <Text className="px-3 pb-2 pt-3 text-base font-semibold text-slate-900 dark:text-[#F4F5F1]">
-            Stop speaking after
-          </Text>
-          <Pressable
-            accessibilityRole="menuitem"
-            accessibilityState={{ selected: !sleepTimerMinutes }}
-            onPress={() => {
-              setSleepTimerMinutes(undefined);
-              clearAppleSpeechSleepTimer();
-              setSleepTimerRemaining(0);
-              setIsSleepTimerMenuOpen(false);
-            }}
-            className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
-          >
-            <Text className="text-base text-black dark:text-[#F4F5F1]">Off</Text>
-            {!sleepTimerMinutes && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
+            </ScrollView>
           </Pressable>
-          {sleepTimerOptions.map((minutes) => (
-            <Pressable
-              key={minutes}
-              accessibilityRole="menuitem"
-              accessibilityState={{ selected: sleepTimerMinutes === minutes }}
-              onPress={() => {
-                setSleepTimerMinutes(minutes);
-                if (isSpeaking) {
-                  startAppleSpeechSleepTimer(minutes);
-                  setSleepTimerRemaining(minutes * 60);
-                }
-                setIsSleepTimerMenuOpen(false);
-              }}
-              className="h-12 flex-row items-center justify-between rounded px-3 active:bg-black/5"
-            >
-              <Text className="text-base text-black dark:text-[#F4F5F1]">
-                {minutes < 60
-                  ? `${minutes} minutes`
-                  : `${minutes / 60} ${minutes === 60 ? "hour" : "hours"}`}
-              </Text>
-              {sleepTimerMinutes === minutes && <Check size={16} color={isDark ? "#F4F5F1" : "#000000"} />}
-            </Pressable>
-          ))}
-        </View>
+        </Pressable>
       </Modal>
+
+      <View className="mt-4">
+        <View className="mb-2 flex-row items-center justify-between">
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+            Voice speed:
+          </Text>
+          <Text className="text-sm font-semibold text-[#639922]">
+            {speechRate}x
+          </Text>
+        </View>
+        <View>
+          <SteppedSlider
+            accessibilityLabel="Voice speed"
+            levels={speedLevels}
+            value={speechRate}
+            onChange={setSpeechRate}
+            formatValue={(value) => `${value}x`}
+          />
+        </View>
+      </View>
+
+      <View className="mt-4">
+        <View className="mb-2 flex-row items-center justify-between">
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+            Sleep timer:
+          </Text>
+          <Text
+            className="text-sm font-semibold text-[#639922]"
+            numberOfLines={1}
+          >
+            {formatSleepTimer(sleepTimerMinutes ?? 0)}
+          </Text>
+        </View>
+        <View>
+          <SteppedSlider
+            accessibilityLabel="Sleep timer"
+            levels={sleepTimerLevels}
+            value={sleepTimerMinutes ?? 0}
+            onChange={handleSleepTimerChange}
+            formatValue={formatSleepTimer}
+          />
+        </View>
+      </View>
       {!isAppleSpeechAvailable && (
         <Text className="mt-4 text-sm text-amber-700">
           Apple voices require the updated iOS development build.
@@ -571,7 +522,7 @@ export default function TTS({
         size="lg"
         onPress={handleTTS}
         isDisabled={!isAppleSpeechAvailable || !text.trim()}
-        className="mt-8 h-14 flex-row items-center justify-center rounded-xl bg-[#639922] px-5"
+        className="mt-5 h-14 flex-row items-center justify-center rounded-xl bg-[#639922] px-5"
         accessibilityLabel={
           isSpeaking ? "Stop text to speech" : "Start text to speech"
         }
@@ -586,3 +537,75 @@ export default function TTS({
     </View>
   );
 }
+
+const createStyles = (isDark: boolean) => StyleSheet.create({
+  pressed: { opacity: 0.65 },
+  picker: {
+    alignItems: "center",
+    borderColor: isDark ? "#42483F" : "#E2E0DB",
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    height: 40,
+    justifyContent: "space-between",
+    maxWidth: "62%",
+    minWidth: 150,
+    paddingHorizontal: 12,
+  },
+  voicePicker: { maxWidth: 256 },
+  pickerText: {
+    color: isDark ? "#F4F5F1" : "#17202B",
+    flexShrink: 1,
+    fontSize: 14,
+    marginRight: 8,
+  },
+  modalBackdrop: {
+    alignItems: "center",
+    backgroundColor: "rgba(15, 23, 42, 0.28)",
+    flex: 1,
+    justifyContent: "center",
+    padding: 24,
+  },
+  menu: {
+    backgroundColor: isDark ? "#1A1E18" : "#FFFEFC",
+    borderRadius: 20,
+    maxHeight: "68%",
+    padding: 8,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
+    width: "100%",
+  },
+  menuTitle: {
+    color: isDark ? "#F4F5F1" : "#111827",
+    fontSize: 20,
+    fontWeight: "600",
+    padding: 14,
+  },
+  menuItem: {
+    alignItems: "center",
+    borderRadius: 12,
+    flexDirection: "row",
+    height: 50,
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+  },
+  voiceMenuItem: {
+    alignItems: "center",
+    borderRadius: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  menuItemPressed: { backgroundColor: isDark ? "#2A3027" : "#F3F2EF" },
+  menuItemText: { color: isDark ? "#F4F5F1" : "#111827", fontSize: 17 },
+  menuItemDescription: {
+    color: isDark ? "#9EA69A" : "#64748B",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  voiceDetails: { flexShrink: 1, marginRight: 12 },
+});

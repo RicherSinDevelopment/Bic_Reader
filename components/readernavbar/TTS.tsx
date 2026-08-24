@@ -24,6 +24,7 @@ import {
 type TTSProps = {
   text: string;
   startOffset: number;
+  getStartOffset?: () => number;
   onSpeechStartOffsetChange: (offset: number) => void;
   onClearHighlight: () => void;
   translationLanguage?: TranslationLanguage;
@@ -101,6 +102,7 @@ function detectTextLanguage(text: string) {
 export default function TTS({
   text,
   startOffset,
+  getStartOffset,
   onSpeechStartOffsetChange,
   onClearHighlight,
   translationLanguage,
@@ -252,9 +254,10 @@ export default function TTS({
       if (!text.trim()) return;
 
       onClearHighlight();
+      const requestedStartOffset = getStartOffset?.() ?? startOffset;
       const safeStartOffset = Math.max(
         0,
-        Math.min(text.length, Math.floor(startOffset)),
+        Math.min(text.length, Math.floor(requestedStartOffset)),
       );
       const visibleText = text.slice(safeStartOffset).trimStart();
       const leadingWhitespace = text

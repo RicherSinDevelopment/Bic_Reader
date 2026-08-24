@@ -1,8 +1,8 @@
 import type { ExtractedPdfDocument } from "@/modules/bic-pdf-reader";
 import type { SQLiteDatabase } from "expo-sqlite";
 
-// Version 6 adds on-device Apple Vision OCR for scanned pages.
-export const PDF_EXTRACTION_ENGINE_VERSION = 6;
+// Version 7 adds word-level Apple Vision bounds for scanned-page highlights.
+export const PDF_EXTRACTION_ENGINE_VERSION = 7;
 
 export async function getCachedPdfExtraction(db: SQLiteDatabase, pdfId: string) {
   const row = await db.getFirstAsync<{ document_json: string; engine_version: number }>(

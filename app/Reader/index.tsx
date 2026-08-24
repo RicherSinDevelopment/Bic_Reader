@@ -913,9 +913,9 @@ export default function ReaderScreen() {
   };
 
   useEffect(() => {
-    // A newly activated guide starts in the reader's current visible frame.
-    // Scrolling can hide the chrome afterward through the callback below.
-    setReaderChromeHidden(false);
+    const guideOwnsReader = readerGuideEnabled && readerTransition === "pager" &&
+      (activeTab === "reader" || activeTab === "translated");
+    setReaderChromeHidden(guideOwnsReader);
   }, [
     activeTab,
     hideTopBarOnScroll,
@@ -925,6 +925,13 @@ export default function ReaderScreen() {
 
   const handleReaderToolbarVisibilityChange = useCallback(
     (visible: boolean) => {
+      if (
+        readerGuideEnabled && readerTransition === "pager" &&
+        (activeTab === "reader" || activeTab === "translated")
+      ) {
+        setReaderChromeHidden(true);
+        return;
+      }
       if (
         (activeTab === "reader" || activeTab === "translated") &&
         (hideTopBarOnScroll ||
@@ -1315,7 +1322,10 @@ export default function ReaderScreen() {
               isActive={activeTab === "translated"}
               isLandscape={isLandscape}
               headerOverlayHeight={isLandscape ? 0 : headerHeight}
-              topBarVisible={isLandscape || !readerChromeHidden}
+              topBarVisible={
+                !(readerGuideEnabled && readerTransition === "pager") &&
+                (isLandscape || !readerChromeHidden)
+              }
               blocks={translatedBlocks}
               pageCount={translatedAvailablePageCount}
               sourcePageCount={readerPageCount}
@@ -1389,7 +1399,10 @@ export default function ReaderScreen() {
                 isActive={activeTab === "reader"}
                 isLandscape={isLandscape}
                 headerOverlayHeight={isLandscape ? 0 : headerHeight}
-                topBarVisible={isLandscape || !readerChromeHidden}
+                topBarVisible={
+                  !(readerGuideEnabled && readerTransition === "pager") &&
+                  (isLandscape || !readerChromeHidden)
+                }
                 blocks={readerBlocks}
                 pageCount={readerPageCount}
                 destination={readerDestination}

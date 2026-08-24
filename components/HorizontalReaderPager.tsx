@@ -1,6 +1,6 @@
 import { hyphenateText, type ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Platform, Text, useWindowDimensions, View } from "react-native";
+import { FlatList, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Destination = {
@@ -31,6 +31,8 @@ type PageAnchor = {
   wordIndex: number;
 };
 
+type GuideLine = { left: number; top: number; width: number; height: number; text?: string };
+
 type Props = {
   blocks: ExtractedPdfBlock[];
   readingDirection?: "ltr" | "rtl";
@@ -39,6 +41,9 @@ type Props = {
     offset: number;
     length: number;
   } | null;
+  guideMode?: "line" | "word" | null;
+  guideBackgroundDimming?: number;
+  onGuideClose?: () => void;
   destination?: Destination;
   stationarySwitchHighlight?: {
     blockId: string;
@@ -165,6 +170,9 @@ export default function HorizontalReaderPager({
   blocks,
   readingDirection = "ltr",
   spokenWordHighlight,
+  guideMode = null,
+  guideBackgroundDimming = 60,
+  onGuideClose,
   destination,
   stationarySwitchHighlight,
   fontFamily,
@@ -189,6 +197,26 @@ export default function HorizontalReaderPager({
   const [containerHeight, setContainerHeight] = useState(0);
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<number | null>(null);
   const [dismissedSwitchNonce, setDismissedSwitchNonce] = useState<number | null>(null);
+  const [lineGuideIndex, setLineGuideIndex] = useState(0);
+  const [wordGuideIndex, setWordGuideIndex] = useState(0);
+  const [wordGuideFragmentIndex, setWordGuideFragmentIndex] = useState(0);
+  const [guideLinesByPage, setGuideLinesByPage] = useState<Record<number, GuideLine[]>>({});
+  const [wordMeasurement, setWordMeasurement] = useState<{
+    key: string;
+    prefixWidth?: number;
+    totalWidth?: number;
+  } | null>(null);
+  const [displayedGuideRect, setDisplayedGuideRect] = useState<GuideLine | undefined>();
+  const segmentMeasurements = useRef(new Map<string, {
+    pageIndex: number;
+    blockId?: string;
+    segmentStart?: number;
+    segmentLength?: number;
+    indentLength?: number;
+    left?: number;
+    top?: number;
+    lines?: GuideLine[];
+  }>());
   const touchStart = useRef({ x: 0, y: 0, time: 0 });
   const hyphenationCache = useRef(new Map<string, string>());
   const { width, height: windowHeight } = useWindowDimensions();
@@ -259,6 +287,26 @@ export default function HorizontalReaderPager({
     }
     return complete;
   }, [pages]);
+  const guideWords = useMemo(() => pages.flatMap((page, pageIndex) =>
+    page.flatMap((segments) => Array.from(segments.text.matchAll(/\S+/g)).map((match) => ({
+      pageIndex,
+      blockId: segments.blockId,
+      offset: segments.startOffset + (match.index ?? 0),
+      length: match[0].length,
+    }))),
+  ), [pages]);
+
+  useEffect(() => {
+    if (!guideMode) return;
+    setLineGuideIndex(0);
+    if (guideMode === "word") {
+      const firstVisibleWord = guideWords.findIndex(
+        (word) => word.pageIndex >= currentPageRef.current,
+      );
+      setWordGuideIndex(Math.max(0, firstVisibleWord));
+      setWordGuideFragmentIndex(0);
+    }
+  }, [guideMode, guideWords]);
 
   useEffect(() => {
     onPageMapChange?.(sourcePageMap);
@@ -359,6 +407,294 @@ export default function HorizontalReaderPager({
     return hyphenated;
   }, [automaticHyphenation]);
 
+  const activeGuideWord = guideMode === "word"
+    ? guideWords[wordGuideIndex]
+    : undefined;
+  const activeGuideLines = guideLinesByPage[currentPageRef.current] ?? [];
+  const activeGuideLine = activeGuideLines[Math.min(lineGuideIndex, Math.max(0, activeGuideLines.length - 1))];
+
+  const recordSegmentMeasurement = useCallback((
+    key: string,
+    pageIndex: number,
+    segmentInfo: {
+      blockId: string;
+      start: number;
+      length: number;
+      indentLength: number;
+    },
+    layout?: { left: number; top: number },
+    lines?: GuideLine[],
+  ) => {
+    const current = segmentMeasurements.current.get(key) ?? { pageIndex };
+    const next = {
+      ...current,
+      pageIndex,
+      blockId: segmentInfo.blockId,
+      segmentStart: segmentInfo.start,
+      segmentLength: segmentInfo.length,
+      indentLength: segmentInfo.indentLength,
+      ...(layout ? layout : {}),
+      ...(lines ? { lines } : {}),
+    };
+    segmentMeasurements.current.set(key, next);
+    if (next.left === undefined || next.top === undefined || !next.lines) return;
+    const pageLines = Array.from(segmentMeasurements.current.values())
+      .filter((measurement) =>
+        measurement.pageIndex === pageIndex &&
+        measurement.left !== undefined &&
+        measurement.top !== undefined &&
+        measurement.lines
+      )
+      .flatMap((measurement) => measurement.lines!.map((line) => ({
+        left: measurement.left! + line.left,
+        top: measurement.top! + line.top,
+        width: line.width,
+        height: line.height,
+        text: line.text,
+      })))
+      .sort((left, right) => left.top - right.top || left.left - right.left);
+    setGuideLinesByPage((currentPages) => {
+      const previous = currentPages[pageIndex] ?? [];
+      const unchanged = previous.length === pageLines.length && previous.every((line, index) => {
+        const candidate = pageLines[index];
+        return Math.abs(line.left - candidate.left) < 0.5 &&
+          Math.abs(line.top - candidate.top) < 0.5 &&
+          Math.abs(line.width - candidate.width) < 0.5 &&
+          Math.abs(line.height - candidate.height) < 0.5;
+      });
+      return unchanged ? currentPages : { ...currentPages, [pageIndex]: pageLines };
+    });
+  }, []);
+
+  const activeWordMeasurementTarget = useMemo(() => {
+    if (!activeGuideWord) return undefined;
+    const measurement = Array.from(segmentMeasurements.current.values()).find((item) =>
+      item.pageIndex === activeGuideWord.pageIndex &&
+      item.blockId === activeGuideWord.blockId &&
+      item.segmentStart !== undefined &&
+      item.segmentLength !== undefined &&
+      activeGuideWord.offset >= item.segmentStart &&
+      activeGuideWord.offset < item.segmentStart + item.segmentLength &&
+      item.left !== undefined &&
+      item.top !== undefined &&
+      item.lines
+    );
+    if (!measurement?.lines || measurement.left === undefined || measurement.top === undefined) {
+      return undefined;
+    }
+    const pageSegment = pages[activeGuideWord.pageIndex]?.find((segment) =>
+      segment.blockId === activeGuideWord.blockId &&
+      activeGuideWord.offset >= segment.startOffset &&
+      activeGuideWord.offset < segment.startOffset + segment.text.length
+    );
+    if (!pageSegment) return undefined;
+    const sourceLocalOffset = activeGuideWord.offset - measurement.segmentStart!;
+    const openingWord = pageSegment.sectionOpening
+      ? pageSegment.text.match(/^\S+/)?.[0] ?? ""
+      : "";
+    const displayedOpeningWord = openingWord ? textForDisplay(openingWord) : "";
+    const displayedSegment = openingWord
+      ? displayedOpeningWord + textForDisplay(pageSegment.text.slice(openingWord.length))
+      : textForDisplay(pageSegment.text);
+    let sourceCharacters = 0;
+    let displayLocalOffset = 0;
+    while (displayLocalOffset < displayedSegment.length && sourceCharacters < sourceLocalOffset) {
+      if (displayedSegment[displayLocalOffset] !== "\u00ad") sourceCharacters += 1;
+      displayLocalOffset += 1;
+    }
+    let displayWordEnd = displayLocalOffset;
+    const sourceWordEnd = sourceLocalOffset + activeGuideWord.length;
+    while (displayWordEnd < displayedSegment.length && sourceCharacters < sourceWordEnd) {
+      if (displayedSegment[displayWordEnd] !== "\u00ad") sourceCharacters += 1;
+      displayWordEnd += 1;
+    }
+    const displayWordLength = displayWordEnd - displayLocalOffset;
+    const localOffset = displayLocalOffset + (measurement.indentLength ?? 0);
+    const displayedText = "\u2003\u2002".slice(0, measurement.indentLength ?? 0) + displayedSegment;
+    let searchFrom = 0;
+    const fragments: Array<{
+      prefix: string;
+      prefixAndWord: string;
+      line: GuideLine;
+    }> = [];
+    for (const line of measurement.lines) {
+      const lineText = line.text ?? "";
+      const lineLength = Math.max(1, lineText.length);
+      const matchedStart = lineText ? displayedText.indexOf(lineText, searchFrom) : -1;
+      const lineStart = matchedStart >= 0 ? matchedStart : searchFrom;
+      const lineEnd = lineStart + lineLength;
+      const wordStart = localOffset;
+      const wordEnd = localOffset + displayWordLength;
+      const fragmentStart = Math.max(wordStart, lineStart);
+      const fragmentEnd = Math.min(wordEnd, lineEnd);
+      if (fragmentStart < fragmentEnd) {
+        const offsetInLine = fragmentStart - lineStart;
+        const fragmentLength = fragmentEnd - fragmentStart;
+        const prefix = lineText.slice(0, offsetInLine);
+        fragments.push({
+          prefix,
+          prefixAndWord: prefix + lineText.slice(offsetInLine, offsetInLine + fragmentLength),
+          line: {
+            left: measurement.left + line.left,
+            top: measurement.top + line.top,
+            width: line.width,
+            height: line.height,
+          },
+        });
+      }
+      searchFrom = lineEnd;
+      while (searchFrom < displayedText.length && /\s/.test(displayedText[searchFrom])) {
+        searchFrom += 1;
+      }
+    }
+    if (!fragments.length) return undefined;
+    const selectedFragmentIndex = wordGuideFragmentIndex < 0
+      ? fragments.length - 1
+      : Math.min(wordGuideFragmentIndex, fragments.length - 1);
+    const fragment = fragments[selectedFragmentIndex];
+    const headingScale = pageSegment.kind === "title"
+      ? 1.55
+      : pageSegment.kind === "heading" ? 1.25 : 1;
+    return {
+      key: `${activeGuideWord.pageIndex}:${activeGuideWord.blockId}:${activeGuideWord.offset}:${selectedFragmentIndex}`,
+      ...fragment,
+      fragmentCount: fragments.length,
+      selectedFragmentIndex,
+      typography: {
+        fontFamily,
+        fontSize: fontSize * headingScale,
+        lineHeight: fontSize * headingScale * lineHeight,
+        letterSpacing,
+        fontWeight: bold ? "700" as const : "400" as const,
+        writingDirection: readingDirection,
+      },
+      openingWord: displayedOpeningWord,
+      activeWordUsesOpeningStyle: Boolean(openingWord && sourceLocalOffset === 0),
+      openingWordStyle: {
+        fontSize: fontSize * headingScale * 1.24,
+        fontWeight: "700" as const,
+        letterSpacing: letterSpacing + 0.15,
+      },
+    };
+  }, [
+    activeGuideWord,
+    bold,
+    fontFamily,
+    fontSize,
+    guideLinesByPage,
+    letterSpacing,
+    lineHeight,
+    pages,
+    readingDirection,
+    textForDisplay,
+    wordGuideFragmentIndex,
+  ]);
+  const activeGuideWordRect = useMemo<GuideLine | undefined>(() => {
+    const target = activeWordMeasurementTarget;
+    if (!target || wordMeasurement?.key !== target.key ||
+      wordMeasurement.prefixWidth === undefined ||
+      wordMeasurement.totalWidth === undefined) {
+      return undefined;
+    }
+    const wordWidth = Math.max(4, wordMeasurement.totalWidth - wordMeasurement.prefixWidth);
+    return {
+      left: isRtl
+        ? target.line.left + target.line.width - wordMeasurement.totalWidth
+        : target.line.left + wordMeasurement.prefixWidth,
+      top: target.line.top,
+      width: wordWidth,
+      height: target.line.height,
+    };
+  }, [activeWordMeasurementTarget, isRtl, wordMeasurement]);
+  useEffect(() => {
+    if (!activeWordMeasurementTarget) {
+      setWordMeasurement(null);
+      return;
+    }
+    setWordMeasurement((current) => current?.key === activeWordMeasurementTarget.key
+      ? current
+      : {
+          key: activeWordMeasurementTarget.key,
+          ...(activeWordMeasurementTarget.prefix ? {} : { prefixWidth: 0 }),
+        });
+  }, [activeWordMeasurementTarget]);
+  const activeGuideRect = guideMode === "word"
+    ? activeGuideWordRect
+    : activeGuideLine;
+  useEffect(() => {
+    if (!guideMode) {
+      setDisplayedGuideRect(undefined);
+    } else if (activeGuideRect) {
+      setDisplayedGuideRect(activeGuideRect);
+    }
+  }, [activeGuideRect, guideMode]);
+  const visibleGuideRect = activeGuideRect ?? displayedGuideRect;
+
+  const renderMeasuredGuideText = useCallback((value: string) => {
+    const target = activeWordMeasurementTarget;
+    if (target?.activeWordUsesOpeningStyle) {
+      return <Text style={target.openingWordStyle}>{value}</Text>;
+    }
+    if (!target?.openingWord || !value.startsWith(target.openingWord)) return value;
+    return (
+      <>
+        <Text style={target.openingWordStyle}>{target.openingWord}</Text>
+        {value.slice(target.openingWord.length)}
+      </>
+    );
+  }, [activeWordMeasurementTarget]);
+
+  const moveToPage = useCallback((pageIndex: number) => {
+    const target = Math.max(0, Math.min(pages.length - 1, pageIndex));
+    if (target === currentPageRef.current) return;
+    pagerRef.current?.scrollToIndex({ animated: true, index: target });
+    currentPageRef.current = target;
+    const sourcePage = pages[target]?.[0]?.sourcePage ?? 1;
+    onPageChange?.(
+      target + 1,
+      pages.length,
+      sourcePage,
+      pageAnchor(pages[target], blocks),
+    );
+  }, [blocks, onPageChange, pages]);
+
+  const moveGuide = useCallback((direction: -1 | 1) => {
+    if (guideMode === "word") {
+      const selectedFragment = activeWordMeasurementTarget?.selectedFragmentIndex ?? 0;
+      const fragmentCount = activeWordMeasurementTarget?.fragmentCount ?? 1;
+      if (direction > 0 && selectedFragment < fragmentCount - 1) {
+        setWordGuideFragmentIndex(selectedFragment + 1);
+        return;
+      }
+      if (direction < 0 && selectedFragment > 0) {
+        setWordGuideFragmentIndex(selectedFragment - 1);
+        return;
+      }
+      const next = Math.max(0, Math.min(guideWords.length - 1, wordGuideIndex + direction));
+      if (next === wordGuideIndex) return;
+      setWordGuideIndex(next);
+      setWordGuideFragmentIndex(direction < 0 ? -1 : 0);
+      const nextPage = guideWords[next]?.pageIndex;
+      if (nextPage !== undefined) moveToPage(nextPage);
+      return;
+    }
+    const currentLines = guideLinesByPage[currentPageRef.current] ?? [];
+    const maximumLine = Math.max(0, currentLines.length - 1);
+    const next = lineGuideIndex + direction;
+    if (next > maximumLine) {
+      setLineGuideIndex(0);
+      moveToPage(currentPageRef.current + 1);
+      return;
+    }
+    if (next < 0) {
+      const previousPage = Math.max(0, currentPageRef.current - 1);
+      setLineGuideIndex(Math.max(0, (guideLinesByPage[previousPage]?.length ?? 1) - 1));
+      moveToPage(previousPage);
+      return;
+    }
+    setLineGuideIndex(next);
+  }, [activeWordMeasurementTarget, guideLinesByPage, guideMode, guideWords, lineGuideIndex, moveToPage, wordGuideIndex]);
+
   const navigationSwitchHighlight = destination?.blockId &&
     destination.switchHighlightOffset !== undefined
     ? {
@@ -373,7 +709,7 @@ export default function HorizontalReaderPager({
     ? stationarySwitchHighlight
     : navigationSwitchHighlight;
 
-  const renderSegment = (segment: Segment, index: number) => {
+  const renderSegment = (segment: Segment, index: number, pageIndex: number) => {
     const isSearchTarget = destination?.nonce !== dismissedSearchNonce &&
       destination?.blockId === segment.blockId &&
       destination.searchQuery &&
@@ -436,6 +772,28 @@ export default function HorizontalReaderPager({
       <Text
         android_hyphenationFrequency={automaticHyphenation ? "full" : "none"}
         key={`${segment.blockId}-${segment.startOffset}-${index}`}
+        onLayout={(event) => recordSegmentMeasurement(
+          `${pageIndex}:${segment.blockId}:${segment.startOffset}`,
+          pageIndex,
+          { blockId: segment.blockId, start: segment.startOffset, length: segment.text.length, indentLength: paragraphIndent.length },
+          {
+            left: event.nativeEvent.layout.x,
+            top: event.nativeEvent.layout.y,
+          },
+        )}
+        onTextLayout={(event) => recordSegmentMeasurement(
+          `${pageIndex}:${segment.blockId}:${segment.startOffset}`,
+          pageIndex,
+          { blockId: segment.blockId, start: segment.startOffset, length: segment.text.length, indentLength: paragraphIndent.length },
+          undefined,
+          event.nativeEvent.lines.map((line) => ({
+            left: line.x,
+            top: line.y,
+            width: line.width,
+            height: line.height,
+            text: line.text,
+          })),
+        )}
         style={{
           ...typographyStyle,
           marginBottom: segment.spacingAfter,
@@ -604,7 +962,7 @@ export default function HorizontalReaderPager({
             offset: index * width,
           });
         }}
-        renderItem={({ item: page }) => (
+        renderItem={({ item: page, index: pageIndex }) => (
           <View
             style={{
               backgroundColor,
@@ -615,10 +973,88 @@ export default function HorizontalReaderPager({
               width,
             }}
           >
-            {page.map(renderSegment)}
+            {page.map((segment, segmentIndex) => renderSegment(segment, segmentIndex, pageIndex))}
           </View>
         )}
       />
+      {guideMode === "word" && activeWordMeasurementTarget && (
+        <View
+          pointerEvents="none"
+          style={{ position: "absolute", left: -10000, top: -10000, alignItems: "flex-start" }}
+        >
+          {activeWordMeasurementTarget.prefix ? (
+            <Text
+              numberOfLines={1}
+              style={[activeWordMeasurementTarget.typography, { alignSelf: "flex-start" }]}
+              onTextLayout={(event) => {
+                const measured = event.nativeEvent.lines[0]?.width ?? 0;
+                setWordMeasurement((current) => current?.key === activeWordMeasurementTarget.key && current.prefixWidth === measured
+                  ? current
+                  : { ...(current?.key === activeWordMeasurementTarget.key ? current : { key: activeWordMeasurementTarget.key }), prefixWidth: measured });
+              }}
+            >
+              {renderMeasuredGuideText(activeWordMeasurementTarget.prefix)}
+            </Text>
+          ) : null}
+          <Text
+            numberOfLines={1}
+            style={[activeWordMeasurementTarget.typography, { alignSelf: "flex-start" }]}
+            onTextLayout={(event) => {
+              const measured = event.nativeEvent.lines[0]?.width ?? 0;
+              setWordMeasurement((current) => current?.key === activeWordMeasurementTarget.key && current.totalWidth === measured
+                ? current
+                : { ...(current?.key === activeWordMeasurementTarget.key ? current : { key: activeWordMeasurementTarget.key }), totalWidth: measured });
+            }}
+          >
+            {renderMeasuredGuideText(activeWordMeasurementTarget.prefixAndWord)}
+          </Text>
+        </View>
+      )}
+      {guideMode && visibleGuideRect && (
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <View style={{ height: visibleGuideRect.top, backgroundColor, opacity: guideBackgroundDimming / 100 }} />
+          <View style={{ height: visibleGuideRect.height, flexDirection: "row" }}>
+            <View style={{ width: visibleGuideRect.left, backgroundColor, opacity: guideBackgroundDimming / 100 }} />
+            <View style={{ width: visibleGuideRect.width, backgroundColor: "rgba(245, 158, 11, 0.28)", borderColor: "rgba(217, 119, 6, 0.55)", borderWidth: 1, borderRadius: 4 }} />
+            <View style={{ flex: 1, backgroundColor, opacity: guideBackgroundDimming / 100 }} />
+          </View>
+          <View style={{ flex: 1, backgroundColor, opacity: guideBackgroundDimming / 100 }} />
+        </View>
+      )}
+      {guideMode && (
+        <>
+          <Pressable
+            accessibilityLabel="Move reading guide. Tap upper half for back, lower half for forward"
+            accessibilityRole="button"
+            onPress={(event) => moveGuide(event.nativeEvent.pageY < usableHeight / 2 ? -1 : 1)}
+            style={StyleSheet.absoluteFill}
+          />
+          <Pressable
+            accessibilityLabel="Close reading guide"
+            accessibilityRole="button"
+            hitSlop={12}
+            onPress={onGuideClose}
+            style={{
+              position: "absolute",
+              bottom: 24 + insets.bottom,
+              alignSelf: "center",
+              width: 48,
+              height: 48,
+              borderRadius: 24,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: "rgba(15, 23, 42, 0.92)",
+              shadowColor: "#000000",
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.25,
+              shadowRadius: 6,
+              elevation: 8,
+            }}
+          >
+            <Text style={{ color: "white", fontSize: 32, fontWeight: "300", lineHeight: 34 }}>×</Text>
+          </Pressable>
+        </>
+      )}
     </View>
   );
 }

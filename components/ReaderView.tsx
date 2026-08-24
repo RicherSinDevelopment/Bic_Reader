@@ -219,6 +219,7 @@ const ReaderView = ({
     "presets" | "font" | "background"
   >("presets");
   const [ttsStartOffset, setTtsStartOffset] = useState(0);
+  const ttsStartOffsetRef = useRef(0);
   const [spokenWordHighlight, setSpokenWordHighlight] = useState<{
     blockId: string;
     offset: number;
@@ -525,7 +526,13 @@ const textColor = isDark && !colorsCustomized
     lastSourcePageRef.current = sourcePage;
     if (anchor) {
       modeTextAnchorRef.current = anchor;
-      setTtsStartOffset(ttsPositionForBlock(blocks, anchor.blockId, anchor.blockOffset));
+      const nextTtsOffset = ttsPositionForBlock(
+        blocks,
+        anchor.blockId,
+        anchor.blockOffset,
+      );
+      ttsStartOffsetRef.current = nextTtsOffset;
+      setTtsStartOffset(nextTtsOffset);
       const block = blocks.find((candidate) => candidate.id === anchor.blockId);
       const word = block
         ? Array.from(block.text.matchAll(/\S+/g))[anchor.wordIndex]?.[0] ?? ""
@@ -1494,8 +1501,12 @@ const textColor = isDark && !colorsCustomized
     if (!readerGuideMode) return;
     wordGuideScrollArmed.current = false;
     chromeResizeGuardUntil.current = Date.now() + 400;
-    showToolbar();
-  }, [readerGuideMode, showToolbar]);
+    if (isPaged) {
+      hideToolbar();
+    } else {
+      showToolbar();
+    }
+  }, [hideToolbar, isPaged, readerGuideMode, showToolbar]);
 
   // --------------------------------
   // WEBVIEW MESSAGE HANDLER
@@ -1646,8 +1657,12 @@ const textColor = isDark && !colorsCustomized
             });
           }
         }
-        if (typeof data.ttsOffset === "number") {
-          setTtsStartOffset(Math.max(0, data.ttsOffset));
+        // In pager mode the hidden WebView can remain on a different page.
+        // Only the native pager's visible anchor is authoritative for TTS.
+        if (!isPaged && typeof data.ttsOffset === "number") {
+          const nextTtsOffset = Math.max(0, data.ttsOffset);
+          ttsStartOffsetRef.current = nextTtsOffset;
+          setTtsStartOffset(nextTtsOffset);
         }
         onSwitchAnchorChange?.(
           data.blockId,
@@ -1739,6 +1754,7 @@ const textColor = isDark && !colorsCustomized
           <TTS
             text={ttsText}
             startOffset={ttsStartOffset}
+            getStartOffset={() => ttsStartOffsetRef.current}
             onSpeechStartOffsetChange={(offset) => {
               speechStartOffsetRef.current = offset;
             }}
@@ -1876,6 +1892,9 @@ const textColor = isDark && !colorsCustomized
                 blocks={blocks}
                 readingDirection={readerDirection}
                 spokenWordHighlight={spokenWordHighlight}
+                guideMode={readerGuideMode}
+                guideBackgroundDimming={guideBackgroundDimming}
+                onGuideClose={closeReaderGuide}
                 destination={effectivePagerDestination}
                 stationarySwitchHighlight={stationarySwitchHighlight}
                 fontFamily={fontFamily.split(",")[0].replaceAll("'", "").trim()}
@@ -1891,6 +1910,7 @@ const textColor = isDark && !colorsCustomized
                 onPageChange={handlePagerPageChange}
                 onPageMapChange={onPageMapChange}
                 onReaderTap={() => {
+                  if (readerGuideMode) return;
                   if (toolbarHidden.current) {
                     showToolbar();
                   } else {

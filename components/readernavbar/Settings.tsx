@@ -124,7 +124,6 @@ export default function Settings() {
             size="md"
             value={lineGuideEnabled}
             onValueChange={(enabled) => {
-              if (enabled) setTransition("scroll");
               setLineGuideEnabled(enabled);
             }}
             isDisabled={false}
@@ -147,7 +146,6 @@ export default function Settings() {
             size="md"
             value={wordGuideEnabled}
             onValueChange={(enabled) => {
-              if (enabled) setTransition("scroll");
               setWordGuideEnabled(enabled);
             }}
             isDisabled={false}

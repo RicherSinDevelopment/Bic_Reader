@@ -55,7 +55,9 @@ enum AppleVisionOcr {
     let request = VNRecognizeTextRequest()
     request.recognitionLevel = .accurate
     request.usesLanguageCorrection = true
-    request.automaticallyDetectsLanguage = true
+    if #available(iOS 16.0, *) {
+      request.automaticallyDetectsLanguage = true
+    }
     request.minimumTextHeight = 0.006
     try VNImageRequestHandler(cgImage: cgImage, orientation: .up).perform([request])
 
@@ -70,16 +72,34 @@ enum AppleVisionOcr {
       return left.0.boundingBox.midY > right.0.boundingBox.midY
     }
 
+    let wordRegex = try NSRegularExpression(pattern: "\\S+")
     let blocks: [[String: Any]] = observations.enumerated().map { index, item in
+      let candidate = item.1
       let box = item.0.boundingBox
       let left = box.minX * bounds.width
       let top = (1 - box.maxY) * bounds.height
       let right = box.maxX * bounds.width
       let bottom = (1 - box.minY) * bounds.height
+      let wordBounds: [[Double]] = wordRegex.matches(
+        in: candidate.string,
+        range: NSRange(candidate.string.startIndex..., in: candidate.string)
+      ).compactMap { match in
+        guard
+          let stringRange = Range(match.range, in: candidate.string),
+          let wordObservation = try? candidate.boundingBox(for: stringRange)
+        else { return nil }
+        let wordBox = wordObservation.boundingBox
+        return [
+          Double(wordBox.minX * bounds.width),
+          Double((1 - wordBox.maxY) * bounds.height),
+          Double(wordBox.maxX * bounds.width),
+          Double((1 - wordBox.minY) * bounds.height),
+        ]
+      }
       return [
         "id": "ocr-\(pageNumber)-\(index)",
         "kind": "paragraph",
-        "text": item.1.string,
+        "text": candidate.string,
         "page": pageNumber,
         "sourceBounds": [
           "left": left,
@@ -87,9 +107,9 @@ enum AppleVisionOcr {
           "right": right,
           "bottom": bottom,
         ],
-        "wordBounds": [],
+        "wordBounds": wordBounds,
         "readingOrder": index,
-        "confidence": Double(item.1.confidence),
+        "confidence": Double(candidate.confidence),
         "hiddenInReader": false,
       ]
     }

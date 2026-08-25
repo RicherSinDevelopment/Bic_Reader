@@ -7,14 +7,21 @@ import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { type PickedPdf, useDocumentPicker } from "@/hooks/useDocumentPicker";
 
 type AddButtonProps = {
+  isLocked?: boolean;
+  onLockedPress?: () => void;
   onPdfPicked: (pdf: PickedPdf) => void | Promise<void>;
 };
 
-export default function AddButton({ onPdfPicked }: AddButtonProps) {
+export default function AddButton({ isLocked = false, onLockedPress, onPdfPicked }: AddButtonProps) {
   const { pickPdf } = useDocumentPicker();
   const [isPicking, setIsPicking] = useState(false);
 
   const handlePickPdf = async () => {
+    if (isLocked) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      onLockedPress?.();
+      return;
+    }
     if (isPicking) {
       return;
     }

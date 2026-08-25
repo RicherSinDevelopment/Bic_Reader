@@ -2,14 +2,17 @@ import { useAuth } from '@/providers/AuthProvider';
 import { useRevenueCat } from '@/providers/RevenueCatProvider';
 import { usePdfLibrary } from '@/hooks/usePdfLibrary';
 import { useAppearanceStore } from '@/stores/appearanceStore';
+import { resetOnboarding } from '@/lib/onboarding';
 import ProfileBackButton from '@/components/ProfileBackButton';
 import { useRouter } from 'expo-router';
 import {
   BookCheck,
   BookOpen,
   ChevronRight,
+  Globe2,
   Library,
   LogOut,
+  Mail,
   Moon,
   RefreshCw,
   Sparkles,
@@ -17,6 +20,7 @@ import {
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -39,6 +43,8 @@ export default function Profile() {
   const { pdfs, isLoading: isLibraryLoading } = usePdfLibrary();
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
   const preference = useAppearanceStore((state) => state.preference);
   const setPreference = useAppearanceStore((state) => state.setPreference);
   const isDark = useColorScheme() === 'dark';
@@ -62,10 +68,35 @@ export default function Profile() {
     setErrorMessage(null);
 
     try {
+      resetOnboarding();
       await signOut();
-      router.replace('/(auth)/sign-in');
+      router.replace('/onboarding');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unable to sign out.');
+    }
+  };
+
+  const handleRestorePurchases = async () => {
+    if (isRestoring) return;
+    setErrorMessage(null);
+    setRestoreMessage(null);
+    setIsRestoring(true);
+
+    const restored = await restorePurchases();
+    setIsRestoring(false);
+    setRestoreMessage(
+      restored
+        ? 'Premium restored successfully.'
+        : 'No active Premium subscription was found for this store account.',
+    );
+  };
+
+  const openExternalLink = async (url: string, fallbackMessage: string) => {
+    setErrorMessage(null);
+    try {
+      await Linking.openURL(url);
+    } catch {
+      setErrorMessage(fallbackMessage);
     }
   };
 
@@ -163,14 +194,32 @@ export default function Profile() {
 
               <Pressable
                 accessibilityRole="button"
-                disabled={isSubscriptionLoading}
-                onPress={() => void restorePurchases()}
-                style={styles.restoreButton}
+                disabled={isSubscriptionLoading || isRestoring}
+                onPress={() => void handleRestorePurchases()}
+                style={({ pressed }) => [
+                  styles.restoreButton,
+                  (isSubscriptionLoading || isRestoring) && styles.restoreButtonDisabled,
+                  pressed && !isSubscriptionLoading && !isRestoring && styles.restoreButtonPressed,
+                ]}
               >
-                <RefreshCw color="#4F7D1A" size={17} />
-                <Text style={styles.restoreButtonText}>Restore purchases</Text>
+                {isRestoring ? (
+                  <ActivityIndicator color="#4F7D1A" size="small" />
+                ) : (
+                  <RefreshCw color="#4F7D1A" size={17} />
+                )}
+                <Text style={styles.restoreButtonText}>
+                  {isRestoring ? 'Restoring…' : 'Restore purchases'}
+                </Text>
               </Pressable>
 
+              {restoreMessage ? (
+                <Text
+                  accessibilityRole="alert"
+                  style={isPremium ? styles.successText : styles.restoreNoticeText}
+                >
+                  {restoreMessage}
+                </Text>
+              ) : null}
               {purchaseError ? <Text style={styles.errorText}>{purchaseError}</Text> : null}
             </View>
           </View>
@@ -216,6 +265,51 @@ export default function Profile() {
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: `${stats.averageProgress}%` }]} />
               </View>
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Support</Text>
+            <View style={styles.supportCard}>
+              <Pressable
+                accessibilityHint="Opens your email app"
+                accessibilityRole="link"
+                onPress={() => void openExternalLink(
+                  'mailto:suppor@bicreader.com?subject=Bic%20Reader%20Support',
+                  'Unable to open your email app. Email suppor@bicreader.com directly.',
+                )}
+                style={({ pressed }) => [styles.supportRow, pressed && styles.supportRowPressed]}
+              >
+                <View style={styles.supportIcon}>
+                  <Mail color="#4F7D1A" size={20} />
+                </View>
+                <View style={styles.supportCopy}>
+                  <Text style={styles.supportTitle}>Contact us</Text>
+                  <Text style={styles.supportCaption}>suppor@bicreader.com</Text>
+                </View>
+                <ChevronRight color={isDark ? '#7F897A' : '#9A9D95'} size={19} />
+              </Pressable>
+
+              <View style={styles.supportDivider} />
+
+              <Pressable
+                accessibilityHint="Opens the Bic Reader website"
+                accessibilityRole="link"
+                onPress={() => void openExternalLink(
+                  'https://bicreader.com',
+                  'Unable to open bicreader.com.',
+                )}
+                style={({ pressed }) => [styles.supportRow, pressed && styles.supportRowPressed]}
+              >
+                <View style={styles.supportIcon}>
+                  <Globe2 color="#4F7D1A" size={20} />
+                </View>
+                <View style={styles.supportCopy}>
+                  <Text style={styles.supportTitle}>Visit our website</Text>
+                  <Text style={styles.supportCaption}>bicreader.com</Text>
+                </View>
+                <ChevronRight color={isDark ? '#7F897A' : '#9A9D95'} size={19} />
+              </Pressable>
             </View>
           </View>
 
@@ -378,7 +472,11 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
     gap: 7,
     marginTop: 8,
   },
+  restoreButtonDisabled: { opacity: 0.58 },
+  restoreButtonPressed: { opacity: 0.72 },
   restoreButtonText: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 14 },
+  successText: { marginTop: 3, color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 13, textAlign: 'center' },
+  restoreNoticeText: { marginTop: 3, color: isDark ? '#B8BEB3' : '#737270', fontFamily: 'Lato_400Regular', fontSize: 13, lineHeight: 18, textAlign: 'center' },
   libraryLink: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 8 },
   libraryLinkText: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 14 },
   statsGrid: { flexDirection: 'row', gap: 10, marginTop: 12 },
@@ -415,6 +513,34 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
   progressValue: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 15 },
   progressTrack: { height: 8, marginTop: 12, overflow: 'hidden', borderRadius: 4, backgroundColor: isDark ? '#343A31' : '#E5E2D8' },
   progressFill: { height: '100%', borderRadius: 4, backgroundColor: '#639922' },
+  supportCard: {
+    marginTop: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: isDark ? '#343A31' : '#E5E2D8',
+    borderRadius: 20,
+    backgroundColor: isDark ? '#1A1E18' : '#FFFEFB',
+  },
+  supportRow: {
+    minHeight: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+    paddingHorizontal: 17,
+  },
+  supportRowPressed: { backgroundColor: isDark ? '#232820' : '#F3F5EE' },
+  supportIcon: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 13,
+    backgroundColor: isDark ? '#273321' : '#EAF3DE',
+  },
+  supportCopy: { flex: 1, minWidth: 0 },
+  supportTitle: { color: isDark ? '#F4F5F1' : '#2C2C2A', fontFamily: 'Lato_700Bold', fontSize: 15 },
+  supportCaption: { marginTop: 3, color: isDark ? '#A6ADA1' : '#737270', fontFamily: 'Lato_400Regular', fontSize: 12 },
+  supportDivider: { height: StyleSheet.hairlineWidth, marginLeft: 70, backgroundColor: isDark ? '#343A31' : '#E5E2D8' },
   errorText: { marginTop: 18, color: '#B42318', fontFamily: 'Lato_400Regular', fontSize: 13, textAlign: 'center' },
   signOutButton: {
     height: 54,

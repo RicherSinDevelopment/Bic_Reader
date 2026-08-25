@@ -1,7 +1,8 @@
 import ReaderToolbar, {
   ReaderBottomNavItem,
 } from "@/components/Readertoolbar";
-import HorizontalReaderPager from "@/components/HorizontalReaderPager";
+import HorizontalReaderPager, { type ReaderNote } from "@/components/HorizontalReaderPager";
+import PremiumFeatureModal from "@/components/PremiumFeatureModal";
 
 import AI from "@/components/readernavbar/AI";
 import BackgroundSettings from "@/components/readernavbar/BackgroundSettings";
@@ -24,10 +25,13 @@ import { BottomSheetHandle as NativeBottomSheetHandle } from "@gorhom/bottom-she
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   useColorScheme,
   useWindowDimensions,
   View,
@@ -46,6 +50,8 @@ import { Lato_700Bold } from "@expo-google-fonts/lato";
 import { SourceSans3_400Regular } from "@expo-google-fonts/source-sans-3/400Regular";
 import { useAssets } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
+import { useRevenueCat } from "@/providers/RevenueCatProvider";
+import { useRouter } from "expo-router";
 
 type ReaderViewProps = {
   isActive?: boolean;
@@ -86,6 +92,8 @@ type ReaderViewProps = {
 
 const readerMenuItems = [
   { key: "highlight", label: "Highlight" },
+  { key: "addNote", label: "Add Note" },
+  { key: "removeHighlight", label: "Remove Highlight" },
   { key: "askAI", label: "Ask AI" },
 ];
 
@@ -206,12 +214,15 @@ const ReaderView = ({
 }: ReaderViewProps) => {
   const { height: windowHeight } = useWindowDimensions();
   const isDark = useColorScheme() === "dark";
+  const { isPremium } = useRevenueCat();
+  const router = useRouter();
   const [fontAssets] = useAssets([Lato_700Bold, SourceSans3_400Regular]);
   const [latoBoldBase64, setLatoBoldBase64] = useState<string | null>(null);
   const [sourceSansBase64, setSourceSansBase64] = useState<string | null>(null);
   const [activeItem, setActiveItem] =
     useState<ReaderBottomNavItem>("font");
   const [aiExpanded, setAiExpanded] = useState(false);
+  const [showAiPremiumPrompt, setShowAiPremiumPrompt] = useState(false);
   const [backgroundSettingsTab, setBackgroundSettingsTab] = useState<
     "presets" | "font" | "background"
   >("presets");
@@ -266,6 +277,14 @@ const ReaderView = ({
     length: number;
   }> | null>(null);
   const [selectedAIText, setSelectedAIText] = useState("");
+  const [readerNotes, setReaderNotes] = useState<ReaderNote[]>([]);
+  const [noteEditor, setNoteEditor] = useState<{
+    id?: string;
+    ranges: Array<{ blockId: string; offset: number; length: number }>;
+    selectedText: string;
+    source: "paged" | "scroll";
+  } | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
 
   useEffect(() => {
     const latoUri = fontAssets?.[0]?.localUri;
@@ -419,14 +438,80 @@ const ReaderView = ({
         setHighlightPickerVisible(true);
         return;
       }
+      if (event.nativeEvent.key === "removeHighlight") {
+        webViewRef.current?.injectJavaScript(`
+          window.__removeReaderHighlightSelection?.();
+          true;
+        `);
+        return;
+      }
+      if (event.nativeEvent.key === "addNote") {
+        setNoteDraft("");
+        setNoteEditor({
+          ranges: [],
+          selectedText: event.nativeEvent.selectedText?.trim() ?? "",
+          source: "scroll",
+        });
+        return;
+      }
       if (event.nativeEvent.key === "askAI") {
+        if (!isPremium) {
+          setShowAiPremiumPrompt(true);
+          return;
+        }
         setSelectedAIText(event.nativeEvent.selectedText?.trim() ?? "");
         setActiveItem("ai");
         bottomSheetRef.current?.open(0);
       }
     },
-    []
+    [isPremium]
   );
+
+  const openReaderNote = useCallback((noteId: string) => {
+    const note = readerNotes.find((item) => item.id === noteId);
+    if (!note) return;
+    setNoteDraft(note.text);
+    setNoteEditor({
+      id: note.id,
+      ranges: readerNotes
+        .filter((item) => item.id === note.id)
+        .map(({ blockId, offset, length }) => ({ blockId, offset, length })),
+      selectedText: "",
+      source: note.blockId ? "paged" : "scroll",
+    });
+  }, [readerNotes]);
+
+  const saveReaderNote = useCallback(() => {
+    if (!noteEditor || !noteDraft.trim()) return;
+    const noteId = noteEditor.id ?? `note-${Date.now()}`;
+    const savedRanges = noteEditor.ranges.length
+      ? noteEditor.ranges
+      : [{ blockId: "", offset: 0, length: 0 }];
+    setReaderNotes((current) => [
+      ...current.filter((item) => item.id !== noteId),
+      ...savedRanges.map((range) => ({ ...range, id: noteId, text: noteDraft.trim() })),
+    ]);
+    if (noteEditor.source === "scroll" && !noteEditor.id) {
+      webViewRef.current?.injectJavaScript(`
+        window.__applyReaderNote?.(${JSON.stringify(noteId)});
+        true;
+      `);
+    }
+    setNoteEditor(null);
+    setNoteDraft("");
+  }, [noteDraft, noteEditor]);
+
+  const deleteReaderNote = useCallback(() => {
+    if (!noteEditor?.id) return;
+    const noteId = noteEditor.id;
+    setReaderNotes((current) => current.filter((item) => item.id !== noteId));
+    webViewRef.current?.injectJavaScript(`
+      window.__removeReaderNote?.(${JSON.stringify(noteId)});
+      true;
+    `);
+    setNoteEditor(null);
+    setNoteDraft("");
+  }, [noteEditor]);
 
   const applyHighlightColor = useCallback((color: string) => {
     setHighlightPickerVisible(false);
@@ -894,6 +979,28 @@ const textColor = isDark && !colorsCustomized
             box-decoration-break: clone;
             -webkit-box-decoration-break: clone;
             padding: 1px 0;
+          }
+          .reader-note {
+            text-decoration-line: underline;
+            text-decoration-color: #dc2626;
+            text-decoration-thickness: 2px;
+            text-underline-offset: 3px;
+          }
+          .reader-note-marker {
+            display: inline-flex;
+            width: 18px;
+            height: 18px;
+            align-items: center;
+            justify-content: center;
+            margin: 0 3px;
+            padding: 0;
+            border: 0;
+            border-radius: 9px;
+            background: #dc2626;
+            color: #ffffff;
+            font-size: 17px;
+            line-height: 14px;
+            vertical-align: middle;
           }
           .reader-search-highlight {
             border-radius: 3px;
@@ -1417,6 +1524,92 @@ const textColor = isDark && !colorsCustomized
     selection?.removeAllRanges();
     window.__readerSelectionRange = null;
   };
+
+  window.__applyReaderNote = function(noteId) {
+    const selection = window.getSelection();
+    const liveRange = selection && selection.rangeCount > 0
+      ? selection.getRangeAt(0)
+      : null;
+    const range = liveRange && !liveRange.collapsed
+      ? liveRange.cloneRange()
+      : window.__readerSelectionRange;
+    if (!range || range.collapsed) return;
+    const root = range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+      ? range.commonAncestorContainer.parentNode
+      : range.commonAncestorContainer;
+    if (!root) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let node = root.nodeType === Node.TEXT_NODE ? root : walker.nextNode();
+    while (node) {
+      if (range.intersectsNode(node) && !node.parentElement?.closest('.reader-note-marker')) {
+        textNodes.push(node);
+      }
+      node = walker.nextNode();
+    }
+    let lastMarker = null;
+    textNodes.reverse().forEach(function(textNode) {
+      const start = textNode === range.startContainer ? range.startOffset : 0;
+      const end = textNode === range.endContainer ? range.endOffset : (textNode.textContent || '').length;
+      if (start >= end) return;
+      const noteRange = document.createRange();
+      noteRange.setStart(textNode, start);
+      noteRange.setEnd(textNode, end);
+      const underline = document.createElement('span');
+      underline.className = 'reader-note';
+      underline.dataset.noteId = noteId;
+      noteRange.surroundContents(underline);
+      if (!lastMarker) lastMarker = underline;
+    });
+    if (lastMarker) {
+      const marker = document.createElement('button');
+      marker.className = 'reader-note-marker';
+      marker.dataset.openNote = noteId;
+      marker.setAttribute('aria-label', 'Open note');
+      marker.textContent = '•';
+      lastMarker.after(marker);
+    }
+    selection?.removeAllRanges();
+    window.__readerSelectionRange = null;
+  };
+
+  window.__removeReaderNote = function(noteId) {
+    document.querySelectorAll('[data-open-note="' + noteId + '"]').forEach(function(marker) {
+      marker.remove();
+    });
+    document.querySelectorAll('.reader-note[data-note-id="' + noteId + '"]').forEach(function(underline) {
+      const parent = underline.parentNode;
+      underline.replaceWith(document.createTextNode(underline.textContent || ''));
+      parent?.normalize();
+    });
+  };
+
+  window.__removeReaderHighlightSelection = function() {
+    const selection = window.getSelection();
+    const liveRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    const range = liveRange && !liveRange.collapsed ? liveRange.cloneRange() : window.__readerSelectionRange;
+    if (!range || range.collapsed) return;
+    const matchingHighlights = [];
+    document.querySelectorAll('.reader-user-highlight').forEach(function(mark) {
+      if (range.intersectsNode(mark)) matchingHighlights.push(mark);
+    });
+    matchingHighlights.forEach(function(mark) {
+      const parent = mark.parentNode;
+      mark.replaceWith(...Array.from(mark.childNodes));
+      parent?.normalize();
+    });
+    selection?.removeAllRanges();
+    window.__readerSelectionRange = null;
+  };
+
+  document.addEventListener('click', function(event) {
+    const marker = event.target.closest?.('[data-open-note]');
+    if (!marker) return;
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: 'openNote',
+      noteId: marker.dataset.openNote,
+    }));
+  });
 </script>
       </body>
 
@@ -1633,9 +1826,18 @@ const textColor = isDark && !colorsCustomized
 
 
       if (data.type === "askAI") {
+        if (!isPremium) {
+          setShowAiPremiumPrompt(true);
+          return;
+        }
         setSelectedAIText(typeof data.text === "string" ? data.text.trim() : "");
         setActiveItem("ai");
         bottomSheetRef.current?.open(0);
+        return;
+      }
+
+      if (data.type === "openNote" && typeof data.noteId === "string") {
+        openReaderNote(data.noteId);
         return;
       }
 
@@ -1703,6 +1905,11 @@ const textColor = isDark && !colorsCustomized
   const handleToolbarPress = (
     item: ReaderBottomNavItem
   ) => {
+
+    if (item === "ai" && !isPremium) {
+      setShowAiPremiumPrompt(true);
+      return;
+    }
 
     /*
      * Update selected toolbar item.
@@ -1821,6 +2028,69 @@ const textColor = isDark && !colorsCustomized
         <Modal
           animationType="fade"
           transparent
+          visible={noteEditor !== null}
+          onRequestClose={() => setNoteEditor(null)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 18 : 0}
+            style={styles.noteModalContainer}
+          >
+            <Pressable
+              accessibilityLabel="Close note editor"
+              onPress={() => setNoteEditor(null)}
+              style={styles.noteModalBackdrop}
+            />
+            <View style={[styles.noteCard, isDark && styles.noteCardDark]}>
+              <Text style={[styles.noteEyebrow, isDark && styles.noteMutedDark]}>NOTE</Text>
+              <Text style={[styles.noteTitle, isDark && styles.noteTextDark]}>
+                {noteEditor?.id ? "Edit note" : "Add a note"}
+              </Text>
+              {noteEditor?.selectedText ? (
+                <Text numberOfLines={3} style={[styles.noteQuote, isDark && styles.noteQuoteDark]}>
+                  “{noteEditor.selectedText}”
+                </Text>
+              ) : null}
+              <TextInput
+                autoFocus
+                multiline
+                onChangeText={setNoteDraft}
+                placeholder="Write your note…"
+                placeholderTextColor={isDark ? "#7F897A" : "#9A9D95"}
+                style={[styles.noteInput, isDark && styles.noteInputDark]}
+                textAlignVertical="top"
+                value={noteDraft}
+              />
+              <View style={styles.noteActions}>
+                <Pressable onPress={() => setNoteEditor(null)} style={styles.noteCancelButton}>
+                  <Text style={[styles.noteCancelText, isDark && styles.noteMutedDark]}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  disabled={!noteDraft.trim()}
+                  onPress={saveReaderNote}
+                  style={[styles.noteSaveButton, !noteDraft.trim() && styles.noteSaveButtonDisabled]}
+                >
+                  <Text style={styles.noteSaveText}>Save note</Text>
+                </Pressable>
+              </View>
+              {noteEditor?.id ? (
+                <View style={styles.noteDestructiveActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={deleteReaderNote}
+                    style={styles.noteDestructiveButton}
+                  >
+                    <Text style={styles.noteDestructiveText}>Delete note</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        <Modal
+          animationType="fade"
+          transparent
           visible={highlightPickerVisible}
           onRequestClose={closeHighlightPicker}
         >
@@ -1893,12 +2163,31 @@ const textColor = isDark && !colorsCustomized
                   pendingPagerHighlightRef.current = highlights;
                   setHighlightPickerVisible(true);
                 }}
+                onSelectionRemoveHighlight={(ranges) => {
+                  setPagerHighlights((current) => current.filter((highlight) =>
+                    !ranges.some((range) =>
+                      highlight.blockId === range.blockId &&
+                      highlight.offset < range.offset + range.length &&
+                      highlight.offset + highlight.length > range.offset
+                    )
+                  ));
+                }}
+                onSelectionAddNote={(ranges, selectedText) => {
+                  setNoteDraft("");
+                  setNoteEditor({ ranges, selectedText, source: "paged" });
+                }}
+                onOpenNote={openReaderNote}
                 onSelectionAskAI={(text) => {
+                  if (!isPremium) {
+                    setShowAiPremiumPrompt(true);
+                    return;
+                  }
                   setSelectedAIText(text.trim());
                   setActiveItem("ai");
                   bottomSheetRef.current?.open(0);
                 }}
                 readingDirection={readerDirection}
+                userNotes={readerNotes}
                 spokenWordHighlight={spokenWordHighlight}
                 guideMode={readerGuideMode}
                 guideBackgroundDimming={guideBackgroundDimming}
@@ -3271,6 +3560,7 @@ const textColor = isDark && !colorsCustomized
   >
     <ReaderToolbar
       activeItem={activeItem}
+      isAiLocked={!isPremium}
       onSelectItem={handleToolbarPress}
     />
   </Animated.View>
@@ -3345,6 +3635,17 @@ const textColor = isDark && !colorsCustomized
 
         </BottomSheetPortal>
 
+        <PremiumFeatureModal
+          description="Ask questions, summarize difficult sections, and understand your document with the Bic Reader AI Assistant."
+          featureName="AI Assistant is a Premium feature"
+          onClose={() => setShowAiPremiumPrompt(false)}
+          onUpgrade={() => {
+            setShowAiPremiumPrompt(false);
+            router.push('/onboarding/premium');
+          }}
+          visible={showAiPremiumPrompt}
+        />
+
       </View>
 
     </BottomSheet>
@@ -3354,6 +3655,53 @@ const textColor = isDark && !colorsCustomized
 export default ReaderView;
 
 const styles = StyleSheet.create({
+  noteModalContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 22,
+  },
+  noteModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(17, 24, 14, 0.48)",
+  },
+  noteCard: {
+    width: "100%",
+    maxWidth: 390,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#E2E5DC",
+    borderRadius: 24,
+    backgroundColor: "#FFFEFA",
+    shadowColor: "#11180C",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.2,
+    shadowRadius: 26,
+    elevation: 12,
+  },
+  noteCardDark: { borderColor: "#343A31", backgroundColor: "#1A1E18" },
+  noteEyebrow: { color: "#B42318", fontFamily: "Lato_700Bold", fontSize: 10, letterSpacing: 1.2 },
+  noteTitle: { marginTop: 5, color: "#20251D", fontFamily: "Lato_700Bold", fontSize: 22 },
+  noteTextDark: { color: "#F4F5F1" },
+  noteMutedDark: { color: "#A6ADA1" },
+  noteQuote: { marginTop: 12, color: "#687061", fontFamily: "SourceSans3_400Regular", fontSize: 14, fontStyle: "italic", lineHeight: 20 },
+  noteQuoteDark: { color: "#B8BEB3" },
+  noteInput: { minHeight: 125, marginTop: 15, padding: 14, borderWidth: 1, borderColor: "#D9DED2", borderRadius: 15, color: "#20251D", backgroundColor: "#F8F8F3", fontFamily: "SourceSans3_400Regular", fontSize: 16, lineHeight: 22 },
+  noteInputDark: { borderColor: "#3B4237", color: "#F4F5F1", backgroundColor: "#121510" },
+  noteActions: { marginTop: 16, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
+  noteCancelButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16 },
+  noteCancelText: { color: "#66705E", fontFamily: "Lato_700Bold", fontSize: 14 },
+  noteSaveButton: { minHeight: 46, justifyContent: "center", paddingHorizontal: 20, borderRadius: 14, backgroundColor: "#639922" },
+  noteSaveButtonDisabled: { opacity: 0.45 },
+  noteSaveText: { color: "#FFFFFF", fontFamily: "Lato_700Bold", fontSize: 14 },
+  noteDestructiveActions: {
+    marginTop: 15,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(180, 35, 24, 0.2)",
+  },
+  noteDestructiveButton: { minHeight: 42, alignItems: "center", justifyContent: "center" },
+  noteDestructiveText: { color: "#B42318", fontFamily: "Lato_700Bold", fontSize: 14 },
   lineGuideClose: {
     position: "absolute",
     bottom: 24,

@@ -1,4 +1,5 @@
 import AddButton from "@/components/HomePageui/AddFilebutton";
+import PremiumFeatureModal from "@/components/PremiumFeatureModal";
 import SearchButton from "@/components/HomePageui/SearchButton";
 import SettingsButton from "@/components/HomePageui/settingsbutton";
 import SortButton, {
@@ -8,6 +9,9 @@ import PdfLayoutTabs from "@/components/HomePageui/ViewStyletab";
 import PdfLibrary from "@/hooks/displaypdfs";
 import type { PickedPdf } from "@/hooks/useDocumentPicker";
 import { usePdfLibrary } from "@/hooks/usePdfLibrary";
+import { FREE_PDF_LIMIT } from "@/lib/premiumFeatures";
+import { useRevenueCat } from "@/providers/RevenueCatProvider";
+import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { Modal, Pressable, Text, View } from "react-native";
 
@@ -15,8 +19,13 @@ import { Modal, Pressable, Text, View } from "react-native";
 const HomePage = () => {
   const [numColumns, setNumColumns] = useState<1 | 2 | 3>(1);
   const { pdfs, importPdf, deletePdf, renamePdf } = usePdfLibrary();
+  const { isPremium } = useRevenueCat();
+  const router = useRouter();
   const [sortOption, setSortOption] = useState<PdfSortOption>("newest");
   const [duplicatePdfName, setDuplicatePdfName] = useState<string | null>(null);
+  const [showLibraryLimit, setShowLibraryLimit] = useState(false);
+  const freePdfUsage = Math.min(pdfs.length, FREE_PDF_LIMIT);
+  const isAtFreeLimit = !isPremium && pdfs.length >= FREE_PDF_LIMIT;
 
   const sortedPdfs = useMemo(() => {
     return [...pdfs].sort((firstPdf, secondPdf) => {
@@ -35,6 +44,10 @@ const HomePage = () => {
   }, [pdfs, sortOption]);
 
   const handlePdfPicked = async (pdf: PickedPdf) => {
+    if (isAtFreeLimit) {
+      setShowLibraryLimit(true);
+      return;
+    }
     const result = await importPdf(pdf);
 
     if (result.status === "duplicate") {
@@ -104,6 +117,31 @@ const HomePage = () => {
       </View>
     </View>
 
+    {!isPremium ? (
+      <View className="mt-4 rounded-2xl border border-[#DDE3D5] bg-white/70 px-4 py-3 dark:border-[#343A31] dark:bg-[#1A1E18]">
+        <View className="flex-row items-center justify-between">
+          <Text
+            className="text-[#485242] dark:text-[#F4F5F1]"
+            style={{ fontFamily: "Lato_700Bold", fontSize: 13 }}
+          >
+            Free library
+          </Text>
+          <Text style={{ color: "#639922", fontFamily: "Lato_700Bold", fontSize: 13 }}>
+            {freePdfUsage} of {FREE_PDF_LIMIT} PDFs
+          </Text>
+        </View>
+        <View className="mt-2 h-2 overflow-hidden rounded-full bg-[#DDE3D5] dark:bg-[#343A31]">
+          <View
+            className="h-full rounded-full bg-[#639922]"
+            style={{ width: `${(freePdfUsage / FREE_PDF_LIMIT) * 100}%` }}
+          />
+        </View>
+        <Text className="mt-2 text-xs text-black/50 dark:text-white/50">
+          {isAtFreeLimit ? "Upgrade to add more PDFs." : `${FREE_PDF_LIMIT - freePdfUsage} free PDF slots remaining.`}
+        </Text>
+      </View>
+    ) : null}
+
   </View>
 
 
@@ -124,7 +162,11 @@ const HomePage = () => {
   {/* ========================= */}
 
   <View className="absolute bottom-8 left-6 right-6">
-    <AddButton onPdfPicked={handlePdfPicked} />
+    <AddButton
+      isLocked={isAtFreeLimit}
+      onLockedPress={() => setShowLibraryLimit(true)}
+      onPdfPicked={handlePdfPicked}
+    />
   </View>
 
   <Modal
@@ -162,6 +204,17 @@ const HomePage = () => {
       </View>
     </View>
   </Modal>
+
+  <PremiumFeatureModal
+    description={`The free plan includes up to ${FREE_PDF_LIMIT} PDFs. Upgrade for an unlimited library while keeping everything already added.`}
+    featureName="Your free library is full"
+    onClose={() => setShowLibraryLimit(false)}
+    onUpgrade={() => {
+      setShowLibraryLimit(false);
+      router.push('/onboarding/premium');
+    }}
+    visible={showLibraryLimit}
+  />
 
 </View>
 

@@ -35,6 +35,7 @@ type PageAnchor = {
 type GuideLine = { left: number; top: number; width: number; height: number; text?: string };
 
 type TextRange = { blockId: string; offset: number; length: number };
+export type ReaderNote = TextRange & { id: string; text: string };
 
 type Props = {
   blocks: ExtractedPdfBlock[];
@@ -45,7 +46,11 @@ type Props = {
     color: string;
   }>;
   onSelectionHighlightRequest?: (highlights: TextRange[]) => void;
+  onSelectionRemoveHighlight?: (highlights: TextRange[]) => void;
   onSelectionAskAI?: (text: string) => void;
+  onSelectionAddNote?: (ranges: TextRange[], selectedText: string) => void;
+  onOpenNote?: (noteId: string) => void;
+  userNotes?: ReaderNote[];
   readingDirection?: "ltr" | "rtl";
   spokenWordHighlight?: {
     blockId: string;
@@ -88,6 +93,8 @@ type Props = {
 
 const horizontalReaderMenuItems = [
   { key: "highlight", label: "Highlight" },
+  { key: "addNote", label: "Add Note" },
+  { key: "removeHighlight", label: "Remove Highlight" },
   { key: "askAI", label: "Ask AI" },
 ];
 
@@ -120,7 +127,11 @@ function HorizontalSelectablePage({
   textColor,
   bottomPadding,
   onHighlight,
+  onRemoveHighlight,
+  onAddNote,
+  onOpenNote,
   onAskAI,
+  userNotes,
   onReaderReveal,
   onReady,
 }: {
@@ -144,7 +155,11 @@ function HorizontalSelectablePage({
   textColor: string;
   bottomPadding: number;
   onHighlight?: (ranges: TextRange[]) => void;
+  onRemoveHighlight?: (ranges: TextRange[]) => void;
+  onAddNote?: (ranges: TextRange[], selectedText: string) => void;
+  onOpenNote?: (noteId: string) => void;
   onAskAI?: (text: string) => void;
+  userNotes: ReaderNote[];
   onReaderReveal?: () => void;
   onReady?: () => void;
 }) {
@@ -160,6 +175,17 @@ function HorizontalSelectablePage({
       start: Math.max(0, highlight.offset - segment.startOffset),
       end: Math.min(segment.text.length, highlight.offset + highlight.length - segment.startOffset),
       color: highlight.color,
+      noteId: undefined as string | undefined,
+    }));
+    (userNotes ?? []).filter((note) =>
+      note.blockId === segment.blockId &&
+      note.offset < segment.startOffset + segment.text.length &&
+      note.offset + note.length > segment.startOffset
+    ).forEach((note) => highlights.push({
+      start: Math.max(0, note.offset - segment.startOffset),
+      end: Math.min(segment.text.length, note.offset + note.length - segment.startOffset),
+      color: "transparent",
+      noteId: note.id,
     }));
     [searchHighlight, switchHighlight].forEach((highlight, index) => {
       if (!highlight || highlight.blockId !== segment.blockId) return;
@@ -169,6 +195,7 @@ function HorizontalSelectablePage({
         start,
         end: Math.min(segment.text.length, start + highlight.length),
         color: index === 0 ? "#facc15" : "rgba(250, 204, 21, 0.68)",
+        noteId: undefined,
       });
     });
     highlights.sort((left, right) => left.start - right.start);
@@ -179,19 +206,22 @@ function HorizontalSelectablePage({
       const before = escapeHtml(displayText(segment.text.slice(cursor, start)));
       const selected = escapeHtml(displayText(segment.text.slice(start, highlight.end)));
       cursor = highlight.end;
+      if (highlight.noteId) {
+        return `${before}<span class="reader-note" data-note-id="${escapeHtml(highlight.noteId)}">${selected}</span><button class="reader-note-marker" data-open-note="${escapeHtml(highlight.noteId)}" aria-label="Open note">•</button>`;
+      }
       return `${before}<mark class="reader-user-highlight" style="background-color:${escapeHtml(highlight.color)}">${selected}</mark>`;
     }).join("") + escapeHtml(displayText(segment.text.slice(cursor)));
     const scale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
     const indent = segment.paragraphStart && !segment.sectionOpening ? "&#8195;&#8194;" : "";
     return `<div class="segment ${segment.sectionOpening ? "section-opening" : ""}" data-block-id="${escapeHtml(segment.blockId)}" data-start="${segment.startOffset}" data-prefix="${indent ? 2 : 0}" style="font-size:${fontSize * scale}px;line-height:${fontSize * scale * lineHeight}px;margin-top:${segment.spacingBefore}px;margin-bottom:${segment.spacingAfter}px">${indent}${contents}</div>`;
-  }).join(""), [displayText, fontSize, lineHeight, page, searchHighlight, switchHighlight, userHighlights]);
+  }).join(""), [displayText, fontSize, lineHeight, page, searchHighlight, switchHighlight, userHighlights, userNotes]);
 
   const webFontFamily = fontFamily === "Lato_700Bold"
     ? "LatoReaderBold"
     : fontFamily === "SourceSans3_400Regular" ? "SourceSansReader" : fontFamily;
   const html = useMemo(() => `<!doctype html><html dir="${readingDirection}"><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
     @font-face{font-family:'LatoReaderBold';src:url('data:font/ttf;base64,${latoBoldBase64 ?? ""}') format('truetype');font-weight:700;font-display:block}@font-face{font-family:'SourceSansReader';src:url('data:font/ttf;base64,${sourceSansBase64 ?? ""}') format('truetype');font-weight:400;font-display:block}
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:20px 0 ${bottomPadding}px;color:${textColor};font-family:${JSON.stringify(webFontFamily)},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.reader-user-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}::selection{background:#93c5fd;color:#1e293b}</style></head><body>${markup}<script>
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:20px 0 ${bottomPadding}px;color:${textColor};font-family:${JSON.stringify(webFontFamily)},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.reader-user-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body>${markup}<script>
     window.__selectionRanges=[];
     function cleanLength(value){return String(value||'').replace(/\\u00ad/g,'').length}
     function rawIndexForClean(value,target){let clean=0;for(let index=0;index<value.length;index++){if(value[index]!=='\\u00ad'){if(clean===target)return index;clean++}}return value.length}
@@ -218,6 +248,7 @@ function HorizontalSelectablePage({
       window.ReactNativeWebView.postMessage(JSON.stringify({type:'selection',text:selection.toString(),ranges:ranges}));
     }
     let timer;document.addEventListener('selectionchange',function(){clearTimeout(timer);timer=setTimeout(captureSelection,80)});
+    document.addEventListener('click',function(event){const marker=event.target.closest('[data-open-note]');if(marker)window.ReactNativeWebView.postMessage(JSON.stringify({type:'openNote',noteId:marker.dataset.openNote}))});
   </script></body></html>`, [automaticHyphenation, backgroundColor, bold, bottomPadding, latoBoldBase64, letterSpacing, markup, readingDirection, sourceSansBase64, textColor, webFontFamily, wordSpacing]);
 
   const source = useMemo(() => ({ html }), [html]);
@@ -251,12 +282,20 @@ function HorizontalSelectablePage({
           const hadSelection = selectionRangesRef.current.length > 0;
           selectionRangesRef.current = Array.isArray(message.ranges) ? message.ranges : [];
           if (hadSelection && !selectionRangesRef.current.length) onReaderReveal?.();
+        } else if (message.type === "openNote" && typeof message.noteId === "string") {
+          onOpenNote?.(message.noteId);
         }
       } catch {}
     }}
     onCustomMenuSelection={(event) => {
       if (event.nativeEvent.key === "highlight") {
         if (selectionRangesRef.current.length) onHighlight?.(selectionRangesRef.current);
+      } else if (event.nativeEvent.key === "removeHighlight") {
+        if (selectionRangesRef.current.length) onRemoveHighlight?.(selectionRangesRef.current);
+      } else if (event.nativeEvent.key === "addNote") {
+        if (selectionRangesRef.current.length) {
+          onAddNote?.(selectionRangesRef.current, event.nativeEvent.selectedText?.trim() ?? "");
+        }
       } else if (event.nativeEvent.key === "askAI") {
         onAskAI?.(event.nativeEvent.selectedText?.trim() ?? "");
       }
@@ -363,7 +402,11 @@ export default function HorizontalReaderPager({
   blocks,
   userHighlights = [],
   onSelectionHighlightRequest,
+  onSelectionRemoveHighlight,
   onSelectionAskAI,
+  onSelectionAddNote,
+  onOpenNote,
+  userNotes = [],
   readingDirection = "ltr",
   spokenWordHighlight,
   guideMode = null,
@@ -1249,6 +1292,7 @@ export default function HorizontalReaderPager({
               <HorizontalSelectablePage
                 page={page}
                 userHighlights={userHighlights}
+                userNotes={userNotes}
                 spokenWordHighlight={spokenWordHighlight}
                 searchHighlight={selectableSearchHighlight}
                 switchHighlight={selectableSwitchHighlight}
@@ -1267,6 +1311,9 @@ export default function HorizontalReaderPager({
                 textColor={textColor}
                 bottomPadding={12 + insets.bottom}
                 onHighlight={onSelectionHighlightRequest}
+                onRemoveHighlight={onSelectionRemoveHighlight}
+                onAddNote={onSelectionAddNote}
+                onOpenNote={onOpenNote}
                 onAskAI={onSelectionAskAI}
                 onReaderReveal={onReaderReveal}
                 onReady={reportReady}

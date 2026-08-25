@@ -1,6 +1,6 @@
 import { useAuth } from '@/providers/AuthProvider';
-import type { CustomerInfo } from 'react-native-purchases';
-import Purchases, { LOG_LEVEL } from 'react-native-purchases';
+import type { CustomerInfo, PurchasesError, PurchasesPackage } from 'react-native-purchases';
+import Purchases, { LOG_LEVEL, PURCHASES_ERROR_CODE } from 'react-native-purchases';
 import RevenueCatUI, { PAYWALL_RESULT } from 'react-native-purchases-ui';
 import { useSegments } from 'expo-router';
 import {
@@ -15,7 +15,7 @@ import {
 import { Platform } from 'react-native';
 
 const API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY;
-const ENTITLEMENT_ID = process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID ?? 'premium';
+const ENTITLEMENT_ID = process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID ?? 'pro';
 
 let isConfigured = false;
 let configuredUserId: string | null = null;
@@ -24,6 +24,8 @@ type RevenueCatContextValue = {
   error: string | null;
   isLoading: boolean;
   isPremium: boolean;
+  loadPackages: () => Promise<PurchasesPackage[]>;
+  purchasePackage: (selectedPackage: PurchasesPackage) => Promise<'purchased' | 'cancelled' | 'failed'>;
   refreshCustomerInfo: () => Promise<void>;
   restorePurchases: () => Promise<boolean>;
   showPaywall: () => Promise<boolean>;
@@ -78,13 +80,6 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    const userId = session?.user.id;
-    if (!userId) {
-      setIsPremium(false);
-      setIsLoading(false);
-      return;
-    }
-
     if (!API_KEY) {
       setError('RevenueCat API key is missing.');
       setIsLoading(false);
@@ -96,16 +91,25 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
     const initialize = async () => {
       try {
         setIsLoading(true);
+        const userId = session?.user.id ?? null;
 
         if (!isConfigured) {
           Purchases.setLogLevel(__DEV__ ? LOG_LEVEL.DEBUG : LOG_LEVEL.WARN);
-          Purchases.configure({ apiKey: API_KEY, appUserID: userId });
+          Purchases.configure({ apiKey: API_KEY, ...(userId ? { appUserID: userId } : {}) });
           isConfigured = true;
           configuredUserId = userId;
           if (isMounted) setIsReady(true);
-        } else if (configuredUserId !== userId) {
+        } else if (userId && configuredUserId !== userId) {
           const { customerInfo } = await Purchases.logIn(userId);
           configuredUserId = userId;
+          if (isMounted) {
+            setIsReady(true);
+            applyCustomerInfo(customerInfo);
+          }
+          return;
+        } else if (!userId && configuredUserId) {
+          const customerInfo = await Purchases.logOut();
+          configuredUserId = null;
           if (isMounted) {
             setIsReady(true);
             applyCustomerInfo(customerInfo);
@@ -130,6 +134,37 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
       isMounted = false;
     };
   }, [applyCustomerInfo, isAuthActionRoute, isAuthLoading, session?.user.id]);
+
+  const loadPackages = useCallback(async () => {
+    if (!isConfigured || Platform.OS === 'web') return [];
+    try {
+      setError(null);
+      return (await Purchases.getOfferings()).current?.availablePackages ?? [];
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Unable to load subscriptions.');
+      return [];
+    }
+  }, []);
+
+  const purchasePackage = useCallback(async (selectedPackage: PurchasesPackage) => {
+    if (!isConfigured || Platform.OS === 'web') return 'failed' as const;
+    try {
+      setError(null);
+      const { customerInfo } = await Purchases.purchasePackage(selectedPackage);
+      applyCustomerInfo(customerInfo);
+      return hasPremiumEntitlement(customerInfo) ? 'purchased' as const : 'failed' as const;
+    } catch (caughtError) {
+      const purchaseError = caughtError as Partial<PurchasesError>;
+      if (
+        purchaseError.code === PURCHASES_ERROR_CODE.PURCHASE_CANCELLED_ERROR ||
+        purchaseError.userCancelled
+      ) {
+        return 'cancelled' as const;
+      }
+      setError(caughtError instanceof Error ? caughtError.message : 'Unable to complete purchase.');
+      return 'failed' as const;
+    }
+  }, [applyCustomerInfo]);
 
   useEffect(() => {
     if (!isReady || Platform.OS === 'web') return;
@@ -179,8 +214,8 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
   }, [applyCustomerInfo]);
 
   const value = useMemo<RevenueCatContextValue>(
-    () => ({ error, isLoading, isPremium, refreshCustomerInfo, restorePurchases, showPaywall }),
-    [error, isLoading, isPremium, refreshCustomerInfo, restorePurchases, showPaywall],
+    () => ({ error, isLoading, isPremium, loadPackages, purchasePackage, refreshCustomerInfo, restorePurchases, showPaywall }),
+    [error, isLoading, isPremium, loadPackages, purchasePackage, refreshCustomerInfo, restorePurchases, showPaywall],
   );
 
   return <RevenueCatContext.Provider value={value}>{children}</RevenueCatContext.Provider>;

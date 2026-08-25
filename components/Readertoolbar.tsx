@@ -1,5 +1,6 @@
 import {
   CaseSensitive,
+  LockKeyhole,
   Settings,
   Sparkles,
   Speech,
@@ -34,10 +35,11 @@ const toolbarLabels: Record<ReaderBottomNavItem, string> = {
 
 type Props = {
   activeItem: ReaderBottomNavItem;
+  isAiLocked?: boolean;
   onSelectItem: (item: ReaderBottomNavItem) => void;
 };
 
-export default function ReaderToolbar({ activeItem, onSelectItem }: Props) {
+export default function ReaderToolbar({ activeItem, isAiLocked = false, onSelectItem }: Props) {
   const isDark = useColorScheme() === "dark";
   const styles = React.useMemo(() => createStyles(isDark), [isDark]);
 
@@ -90,6 +92,11 @@ export default function ReaderToolbar({ activeItem, onSelectItem }: Props) {
             ]}
           >
             {renderIcon(item.id)}
+            {item.id === "ai" && isAiLocked ? (
+              <View style={styles.lockBadge}>
+                <LockKeyhole color="#FFFFFF" size={9} strokeWidth={2.5} />
+              </View>
+            ) : null}
           </Pressable>
         );
       })}
@@ -140,5 +147,18 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
   pressedItem: {
     opacity: 0.62,
     transform: [{ scale: 0.94 }],
+  },
+  lockBadge: {
+    position: "absolute",
+    top: 2,
+    right: "22%",
+    width: 17,
+    height: 17,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#639922",
+    borderWidth: 2,
+    borderColor: isDark ? "#1A1E18" : "#FFFFFF",
   },
 });

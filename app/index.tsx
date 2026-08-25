@@ -2,6 +2,7 @@ import { Redirect } from 'expo-router';
 import { ActivityIndicator, StyleSheet, useColorScheme, View } from 'react-native';
 
 import { useAuth } from '@/providers/AuthProvider';
+import { hasCompletedOnboarding } from '@/lib/onboarding';
 
 export default function Index() {
   const { isLoading, session } = useAuth();
@@ -20,7 +21,11 @@ export default function Index() {
     );
   }
 
-  return <Redirect href={session ? '/HomePage' : '/(auth)/sign-in'} />;
+  return (
+    <Redirect
+      href={session ? '/HomePage' : hasCompletedOnboarding() ? '/(auth)/sign-in' : '/onboarding'}
+    />
+  );
 }
 
 const styles = StyleSheet.create({

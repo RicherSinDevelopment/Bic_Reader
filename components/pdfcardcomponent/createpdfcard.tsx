@@ -230,7 +230,7 @@ export default function PdfCoverCard({
       </Pressable>
 
       {/* Meta row: name, completion %, date opened */}
-      <View className="mt-2 flex-row items-start">
+      <View className="mt-2 flex-row items-center">
         <View className="min-w-0 flex-1">
           <Text numberOfLines={1} className="font-lato-bold text-black text-sm dark:text-[#F4F5F1]">
             {displayName}

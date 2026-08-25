@@ -265,6 +265,17 @@ const ReaderView = ({
   const [webViewReady, setWebViewReady] = useState(false);
   const [appendPass, setAppendPass] = useState(0);
   const [highlightPickerVisible, setHighlightPickerVisible] = useState(false);
+  const [pagerHighlights, setPagerHighlights] = useState<Array<{
+    blockId: string;
+    offset: number;
+    length: number;
+    color: string;
+  }>>([]);
+  const pendingPagerHighlightRef = useRef<{
+    blockId: string;
+    offset: number;
+    length: number;
+  } | null>(null);
   const [selectedAIText, setSelectedAIText] = useState("");
 
   useEffect(() => {
@@ -411,6 +422,7 @@ const ReaderView = ({
   const handleCustomMenuSelection = useCallback(
     (event: { nativeEvent: { key: string; selectedText?: string } }) => {
       if (event.nativeEvent.key === "highlight") {
+        pendingPagerHighlightRef.current = null;
         setHighlightPickerVisible(true);
         return;
       }
@@ -425,10 +437,28 @@ const ReaderView = ({
 
   const applyHighlightColor = useCallback((color: string) => {
     setHighlightPickerVisible(false);
+    const pendingPagerHighlight = pendingPagerHighlightRef.current;
+    if (pendingPagerHighlight) {
+      pendingPagerHighlightRef.current = null;
+      setPagerHighlights((current) => [
+        ...current.filter((highlight) => !(
+          highlight.blockId === pendingPagerHighlight.blockId &&
+          highlight.offset === pendingPagerHighlight.offset &&
+          highlight.length === pendingPagerHighlight.length
+        )),
+        { ...pendingPagerHighlight, color },
+      ]);
+      return;
+    }
     webViewRef.current?.injectJavaScript(`
       window.__applyReaderHighlight?.(${JSON.stringify(color)});
       true;
     `);
+  }, []);
+
+  const closeHighlightPicker = useCallback(() => {
+    pendingPagerHighlightRef.current = null;
+    setHighlightPickerVisible(false);
   }, []);
 
   const fontSize = useReaderSettingsStore(
@@ -1824,11 +1854,11 @@ const textColor = isDark && !colorsCustomized
           animationType="fade"
           transparent
           visible={highlightPickerVisible}
-          onRequestClose={() => setHighlightPickerVisible(false)}
+          onRequestClose={closeHighlightPicker}
         >
           <Pressable
             accessibilityLabel="Close highlight color picker"
-            onPress={() => setHighlightPickerVisible(false)}
+            onPress={closeHighlightPicker}
             style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
           >
             <Pressable
@@ -1890,6 +1920,11 @@ const textColor = isDark && !colorsCustomized
             <View style={StyleSheet.absoluteFill}>
               <HorizontalReaderPager
                 blocks={blocks}
+                userHighlights={pagerHighlights}
+                onWordHighlightRequest={(highlight) => {
+                  pendingPagerHighlightRef.current = highlight;
+                  setHighlightPickerVisible(true);
+                }}
                 readingDirection={readerDirection}
                 spokenWordHighlight={spokenWordHighlight}
                 guideMode={readerGuideMode}

@@ -1,8 +1,8 @@
 import type { ExtractedPdfDocument } from "@/modules/bic-pdf-reader";
 import type { SQLiteDatabase } from "expo-sqlite";
 
-// Version 7 adds word-level Apple Vision bounds for scanned-page highlights.
-export const PDF_EXTRACTION_ENGINE_VERSION = 7;
+// Version 15 restores the proven Apple Vision recognition path for scanned pages.
+export const PDF_EXTRACTION_ENGINE_VERSION = 15;
 
 export async function getCachedPdfExtraction(db: SQLiteDatabase, pdfId: string) {
   const row = await db.getFirstAsync<{ document_json: string; engine_version: number }>(

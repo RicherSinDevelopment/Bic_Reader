@@ -35,6 +35,17 @@ type GuideLine = { left: number; top: number; width: number; height: number; tex
 
 type Props = {
   blocks: ExtractedPdfBlock[];
+  userHighlights?: Array<{
+    blockId: string;
+    offset: number;
+    length: number;
+    color: string;
+  }>;
+  onWordHighlightRequest?: (highlight: {
+    blockId: string;
+    offset: number;
+    length: number;
+  }) => void;
   readingDirection?: "ltr" | "rtl";
   spokenWordHighlight?: {
     blockId: string;
@@ -168,6 +179,8 @@ function pageAnchor(
 
 export default function HorizontalReaderPager({
   blocks,
+  userHighlights = [],
+  onWordHighlightRequest,
   readingDirection = "ltr",
   spokenWordHighlight,
   guideMode = null,
@@ -767,6 +780,41 @@ export default function HorizontalReaderPager({
       ...typographyStyle,
       backgroundColor: "rgba(250, 204, 21, 0.82)",
     };
+    const renderHighlightableText = () => {
+      const matches = Array.from(segment.text.matchAll(/\S+/g));
+      let cursor = 0;
+      return matches.flatMap((match, wordIndex) => {
+        const start = match.index ?? cursor;
+        const absoluteOffset = segment.startOffset + start;
+        const savedHighlight = userHighlights.find((highlight) =>
+          highlight.blockId === segment.blockId &&
+          highlight.offset === absoluteOffset &&
+          highlight.length === match[0].length
+        );
+        const leading = segment.text.slice(cursor, start);
+        cursor = start + match[0].length;
+        const word = (
+          <Text
+            key={`${absoluteOffset}:${match[0]}`}
+            onLongPress={() => onWordHighlightRequest?.({
+              blockId: segment.blockId,
+              offset: absoluteOffset,
+              length: match[0].length,
+            })}
+            style={[
+              wordIndex === 0 && openingWord ? openingWordStyle : undefined,
+              savedHighlight ? {
+                backgroundColor: savedHighlight.color,
+                borderRadius: 3,
+              } : undefined,
+            ]}
+          >
+            {textForDisplay(match[0])}
+          </Text>
+        );
+        return [leading, word];
+      }).concat(segment.text.slice(cursor));
+    };
 
     return (
       <Text
@@ -844,16 +892,7 @@ export default function HorizontalReaderPager({
             </Text>
             {textForDisplay(segment.text.slice(switchStart + switchLength))}
           </>
-        ) : openingWord ? (
-          <>
-            <Text
-              style={openingWordStyle}
-            >
-              {textForDisplay(openingWord)}
-            </Text>
-            {textForDisplay(segment.text.slice(openingWord.length))}
-          </>
-        ) : textForDisplay(segment.text)}
+        ) : renderHighlightableText()}
       </Text>
     );
   };

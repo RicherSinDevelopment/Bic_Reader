@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Animated, Pressable, StyleSheet, View } from "react-native";
+import { Animated, Pressable, StyleSheet, useColorScheme, View } from "react-native";
 import { GlassView, isGlassEffectAPIAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
@@ -35,6 +35,7 @@ export default function PdfLayoutTabs({ onColumnsChange }: PdfLayoutTabsProps) {
   const [selectedColumns, setSelectedColumns] = useState<1 | 2 | 3>(1);
   const [indicatorX] = useState(() => new Animated.Value(0));
   const canUseGlass = isGlassEffectAPIAvailable();
+  const isDark = useColorScheme() === "dark";
 
   const selectColumns = (columns: 1 | 2 | 3) => {
     if (columns === selectedColumns) {
@@ -64,7 +65,13 @@ export default function PdfLayoutTabs({ onColumnsChange }: PdfLayoutTabsProps) {
             style={StyleSheet.absoluteFill}
           />
         ) : (
-          <View style={[StyleSheet.absoluteFill, styles.fallbackBackground]} />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              styles.fallbackBackground,
+              isDark && styles.fallbackBackgroundDark,
+            ]}
+          />
         )}
 
         <Animated.View
@@ -92,7 +99,9 @@ export default function PdfLayoutTabs({ onColumnsChange }: PdfLayoutTabsProps) {
                   name={option.icon}
                   size={20}
                   weight={isSelected ? "semibold" : "regular"}
-                  tintColor={isSelected ? "#07120A" : "rgba(0, 0, 0, 0.58)"}
+                  tintColor={isDark
+                    ? isSelected ? "#FFFFFF" : "rgba(255, 255, 255, 0.78)"
+                    : isSelected ? "#07120A" : "rgba(0, 0, 0, 0.58)"}
                 />
               </Pressable>
             );
@@ -125,6 +134,10 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(0, 0, 0, 0.1)",
     backgroundColor: "rgba(255, 255, 255, 0.84)",
+  },
+  fallbackBackgroundDark: {
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    backgroundColor: "rgba(26, 30, 24, 0.9)",
   },
   indicator: {
     position: "absolute",

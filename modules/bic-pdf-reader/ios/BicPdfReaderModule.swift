@@ -25,7 +25,7 @@ public final class BicPdfReaderModule: Module {
         throw ExtractionException("Rust returned no extraction result")
       }
       defer { bic_pdf_free_string(result) }
-      return try AppleVisionOcr.fillScannedPages(
+      return try AppleVisionOcr.fillPagesRequiringOcr(
         in: String(cString: result),
         pdfPath: path
       )
@@ -47,7 +47,7 @@ public final class BicPdfReaderModule: Module {
         throw ExtractionException("Rust returned no extraction result")
       }
       defer { bic_pdf_free_string(result) }
-      return try AppleVisionOcr.fillScannedPages(
+      return try AppleVisionOcr.fillPagesRequiringOcr(
         in: String(cString: result),
         pdfPath: path
       )

@@ -86,12 +86,8 @@ function shouldJoinParagraphLines(
     previous.page !== next.page ||
     previous.kind !== "paragraph" ||
     next.kind !== "paragraph" ||
-    // The embedded-text engine already groups glyph lines into paragraphs
-    // and supplies word coordinates. Apple Vision currently returns one
-    // observation per line with no word coordinates, which is the shape that
-    // needs this conservative second pass.
-    previous.wordBounds.length > 0 ||
-    next.wordBounds.length > 0
+    !previous.id.startsWith("ocr-") ||
+    !next.id.startsWith("ocr-")
   ) {
     return false;
   }
@@ -141,7 +137,8 @@ function mergeParagraphLine(
   paragraph: ExtractedPdfBlock,
   line: ExtractedPdfBlock,
 ) {
-  const dehyphenate = paragraph.text.endsWith("-") &&
+  const dehyphenate = paragraph.wordBounds.length === 0 &&
+    line.wordBounds.length === 0 && paragraph.text.endsWith("-") &&
     startsWithLowercaseLetter(line.text);
   const paragraphText = dehyphenate
     ? paragraph.text.slice(0, -1)

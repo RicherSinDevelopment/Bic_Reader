@@ -736,13 +736,12 @@ export default function ReaderScreen() {
 
           const publish = (value: ExtractedPdfDocument) => {
             if (!cancelled) {
-              setReaderBlocks(
-                normalizeReaderBlocks(
-                  value.pages.flatMap((page) =>
-                    page.blocks.filter(isVisibleReaderBlock),
-                  ),
+              const normalizedBlocks = normalizeReaderBlocks(
+                value.pages.flatMap((page) =>
+                  page.blocks.filter(isVisibleReaderBlock),
                 ),
               );
+              setReaderBlocks(normalizedBlocks);
               setReaderPageCount(value.pageCount);
               setReaderPageSizes(
                 Object.fromEntries(
@@ -755,7 +754,11 @@ export default function ReaderScreen() {
                   ]),
                 ),
               );
-              setReaderLoading(false);
+              // Decorative/blank opening pages should not leave Reader Mode
+              // looking empty while later batches continue toward real text.
+              setReaderLoading(
+                normalizedBlocks.length === 0 && value.pages.length < value.pageCount,
+              );
             }
           };
 

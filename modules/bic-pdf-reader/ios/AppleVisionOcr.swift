@@ -4,7 +4,7 @@ import UIKit
 import Vision
 
 enum AppleVisionOcr {
-  static func fillScannedPages(in json: String, pdfPath: String) throws -> String {
+  static func fillPagesRequiringOcr(in json: String, pdfPath: String) throws -> String {
     guard
       let input = json.data(using: .utf8),
       var response = try JSONSerialization.jsonObject(with: input) as? [String: Any],
@@ -15,6 +15,8 @@ enum AppleVisionOcr {
       return json
     }
 
+    // Keep PDFium's native extraction for digital PDFs. Rust also flags pages
+    // dominated by a raster image, intentionally ignoring any hidden OCR layer.
     for index in pages.indices where pages[index]["requiresOcr"] as? Bool == true {
       guard
         let pageNumber = pages[index]["page"] as? Int,
@@ -83,11 +85,15 @@ enum AppleVisionOcr {
       let wordBounds: [[Double]] = wordRegex.matches(
         in: candidate.string,
         range: NSRange(candidate.string.startIndex..., in: candidate.string)
-      ).compactMap { match in
+      ).map { match in
         guard
           let stringRange = Range(match.range, in: candidate.string),
           let wordObservation = try? candidate.boundingBox(for: stringRange)
-        else { return nil }
+        else {
+          // Preserve one bounds entry per regex word so a failed Vision range
+          // cannot shift every following word onto the wrong rectangle.
+          return [0, 0, 0, 0]
+        }
         let wordBox = wordObservation.boundingBox
         return [
           Double(wordBox.minX * bounds.width),

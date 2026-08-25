@@ -101,7 +101,28 @@ fn extract_page(page: &PdfPage<'_>, number: u16) -> Result<ExtractedPage> {
         .filter(|glyph| !glyph.character.is_whitespace())
         .count();
     let blocks = lines_to_blocks(glyphs_to_lines(glyphs, width), number, height);
-    let requires_ocr = usable < 12;
+    // A scan can contain a large, invisible OCR text layer. Glyph count alone
+    // therefore cannot distinguish it from a digitally-authored PDF. Scanner
+    // output also commonly nests the page image inside a Form/XObject or splits
+    // it into tiles, so inspect raster-bearing top-level objects recursively and
+    // use their combined page coverage.
+    let raster_objects = page
+        .objects()
+        .iter()
+        .filter(|object| contains_raster_image(object, 0))
+        .collect::<Vec<_>>();
+    let has_raster = !raster_objects.is_empty();
+    let raster_area = raster_objects
+        .iter()
+        .filter_map(|object| object.width().ok().zip(object.height().ok()))
+        .map(|(object_width, object_height)| object_width.value.abs() * object_height.value.abs())
+        .sum::<f32>();
+    let has_dominant_raster = is_dominant_raster_area(raster_area, width, height);
+    let has_hidden_ocr_layer = page
+        .objects()
+        .iter()
+        .any(|object| contains_hidden_text(object, 0));
+    let requires_ocr = usable < 12 || has_dominant_raster || (has_raster && has_hidden_ocr_layer);
     Ok(ExtractedPage {
         page: number,
         width,
@@ -110,6 +131,55 @@ fn extract_page(page: &PdfPage<'_>, number: u16) -> Result<ExtractedPage> {
         confidence: if requires_ocr { 0.1 } else { 0.86 },
         requires_ocr,
     })
+}
+
+fn contains_raster_image(object: &PdfPageObject<'_>, depth: u8) -> bool {
+    if object.as_image_object().is_some() {
+        return true;
+    }
+    if depth >= 8 {
+        return false;
+    }
+    object.as_x_object_form_object().is_some_and(|form| {
+        (0..form.len()).any(|index| {
+            form.get(index)
+                .is_ok_and(|child| contains_raster_image(&child, depth + 1))
+        })
+    })
+}
+
+fn contains_hidden_text(object: &PdfPageObject<'_>, depth: u8) -> bool {
+    if let Some(text) = object.as_text_object() {
+        let transparent_fill = text.fill_color().is_ok_and(|color| color.alpha() <= 8);
+        let transparent_stroke = text.stroke_color().is_ok_and(|color| color.alpha() <= 8);
+        let hidden = match text.render_mode() {
+            PdfPageTextRenderMode::Invisible | PdfPageTextRenderMode::InvisibleClipping => true,
+            PdfPageTextRenderMode::FilledUnstroked
+            | PdfPageTextRenderMode::FilledUnstrokedClipping => transparent_fill,
+            PdfPageTextRenderMode::StrokedUnfilled
+            | PdfPageTextRenderMode::StrokedUnfilledClipping => transparent_stroke,
+            PdfPageTextRenderMode::FilledThenStroked
+            | PdfPageTextRenderMode::FilledThenStrokedClipping
+            | PdfPageTextRenderMode::Unknown => transparent_fill && transparent_stroke,
+        };
+        if hidden {
+            return true;
+        }
+    }
+    if depth >= 8 {
+        return false;
+    }
+    object.as_x_object_form_object().is_some_and(|form| {
+        (0..form.len()).any(|index| {
+            form.get(index)
+                .is_ok_and(|child| contains_hidden_text(&child, depth + 1))
+        })
+    })
+}
+
+fn is_dominant_raster_area(raster_area: f32, page_width: f32, page_height: f32) -> bool {
+    let page_area = page_width.abs() * page_height.abs();
+    page_area > 0.0 && raster_area / page_area >= 0.55
 }
 
 fn hide_repeated_marginalia(pages: &mut [ExtractedPage]) {
@@ -164,4 +234,30 @@ fn create_pdfium() -> Result<Pdfium> {
 #[cfg(not(feature = "ios-static"))]
 fn create_pdfium() -> Result<Pdfium> {
     Ok(Pdfium::new(Pdfium::bind_to_system_library()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_dominant_raster_area;
+
+    #[test]
+    fn full_page_scan_is_sent_to_ocr() {
+        assert!(is_dominant_raster_area(595.0 * 842.0, 595.0, 842.0));
+    }
+
+    #[test]
+    fn ordinary_inline_image_keeps_pdfium_text() {
+        assert!(!is_dominant_raster_area(240.0 * 180.0, 595.0, 842.0));
+    }
+
+    #[test]
+    fn tiled_scan_is_sent_to_ocr() {
+        let two_half_page_tiles = 2.0 * (595.0 * 421.0);
+        assert!(is_dominant_raster_area(two_half_page_tiles, 595.0, 842.0));
+    }
+
+    #[test]
+    fn invalid_page_dimensions_are_not_scans() {
+        assert!(!is_dominant_raster_area(595.0 * 842.0, 0.0, 842.0));
+    }
 }

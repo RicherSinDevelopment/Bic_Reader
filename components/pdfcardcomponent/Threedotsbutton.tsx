@@ -93,9 +93,9 @@ export default function ThreeDotsButton({
         ref={buttonRef}
         accessibilityLabel={`More options for ${fileName}`}
         accessibilityRole="button"
-        hitSlop={10}
+        hitSlop={4}
         onPress={openMenu}
-        className="h-8 w-6 items-center justify-center rounded-md active:bg-black/10 dark:active:bg-white/10"
+        className="h-11 w-11 items-center justify-center rounded-full active:bg-black/10 dark:active:bg-white/10"
       >
         <EllipsisVertical size={18} color={isDark ? "rgba(255, 255, 255, 0.65)" : "rgba(0, 0, 0, 0.6)"} />
       </Pressable>

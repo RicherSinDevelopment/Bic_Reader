@@ -259,6 +259,17 @@ pub(crate) fn lines_to_blocks(lines: Vec<Line>, page: u16, height: f32) -> Vec<T
     blocks
 }
 
+pub(crate) fn ocr_lines_to_blocks(
+    mut lines: Vec<Line>,
+    page: u16,
+    width: f32,
+    height: f32,
+) -> Vec<TextBlock> {
+    assign_columns(&mut lines, width);
+    order_lines(&mut lines);
+    lines_to_blocks(lines, page, height)
+}
+
 fn classify(line: &Line, body: f32, height: f32) -> BlockKind {
     let text = line.text.trim();
     if line.bounds.top < height * 0.06 {

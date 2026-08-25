@@ -1,8 +1,8 @@
 import type { ExtractedPdfDocument } from "@/modules/bic-pdf-reader";
 import type { SQLiteDatabase } from "expo-sqlite";
 
-// Version 15 restores the proven Apple Vision recognition path for scanned pages.
-export const PDF_EXTRACTION_ENGINE_VERSION = 15;
+// Version 17 adds multi-signal page scoring plus document-wide scan sampling.
+export const PDF_EXTRACTION_ENGINE_VERSION = 17;
 
 export async function getCachedPdfExtraction(db: SQLiteDatabase, pdfId: string) {
   const row = await db.getFirstAsync<{ document_json: string; engine_version: number }>(

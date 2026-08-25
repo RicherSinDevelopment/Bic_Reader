@@ -15,8 +15,8 @@ enum AppleVisionOcr {
       return json
     }
 
-    // Keep PDFium's native extraction for digital PDFs. Rust also flags pages
-    // dominated by a raster image, intentionally ignoring any hidden OCR layer.
+    // Keep PDFium's native extraction for digital PDFs. Rust scores page and
+    // document structure, flagging likely scans even when hidden OCR text exists.
     for index in pages.indices where pages[index]["requiresOcr"] as? Bool == true {
       guard
         let pageNumber = pages[index]["page"] as? Int,
@@ -75,7 +75,7 @@ enum AppleVisionOcr {
     }
 
     let wordRegex = try NSRegularExpression(pattern: "\\S+")
-    let blocks: [[String: Any]] = observations.enumerated().map { index, item in
+    let rawBlocks: [[String: Any]] = observations.enumerated().map { index, item in
       let candidate = item.1
       let box = item.0.boundingBox
       let left = box.minX * bounds.width
@@ -122,7 +122,58 @@ enum AppleVisionOcr {
     let confidence = observations.isEmpty
       ? 0
       : observations.reduce(0.0) { $0 + Double($1.1.confidence) } / Double(observations.count)
+    let blocks = organizeWithRust(
+      rawBlocks,
+      pageNumber: pageNumber,
+      pageWidth: bounds.width,
+      pageHeight: bounds.height
+    ) ?? rawBlocks
     return (blocks, confidence)
+  }
+
+  /// Vision owns recognition and exact word geometry; Rust owns the same
+  /// reading-order and semantic layout pass used for native PDFium text.
+  private static func organizeWithRust(
+    _ lines: [[String: Any]],
+    pageNumber: Int,
+    pageWidth: CGFloat,
+    pageHeight: CGFloat
+  ) -> [[String: Any]]? {
+    let organizerLines: [[String: Any]] = lines.compactMap { block in
+      guard
+        let text = block["text"] as? String,
+        let bounds = block["sourceBounds"] as? [String: Any],
+        let wordBounds = block["wordBounds"] as? [[Double]],
+        let confidence = block["confidence"] as? Double
+      else { return nil }
+      return [
+        "text": text,
+        "bounds": bounds,
+        "wordBounds": wordBounds,
+        "confidence": confidence,
+      ]
+    }
+    let input: [String: Any] = [
+      "page": pageNumber,
+      "width": Double(pageWidth),
+      "height": Double(pageHeight),
+      "lines": organizerLines,
+    ]
+    guard
+      JSONSerialization.isValidJSONObject(input),
+      let data = try? JSONSerialization.data(withJSONObject: input),
+      let json = String(data: data, encoding: .utf8),
+      let result = bic_pdf_organize_ocr_page_json(json)
+    else { return nil }
+    defer { bic_pdf_free_string(result) }
+    guard
+      let responseData = String(cString: result).data(using: .utf8),
+      let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
+      response["ok"] as? Bool == true,
+      let blocks = response["data"] as? [[String: Any]],
+      !blocks.isEmpty
+    else { return nil }
+    return blocks
   }
 
   private static func failure(_ message: String) -> NSError {

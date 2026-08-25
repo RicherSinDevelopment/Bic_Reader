@@ -2,9 +2,9 @@ import { useAuth } from '@/providers/AuthProvider';
 import { useRevenueCat } from '@/providers/RevenueCatProvider';
 import { usePdfLibrary } from '@/hooks/usePdfLibrary';
 import { useAppearanceStore } from '@/stores/appearanceStore';
+import ProfileBackButton from '@/components/ProfileBackButton';
 import { useRouter } from 'expo-router';
 import {
-  ArrowLeft,
   BookCheck,
   BookOpen,
   ChevronRight,
@@ -76,14 +76,7 @@ export default function Profile() {
         showsVerticalScrollIndicator={false}
       >
           <View style={styles.header}>
-            <Pressable
-              accessibilityLabel="Back to library"
-              hitSlop={10}
-              onPress={() => router.back()}
-              style={styles.iconButton}
-            >
-              <ArrowLeft color={isDark ? '#F4F5F1' : '#2C2C2A'} size={22} />
-            </Pressable>
+            <View style={styles.headerSpacer} />
             <Text style={styles.headerTitle}>Settings</Text>
             <View style={styles.headerSpacer} />
           </View>
@@ -241,6 +234,11 @@ export default function Profile() {
             <Text style={styles.signOutText}>Sign out</Text>
           </Pressable>
       </ScrollView>
+      <View pointerEvents="box-none" style={styles.persistentBackOverlay}>
+        <View pointerEvents="box-none" style={styles.persistentBackContent}>
+          <ProfileBackButton onPress={() => router.back()} />
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -275,15 +273,20 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: isDark ? '#10120F' : '#F7F5EF' },
   content: { width: '100%', maxWidth: 680, alignSelf: 'center', padding: 22, paddingBottom: 44 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  iconButton: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: isDark ? '#343A31' : '#E0DDD3',
-    borderRadius: 14,
-    backgroundColor: isDark ? '#1A1E18' : '#FFFEFB',
+  persistentBackOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    left: 0,
+    zIndex: 20,
+  },
+  persistentBackContent: {
+    width: '100%',
+    maxWidth: 680,
+    alignSelf: 'center',
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    alignItems: 'flex-start',
   },
   headerTitle: { color: isDark ? '#F4F5F1' : '#2C2C2A', fontFamily: 'Lato_700Bold', fontSize: 21 },
   headerSpacer: { width: 44 },

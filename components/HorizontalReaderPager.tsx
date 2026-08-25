@@ -2,6 +2,7 @@ import { hyphenateText, type ExtractedPdfBlock } from "@/modules/bic-pdf-reader"
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { WebView } from "react-native-webview";
 
 type Destination = {
   page: number;
@@ -33,6 +34,8 @@ type PageAnchor = {
 
 type GuideLine = { left: number; top: number; width: number; height: number; text?: string };
 
+type TextRange = { blockId: string; offset: number; length: number };
+
 type Props = {
   blocks: ExtractedPdfBlock[];
   userHighlights?: Array<{
@@ -41,11 +44,8 @@ type Props = {
     length: number;
     color: string;
   }>;
-  onWordHighlightRequest?: (highlight: {
-    blockId: string;
-    offset: number;
-    length: number;
-  }) => void;
+  onSelectionHighlightRequest?: (highlights: TextRange[]) => void;
+  onSelectionAskAI?: (text: string) => void;
   readingDirection?: "ltr" | "rtl";
   spokenWordHighlight?: {
     blockId: string;
@@ -62,6 +62,8 @@ type Props = {
     nonce: number;
   } | null;
   fontFamily: string;
+  latoBoldBase64?: string;
+  sourceSansBase64?: string;
   fontSize: number;
   lineHeight: number;
   paragraphSpacing: number;
@@ -79,8 +81,188 @@ type Props = {
   ) => void;
   onPageMapChange?: (pageMap: Record<number, number>) => void;
   onReaderTap?: () => void;
+  onReaderReveal?: () => void;
+  onReady?: () => void;
   onSwipeStart?: () => void;
 };
+
+const horizontalReaderMenuItems = [
+  { key: "highlight", label: "Highlight" },
+  { key: "askAI", label: "Ask AI" },
+];
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function HorizontalSelectablePage({
+  page,
+  userHighlights,
+  spokenWordHighlight,
+  searchHighlight,
+  switchHighlight,
+  displayText,
+  readingDirection,
+  fontFamily,
+  latoBoldBase64,
+  sourceSansBase64,
+  fontSize,
+  lineHeight,
+  letterSpacing,
+  wordSpacing,
+  bold,
+  automaticHyphenation,
+  backgroundColor,
+  textColor,
+  bottomPadding,
+  onHighlight,
+  onAskAI,
+  onReaderReveal,
+  onReady,
+}: {
+  page: Segment[];
+  userHighlights: Props["userHighlights"];
+  spokenWordHighlight: Props["spokenWordHighlight"];
+  searchHighlight?: TextRange;
+  switchHighlight?: TextRange;
+  displayText: (text: string) => string;
+  readingDirection: "ltr" | "rtl";
+  fontFamily: string;
+  latoBoldBase64?: string;
+  sourceSansBase64?: string;
+  fontSize: number;
+  lineHeight: number;
+  letterSpacing: number;
+  wordSpacing: number;
+  bold: boolean;
+  automaticHyphenation: boolean;
+  backgroundColor: string;
+  textColor: string;
+  bottomPadding: number;
+  onHighlight?: (ranges: TextRange[]) => void;
+  onAskAI?: (text: string) => void;
+  onReaderReveal?: () => void;
+  onReady?: () => void;
+}) {
+  const webViewRef = useRef<WebView>(null);
+  const selectionRangesRef = useRef<TextRange[]>([]);
+
+  const markup = useMemo(() => page.map((segment) => {
+    const highlights = (userHighlights ?? []).filter((highlight) =>
+      highlight.blockId === segment.blockId &&
+      highlight.offset < segment.startOffset + segment.text.length &&
+      highlight.offset + highlight.length > segment.startOffset
+    ).map((highlight) => ({
+      start: Math.max(0, highlight.offset - segment.startOffset),
+      end: Math.min(segment.text.length, highlight.offset + highlight.length - segment.startOffset),
+      color: highlight.color,
+    }));
+    [searchHighlight, switchHighlight].forEach((highlight, index) => {
+      if (!highlight || highlight.blockId !== segment.blockId) return;
+      const start = highlight.offset - segment.startOffset;
+      if (start < 0 || start >= segment.text.length) return;
+      highlights.push({
+        start,
+        end: Math.min(segment.text.length, start + highlight.length),
+        color: index === 0 ? "#facc15" : "rgba(250, 204, 21, 0.68)",
+      });
+    });
+    highlights.sort((left, right) => left.start - right.start);
+    let cursor = 0;
+    const contents = highlights.map((highlight) => {
+      if (highlight.end <= cursor) return "";
+      const start = Math.max(cursor, highlight.start);
+      const before = escapeHtml(displayText(segment.text.slice(cursor, start)));
+      const selected = escapeHtml(displayText(segment.text.slice(start, highlight.end)));
+      cursor = highlight.end;
+      return `${before}<mark class="reader-user-highlight" style="background-color:${escapeHtml(highlight.color)}">${selected}</mark>`;
+    }).join("") + escapeHtml(displayText(segment.text.slice(cursor)));
+    const scale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
+    const indent = segment.paragraphStart && !segment.sectionOpening ? "&#8195;&#8194;" : "";
+    return `<div class="segment ${segment.sectionOpening ? "section-opening" : ""}" data-block-id="${escapeHtml(segment.blockId)}" data-start="${segment.startOffset}" data-prefix="${indent ? 2 : 0}" style="font-size:${fontSize * scale}px;line-height:${fontSize * scale * lineHeight}px;margin-top:${segment.spacingBefore}px;margin-bottom:${segment.spacingAfter}px">${indent}${contents}</div>`;
+  }).join(""), [displayText, fontSize, lineHeight, page, searchHighlight, switchHighlight, userHighlights]);
+
+  const webFontFamily = fontFamily === "Lato_700Bold"
+    ? "LatoReaderBold"
+    : fontFamily === "SourceSans3_400Regular" ? "SourceSansReader" : fontFamily;
+  const html = useMemo(() => `<!doctype html><html dir="${readingDirection}"><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
+    @font-face{font-family:'LatoReaderBold';src:url('data:font/ttf;base64,${latoBoldBase64 ?? ""}') format('truetype');font-weight:700;font-display:block}@font-face{font-family:'SourceSansReader';src:url('data:font/ttf;base64,${sourceSansBase64 ?? ""}') format('truetype');font-weight:400;font-display:block}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:20px 0 ${bottomPadding}px;color:${textColor};font-family:${JSON.stringify(webFontFamily)},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.reader-user-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}::selection{background:#93c5fd;color:#1e293b}</style></head><body>${markup}<script>
+    window.__selectionRanges=[];
+    function cleanLength(value){return String(value||'').replace(/\\u00ad/g,'').length}
+    function rawIndexForClean(value,target){let clean=0;for(let index=0;index<value.length;index++){if(value[index]!=='\\u00ad'){if(clean===target)return index;clean++}}return value.length}
+    window.__setTtsHighlight=function(blockId,offset,length){
+      document.querySelectorAll('.tts-word-active').forEach(function(mark){const parent=mark.parentNode;mark.replaceWith(document.createTextNode(mark.textContent||''));parent&&parent.normalize()});
+      if(!blockId||!length)return;const segment=Array.from(document.querySelectorAll('[data-block-id]')).find(function(item){const start=Number(item.dataset.start||0);return item.dataset.blockId===blockId&&offset>=start&&offset<start+cleanLength(item.textContent)-Number(item.dataset.prefix||0)});if(!segment)return;
+      const localStart=offset-Number(segment.dataset.start||0)+Number(segment.dataset.prefix||0);const localEnd=localStart+length;let cleanCursor=0;const walker=document.createTreeWalker(segment,NodeFilter.SHOW_TEXT);const nodes=[];let node=walker.nextNode();while(node){const nodeLength=cleanLength(node.textContent||'');nodes.push({node:node,start:cleanCursor,end:cleanCursor+nodeLength});cleanCursor+=nodeLength;node=walker.nextNode()}
+      nodes.reverse().forEach(function(entry){const textNode=entry.node;const value=textNode.textContent||'';if(localEnd<=entry.start||localStart>=entry.end)return;const start=rawIndexForClean(value,Math.max(0,localStart-entry.start));const end=rawIndexForClean(value,Math.min(entry.end-entry.start,localEnd-entry.start));if(end<=start)return;const range=document.createRange();range.setStart(textNode,start);range.setEnd(textNode,end);const mark=document.createElement('mark');mark.className='tts-word-active';mark.style.backgroundColor='#fde047';range.surroundContents(mark)});
+    }
+    function captureSelection(){
+      const selection=window.getSelection();
+      if(!selection||!selection.rangeCount||selection.isCollapsed){window.__selectionRanges=[];window.ReactNativeWebView.postMessage(JSON.stringify({type:'selection',text:'',ranges:[]}));return}
+      const range=selection.getRangeAt(0);const ranges=[];
+      document.querySelectorAll('[data-block-id]').forEach(function(segment){
+        try{if(!range.intersectsNode(segment))return;const contents=document.createRange();contents.selectNodeContents(segment);
+          const startRange=document.createRange();startRange.selectNodeContents(segment);
+          if(segment.contains(range.startContainer))startRange.setEnd(range.startContainer,range.startOffset);else if(range.compareBoundaryPoints(Range.START_TO_START,contents)<=0)startRange.collapse(true);else return;
+          const endRange=document.createRange();endRange.selectNodeContents(segment);
+          if(segment.contains(range.endContainer))endRange.setEnd(range.endContainer,range.endOffset);else if(range.compareBoundaryPoints(Range.END_TO_END,contents)>=0){}else return;
+          const prefix=Number(segment.dataset.prefix||0);let start=Math.max(0,cleanLength(startRange.toString())-prefix);let end=Math.max(0,cleanLength(endRange.toString())-prefix);const sourceText=String(segment.textContent||'').replace(/\\u00ad/g,'').slice(prefix);while(start<end&&/\\s/.test(sourceText[start]||''))start++;while(end>start&&/\\s/.test(sourceText[end-1]||''))end--;
+          if(end>start)ranges.push({blockId:segment.dataset.blockId,offset:Number(segment.dataset.start||0)+start,length:end-start});
+        }catch(error){}
+      });window.__selectionRanges=ranges;
+      window.ReactNativeWebView.postMessage(JSON.stringify({type:'selection',text:selection.toString(),ranges:ranges}));
+    }
+    let timer;document.addEventListener('selectionchange',function(){clearTimeout(timer);timer=setTimeout(captureSelection,80)});
+  </script></body></html>`, [automaticHyphenation, backgroundColor, bold, bottomPadding, latoBoldBase64, letterSpacing, markup, readingDirection, sourceSansBase64, textColor, webFontFamily, wordSpacing]);
+
+  const source = useMemo(() => ({ html }), [html]);
+  const ttsInjection = useMemo(
+    () => `window.__setTtsHighlight?.(${JSON.stringify(spokenWordHighlight?.blockId ?? "")},${spokenWordHighlight?.offset ?? 0},${spokenWordHighlight?.length ?? 0});true;`,
+    [spokenWordHighlight],
+  );
+  useEffect(() => {
+    webViewRef.current?.injectJavaScript(ttsInjection);
+  }, [ttsInjection]);
+  return <WebView
+    ref={webViewRef}
+    source={source}
+    style={[StyleSheet.absoluteFill, { backgroundColor }]}
+    containerStyle={{ backgroundColor }}
+    scrollEnabled={false}
+    bounces={false}
+    overScrollMode="never"
+    showsHorizontalScrollIndicator={false}
+    showsVerticalScrollIndicator={false}
+    menuItems={horizontalReaderMenuItems}
+    onLoadEnd={() => {
+      webViewRef.current?.injectJavaScript(ttsInjection);
+      onReady?.();
+    }}
+    onContentProcessDidTerminate={() => webViewRef.current?.reload()}
+    onMessage={(event) => {
+      try {
+        const message = JSON.parse(event.nativeEvent.data);
+        if (message.type === "selection") {
+          const hadSelection = selectionRangesRef.current.length > 0;
+          selectionRangesRef.current = Array.isArray(message.ranges) ? message.ranges : [];
+          if (hadSelection && !selectionRangesRef.current.length) onReaderReveal?.();
+        }
+      } catch {}
+    }}
+    onCustomMenuSelection={(event) => {
+      if (event.nativeEvent.key === "highlight") {
+        if (selectionRangesRef.current.length) onHighlight?.(selectionRangesRef.current);
+      } else if (event.nativeEvent.key === "askAI") {
+        onAskAI?.(event.nativeEvent.selectedText?.trim() ?? "");
+      }
+    }}
+  />;
+}
 
 function buildPages(
   blocks: ExtractedPdfBlock[],
@@ -180,7 +362,8 @@ function pageAnchor(
 export default function HorizontalReaderPager({
   blocks,
   userHighlights = [],
-  onWordHighlightRequest,
+  onSelectionHighlightRequest,
+  onSelectionAskAI,
   readingDirection = "ltr",
   spokenWordHighlight,
   guideMode = null,
@@ -189,6 +372,8 @@ export default function HorizontalReaderPager({
   destination,
   stationarySwitchHighlight,
   fontFamily,
+  latoBoldBase64,
+  sourceSansBase64,
   fontSize,
   lineHeight,
   paragraphSpacing,
@@ -201,11 +386,14 @@ export default function HorizontalReaderPager({
   onPageChange,
   onPageMapChange,
   onReaderTap,
+  onReaderReveal,
+  onReady,
   onSwipeStart,
 }: Props) {
   const isRtl = readingDirection === "rtl";
   const pagerRef = useRef<FlatList<Segment[]>>(null);
   const currentPageRef = useRef(0);
+  const readyReportedRef = useRef(false);
   const navigatedDestinationKeyRef = useRef<string | null>(null);
   const [containerHeight, setContainerHeight] = useState(0);
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<number | null>(null);
@@ -235,6 +423,11 @@ export default function HorizontalReaderPager({
   const { width, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const usableHeight = containerHeight || windowHeight;
+  const reportReady = useCallback(() => {
+    if (readyReportedRef.current) return;
+    readyReportedRef.current = true;
+    onReady?.();
+  }, [onReady]);
   // Painting the new type settings is urgent; rebuilding every page in a long
   // book is not. Deferred layout metrics keep the controls responsive while
   // React repaginates in the background.
@@ -502,9 +695,7 @@ export default function HorizontalReaderPager({
     );
     if (!pageSegment) return undefined;
     const sourceLocalOffset = activeGuideWord.offset - measurement.segmentStart!;
-    const openingWord = pageSegment.sectionOpening
-      ? pageSegment.text.match(/^\S+/)?.[0] ?? ""
-      : "";
+    const openingWord = "";
     const displayedOpeningWord = openingWord ? textForDisplay(openingWord) : "";
     const displayedSegment = openingWord
       ? displayedOpeningWord + textForDisplay(pageSegment.text.slice(openingWord.length))
@@ -721,7 +912,28 @@ export default function HorizontalReaderPager({
       stationarySwitchHighlight.nonce >= navigationSwitchHighlight.nonce)
     ? stationarySwitchHighlight
     : navigationSwitchHighlight;
-
+  const selectableSearchHighlight = destination &&
+    destination.nonce !== dismissedSearchNonce &&
+    destination.blockId && destination.searchQuery && destination.searchMatchIndex !== undefined
+    ? {
+        blockId: destination.blockId,
+        offset: destination.searchMatchIndex,
+        length: destination.searchQuery.length,
+      }
+    : undefined;
+  const selectableSwitchHighlight = useMemo(() => {
+    if (!activeSwitchHighlight || activeSwitchHighlight.nonce === dismissedSwitchNonce) return undefined;
+    const block = blocks.find((candidate) => candidate.id === activeSwitchHighlight.blockId);
+    if (!block) return undefined;
+    const match = Array.from(block.text.matchAll(/\S+/g)).find((candidate) =>
+      (candidate.index ?? 0) + candidate[0].length > activeSwitchHighlight.offset
+    );
+    return match ? {
+      blockId: activeSwitchHighlight.blockId,
+      offset: match.index ?? activeSwitchHighlight.offset,
+      length: match[0].length,
+    } : undefined;
+  }, [activeSwitchHighlight, blocks, dismissedSwitchNonce]);
   const renderSegment = (segment: Segment, index: number, pageIndex: number) => {
     const isSearchTarget = destination?.nonce !== dismissedSearchNonce &&
       destination?.blockId === segment.blockId &&
@@ -755,9 +967,7 @@ export default function HorizontalReaderPager({
       : -1;
     const spokenLength = isSpokenTarget ? spokenWordHighlight!.length : 0;
     const headingScale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
-    const openingWord = segment.sectionOpening
-      ? segment.text.match(/^\S+/)?.[0] ?? ""
-      : "";
+    const openingWord = "";
     const paragraphIndent = segment.paragraphStart && !segment.sectionOpening
       ? "\u2003\u2002"
       : "";
@@ -781,39 +991,59 @@ export default function HorizontalReaderPager({
       backgroundColor: "rgba(250, 204, 21, 0.82)",
     };
     const renderHighlightableText = () => {
-      const matches = Array.from(segment.text.matchAll(/\S+/g));
-      let cursor = 0;
-      return matches.flatMap((match, wordIndex) => {
-        const start = match.index ?? cursor;
-        const absoluteOffset = segment.startOffset + start;
-        const savedHighlight = userHighlights.find((highlight) =>
+      const displayedText = textForDisplay(segment.text);
+      const displayIndexForSourceOffset = (sourceOffset: number) => {
+        let sourceCursor = 0;
+        let displayCursor = 0;
+        while (displayCursor < displayedText.length && sourceCursor < sourceOffset) {
+          if (displayedText[displayCursor] !== "\u00ad") sourceCursor += 1;
+          displayCursor += 1;
+        }
+        return displayCursor;
+      };
+      const highlights = userHighlights
+        .filter((highlight) =>
           highlight.blockId === segment.blockId &&
-          highlight.offset === absoluteOffset &&
-          highlight.length === match[0].length
-        );
-        const leading = segment.text.slice(cursor, start);
-        cursor = start + match[0].length;
-        const word = (
+          highlight.offset < segment.startOffset + segment.text.length &&
+          highlight.offset + highlight.length > segment.startOffset
+        )
+        .map((highlight) => ({
+          start: Math.max(0, highlight.offset - segment.startOffset),
+          end: Math.min(
+            segment.text.length,
+            highlight.offset + highlight.length - segment.startOffset,
+          ),
+          color: highlight.color,
+        }))
+        .sort((left, right) => left.start - right.start);
+      if (!highlights.length) return displayedText;
+
+      const rendered: React.ReactNode[] = [];
+      let sourceCursor = 0;
+      highlights.forEach((highlight, highlightIndex) => {
+        if (highlight.end <= sourceCursor) return;
+        const start = Math.max(sourceCursor, highlight.start);
+        const displayStart = displayIndexForSourceOffset(start);
+        const displayEnd = displayIndexForSourceOffset(highlight.end);
+        const previousDisplayEnd = displayIndexForSourceOffset(sourceCursor);
+        if (displayStart > previousDisplayEnd) {
+          rendered.push(displayedText.slice(previousDisplayEnd, displayStart));
+        }
+        rendered.push(
           <Text
-            key={`${absoluteOffset}:${match[0]}`}
-            onLongPress={() => onWordHighlightRequest?.({
-              blockId: segment.blockId,
-              offset: absoluteOffset,
-              length: match[0].length,
-            })}
-            style={[
-              wordIndex === 0 && openingWord ? openingWordStyle : undefined,
-              savedHighlight ? {
-                backgroundColor: savedHighlight.color,
-                borderRadius: 3,
-              } : undefined,
-            ]}
+            key={`${segment.blockId}:${segment.startOffset}:${highlightIndex}:${start}`}
+            style={{ backgroundColor: highlight.color }}
           >
-            {textForDisplay(match[0])}
-          </Text>
+            {displayedText.slice(displayStart, displayEnd)}
+          </Text>,
         );
-        return [leading, word];
-      }).concat(segment.text.slice(cursor));
+        sourceCursor = highlight.end;
+      });
+      const finalDisplayOffset = displayIndexForSourceOffset(sourceCursor);
+      if (finalDisplayOffset < displayedText.length) {
+        rendered.push(displayedText.slice(finalDisplayOffset));
+      }
+      return rendered;
     };
 
     return (
@@ -913,14 +1143,14 @@ export default function HorizontalReaderPager({
           setContainerHeight(nextHeight);
         }
       }}
-      onTouchStart={(event) => {
+      onTouchStartCapture={(event) => {
         touchStart.current = {
           x: event.nativeEvent.pageX,
           y: event.nativeEvent.pageY,
           time: Date.now(),
         };
       }}
-      onTouchEnd={(event) => {
+      onTouchEndCapture={(event) => {
         const dx = event.nativeEvent.pageX - touchStart.current.x;
         const dy = event.nativeEvent.pageY - touchStart.current.y;
         if (Math.hypot(dx, dy) < 10 && Date.now() - touchStart.current.time < 350) {
@@ -940,7 +1170,7 @@ export default function HorizontalReaderPager({
         overScrollMode="never"
         initialNumToRender={3}
         maxToRenderPerBatch={3}
-        windowSize={5}
+        windowSize={3}
         removeClippedSubviews
         showsHorizontalScrollIndicator={false}
         keyExtractor={(_, pageIndex) => `reader-page-${pageIndex}`}
@@ -1012,7 +1242,36 @@ export default function HorizontalReaderPager({
               width,
             }}
           >
-            {page.map((segment, segmentIndex) => renderSegment(segment, segmentIndex, pageIndex))}
+            <View pointerEvents="none" style={{ opacity: 0 }}>
+              {page.map((segment, segmentIndex) => renderSegment(segment, segmentIndex, pageIndex))}
+            </View>
+            <View style={{ position: "absolute", left: horizontalPadding, right: horizontalPadding, top: 0, bottom: 0 }}>
+              <HorizontalSelectablePage
+                page={page}
+                userHighlights={userHighlights}
+                spokenWordHighlight={spokenWordHighlight}
+                searchHighlight={selectableSearchHighlight}
+                switchHighlight={selectableSwitchHighlight}
+                displayText={textForDisplay}
+                readingDirection={readingDirection}
+                fontFamily={fontFamily}
+                latoBoldBase64={latoBoldBase64}
+                sourceSansBase64={sourceSansBase64}
+                fontSize={fontSize}
+                lineHeight={lineHeight}
+                letterSpacing={letterSpacing}
+                wordSpacing={wordSpacing}
+                bold={bold}
+                automaticHyphenation={automaticHyphenation}
+                backgroundColor={backgroundColor}
+                textColor={textColor}
+                bottomPadding={12 + insets.bottom}
+                onHighlight={onSelectionHighlightRequest}
+                onAskAI={onSelectionAskAI}
+                onReaderReveal={onReaderReveal}
+                onReady={reportReady}
+              />
+            </View>
           </View>
         )}
       />

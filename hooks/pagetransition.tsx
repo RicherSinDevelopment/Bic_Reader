@@ -15,10 +15,11 @@ export function usePageTransition({
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: "pageTransition",
-        transition: "scroll",
+        transition,
+        resetPage: false,
       })
     );
-  }, [webViewRef]);
+  }, [transition, webViewRef]);
 
   return {
     isPaged: transition === "pager",

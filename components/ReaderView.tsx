@@ -117,10 +117,7 @@ function ttsPositionForBlock(
     const text = block.text.trim();
     if (block.id === blockId) {
       const leadingWhitespace = block.text.length - block.text.trimStart().length;
-      return globalOffset + Math.max(
-        0,
-        Math.min(text.length, blockOffset - leadingWhitespace),
-      );
+      return globalOffset + Math.max(0, Math.min(text.length, blockOffset - leadingWhitespace));
     }
     globalOffset += text.length + 2;
   }
@@ -252,15 +249,7 @@ const ReaderView = ({
     blockOffset: number;
     wordIndex: number;
   } | null>(null);
-  const pendingPagerAnchorRef = useRef(false);
   const [currentSourcePage, setCurrentSourcePage] = useState(1);
-  const [pagerModeDestination, setPagerModeDestination] = useState<{
-    page: number;
-    blockId?: string;
-    searchMatchIndex?: number;
-    switchHighlightOffset?: number;
-    nonce: number;
-  } | null>(null);
   const recoveryPageRef = useRef<number | null>(null);
   const [webViewReady, setWebViewReady] = useState(false);
   const [appendPass, setAppendPass] = useState(0);
@@ -271,11 +260,11 @@ const ReaderView = ({
     length: number;
     color: string;
   }>>([]);
-  const pendingPagerHighlightRef = useRef<{
+  const pendingPagerHighlightRef = useRef<Array<{
     blockId: string;
     offset: number;
     length: number;
-  } | null>(null);
+  }> | null>(null);
   const [selectedAIText, setSelectedAIText] = useState("");
 
   useEffect(() => {
@@ -371,6 +360,10 @@ const ReaderView = ({
     transition,
   });
 
+  useEffect(() => {
+    if (isPaged) setWebViewReady(false);
+  }, [isPaged]);
+
   const highlightSpokenWord = useCallback(
     (charIndex: number, charLength: number) => {
       setSpokenWordHighlight(spokenWordForTtsOffset(blocks, charIndex, charLength));
@@ -437,16 +430,16 @@ const ReaderView = ({
 
   const applyHighlightColor = useCallback((color: string) => {
     setHighlightPickerVisible(false);
-    const pendingPagerHighlight = pendingPagerHighlightRef.current;
-    if (pendingPagerHighlight) {
+    const pendingPagerHighlights = pendingPagerHighlightRef.current;
+    if (pendingPagerHighlights?.length) {
       pendingPagerHighlightRef.current = null;
       setPagerHighlights((current) => [
-        ...current.filter((highlight) => !(
-          highlight.blockId === pendingPagerHighlight.blockId &&
-          highlight.offset === pendingPagerHighlight.offset &&
-          highlight.length === pendingPagerHighlight.length
+        ...current.filter((highlight) => !pendingPagerHighlights.some((pending) =>
+          highlight.blockId === pending.blockId &&
+          highlight.offset === pending.offset &&
+          highlight.length === pending.length
         )),
-        { ...pendingPagerHighlight, color },
+        ...pendingPagerHighlights.map((highlight) => ({ ...highlight, color })),
       ]);
       return;
     }
@@ -554,13 +547,10 @@ const textColor = isDark && !colorsCustomized
     anchor?: { blockId: string; blockOffset: number; wordIndex: number },
   ) => {
     lastSourcePageRef.current = sourcePage;
+    setCurrentSourcePage(sourcePage);
     if (anchor) {
       modeTextAnchorRef.current = anchor;
-      const nextTtsOffset = ttsPositionForBlock(
-        blocks,
-        anchor.blockId,
-        anchor.blockOffset,
-      );
+      const nextTtsOffset = ttsPositionForBlock(blocks, anchor.blockId, anchor.blockOffset);
       ttsStartOffsetRef.current = nextTtsOffset;
       setTtsStartOffset(nextTtsOffset);
       const block = blocks.find((candidate) => candidate.id === anchor.blockId);
@@ -569,40 +559,19 @@ const textColor = isDark && !colorsCustomized
         : "";
       onSwitchAnchorChange?.(anchor.blockId, word, anchor.wordIndex);
     }
-    setCurrentSourcePage(sourcePage);
     onPaginationChange?.(current, total);
     onPageChange?.(sourcePage);
   }, [blocks, onPageChange, onPaginationChange, onSwitchAnchorChange]);
 
-  const previousPagedModeRef = useRef(isPaged);
+  const syncedPagedModeRef = useRef(isPaged);
   useEffect(() => {
-    const wasPaged = previousPagedModeRef.current;
-    previousPagedModeRef.current = isPaged;
-    if (!wasPaged && isPaged) {
-      pendingPagerAnchorRef.current = true;
-      webViewRef.current?.injectJavaScript(
-        `window.__reportSwitchAnchor?.(true); true;`,
-      );
-      const timer = setTimeout(() => {
-        if (!pendingPagerAnchorRef.current) return;
-        pendingPagerAnchorRef.current = false;
-        const anchor = modeTextAnchorRef.current;
-        setPagerModeDestination({
-          page: Math.max(1, lastSourcePageRef.current),
-          blockId: anchor?.blockId,
-          searchMatchIndex: anchor?.blockOffset,
-          switchHighlightOffset: anchor?.blockOffset,
-          nonce: Date.now(),
-        });
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-    if (!wasPaged || isPaged || !webViewReady) return;
-
+    if (!webViewReady) return;
+    const modeChanged = syncedPagedModeRef.current !== isPaged;
+    syncedPagedModeRef.current = isPaged;
+    syncPageTransition();
+    if (!modeChanged) return;
     const sourcePage = Math.max(1, lastSourcePageRef.current);
     const anchor = modeTextAnchorRef.current;
-    onPaginationChange?.(sourcePage, pageCount);
-    onPageChange?.(sourcePage);
     const timer = setTimeout(() => {
       webViewRef.current?.postMessage(JSON.stringify({
         type: "goToSourcePage",
@@ -610,27 +579,9 @@ const textColor = isDark && !colorsCustomized
         blockId: anchor?.blockId,
         switchHighlightWordIndex: anchor?.wordIndex,
       }));
-    }, 0);
+    }, 80);
     return () => clearTimeout(timer);
-  }, [isPaged, onPageChange, onPaginationChange, pageCount, webViewReady]);
-
-  const effectivePagerDestination = useMemo(() => {
-    if (isPaged && !previousPagedModeRef.current) {
-      const anchor = modeTextAnchorRef.current;
-      return {
-        page: Math.max(1, currentSourcePage),
-        blockId: anchor?.blockId,
-        searchMatchIndex: anchor?.blockOffset,
-        switchHighlightOffset: anchor?.blockOffset,
-        nonce: Number.MAX_SAFE_INTEGER,
-      };
-    }
-    if (!pagerModeDestination) return destination;
-    if (!destination) return pagerModeDestination;
-    return destination.nonce > pagerModeDestination.nonce
-      ? destination
-      : pagerModeDestination;
-  }, [currentSourcePage, destination, isPaged, pagerModeDestination]);
+  }, [isPaged, syncPageTransition, webViewReady]);
 
 
   const sendReaderSettings = useCallback(() => {
@@ -866,6 +817,7 @@ const textColor = isDark && !colorsCustomized
             min-height: 0;
             margin-inline: 0;
             max-width: none;
+            direction: ltr;
             column-width: calc(100vw - var(--reader-side-padding) - var(--reader-side-padding));
             column-gap: calc(var(--reader-side-padding) + var(--reader-side-padding));
             column-fill: auto;
@@ -1193,7 +1145,7 @@ const textColor = isDark && !colorsCustomized
       }
       if (message.type === 'pageTransition') {
         if (window.__applyReaderTransition) {
-          window.__applyReaderTransition(message.transition, true);
+          window.__applyReaderTransition(message.transition, Boolean(message.resetPage));
         }
         return;
       }
@@ -1560,6 +1512,34 @@ const textColor = isDark && !colorsCustomized
         return;
       }
 
+      if (data.type === "readerTap") {
+        if (readerGuideMode) return;
+        if (toolbarHidden.current) showToolbar();
+        else hideToolbar();
+        return;
+      }
+
+      if (data.type === "readerSwipeStart") {
+        hideToolbar();
+        return;
+      }
+
+      if (data.type === "readerPagination") {
+        const current = Math.max(1, Number(data.current) || 1);
+        const total = Math.max(1, Number(data.total) || 1);
+        const sourcePage = Math.max(1, Number(data.sourcePage) || 1);
+        lastSourcePageRef.current = sourcePage;
+        setCurrentSourcePage(sourcePage);
+        onPaginationChange?.(current, total);
+        onPageChange?.(sourcePage);
+        return;
+      }
+
+      if (data.type === "readerPageMap" && data.pageMap && typeof data.pageMap === "object") {
+        onPageMapChange?.(data.pageMap as Record<number, number>);
+        return;
+      }
+
       if (data.type === "scroll") {
 
         if (typeof data.sourcePage === "number") {
@@ -1676,20 +1656,8 @@ const textColor = isDark && !colorsCustomized
             blockOffset,
             wordIndex,
           };
-          if (pendingPagerAnchorRef.current) {
-            pendingPagerAnchorRef.current = false;
-            setPagerModeDestination({
-              page: Math.max(1, sourceBlock?.page ?? lastSourcePageRef.current),
-              blockId: data.blockId,
-              searchMatchIndex: blockOffset,
-              switchHighlightOffset: blockOffset,
-              nonce: Date.now(),
-            });
-          }
         }
-        // In pager mode the hidden WebView can remain on a different page.
-        // Only the native pager's visible anchor is authoritative for TTS.
-        if (!isPaged && typeof data.ttsOffset === "number") {
+        if (typeof data.ttsOffset === "number") {
           const nextTtsOffset = Math.max(0, data.ttsOffset);
           ttsStartOffsetRef.current = nextTtsOffset;
           setTtsStartOffset(nextTtsOffset);
@@ -1921,18 +1889,25 @@ const textColor = isDark && !colorsCustomized
               <HorizontalReaderPager
                 blocks={blocks}
                 userHighlights={pagerHighlights}
-                onWordHighlightRequest={(highlight) => {
-                  pendingPagerHighlightRef.current = highlight;
+                onSelectionHighlightRequest={(highlights) => {
+                  pendingPagerHighlightRef.current = highlights;
                   setHighlightPickerVisible(true);
+                }}
+                onSelectionAskAI={(text) => {
+                  setSelectedAIText(text.trim());
+                  setActiveItem("ai");
+                  bottomSheetRef.current?.open(0);
                 }}
                 readingDirection={readerDirection}
                 spokenWordHighlight={spokenWordHighlight}
                 guideMode={readerGuideMode}
                 guideBackgroundDimming={guideBackgroundDimming}
                 onGuideClose={closeReaderGuide}
-                destination={effectivePagerDestination}
+                destination={destination}
                 stationarySwitchHighlight={stationarySwitchHighlight}
                 fontFamily={fontFamily.split(",")[0].replaceAll("'", "").trim()}
+                latoBoldBase64={latoBoldBase64}
+                sourceSansBase64={sourceSansBase64}
                 fontSize={fontSize}
                 lineHeight={lineHeight}
                 paragraphSpacing={paragraphSpacing}
@@ -1946,19 +1921,21 @@ const textColor = isDark && !colorsCustomized
                 onPageMapChange={onPageMapChange}
                 onReaderTap={() => {
                   if (readerGuideMode) return;
-                  if (toolbarHidden.current) {
-                    showToolbar();
-                  } else {
-                    hideToolbar();
-                  }
+                  if (toolbarHidden.current) showToolbar();
+                  else hideToolbar();
                 }}
+                onReaderReveal={() => {
+                  if (!readerGuideMode) showToolbar();
+                }}
+                onReady={onReady}
                 onSwipeStart={hideToolbar}
               />
             </View>
           )}
+          {!isPaged && (
           <View
-            pointerEvents={isPaged ? "none" : "auto"}
-            style={[StyleSheet.absoluteFill, { opacity: isPaged ? 0 : 1 }]}
+            pointerEvents="auto"
+            style={StyleSheet.absoluteFill}
           >
           <WebView
             ref={webViewRef}
@@ -2181,7 +2158,7 @@ const textColor = isDark && !colorsCustomized
               }
 
               function reportPreciseSwitchAnchor(force) {
-                if (!window.__readerTopBarVisible) return false;
+                if (!window.__readerTopBarVisible && window.__readerTransition === 'scroll') return false;
                 const isRtl = document.documentElement.dir === 'rtl';
                 const topBoundary = readerVisibleTopBoundary();
                 const blocksInView = Array.from(
@@ -2258,7 +2235,7 @@ const textColor = isDark && !colorsCustomized
               }
 
               function reportSwitchAnchor(force) {
-                if (!window.__readerTopBarVisible) return;
+                if (!window.__readerTopBarVisible && window.__readerTransition === 'scroll') return;
                 if (reportPreciseSwitchAnchor(force)) return;
                 let block = null;
                 const topBoundary = readerVisibleTopBoundary();
@@ -2554,7 +2531,20 @@ const textColor = isDark && !colorsCustomized
                 const topLimit = readerVisibleTopBoundary() + 12;
                 const bottomLimit = window.innerHeight - 76;
                 if (targetRect.top >= topLimit && targetRect.bottom <= bottomLimit) {
-                  drawWordGuide(target.node, target.match);
+                  if (targetRect.right > 0 && targetRect.left < window.innerWidth) {
+                    drawWordGuide(target.node, target.match);
+                    return;
+                  }
+                }
+                if (window.__readerTransition !== 'scroll') {
+                  const targetPage = Math.floor(
+                    (targetRect.left + (window.__readerCurrentPage || 0) * window.innerWidth) /
+                    window.innerWidth
+                  );
+                  window.__goToReaderPage?.(targetPage);
+                  requestAnimationFrame(function() {
+                    drawWordGuide(target.node, target.match);
+                  });
                   return;
                 }
                 const currentRange = document.createRange();
@@ -2604,6 +2594,8 @@ const textColor = isDark && !colorsCustomized
                     if (
                       rect.width < 1 ||
                       rect.height < 1 ||
+                      rect.right < 0 ||
+                      rect.left > window.innerWidth ||
                       rect.bottom < -4 ||
                       rect.top > window.innerHeight + 4
                     ) return;
@@ -2737,6 +2729,12 @@ const textColor = isDark && !colorsCustomized
                   return;
                 }
 
+                if (window.__readerTransition !== 'scroll') {
+                  window.__navigateReaderPage?.(direction < 0 ? -1 : 1);
+                  requestAnimationFrame(initializeLineGuide);
+                  return;
+                }
+
                 const scrollDistance = direction < 0
                   ? Math.min(0, currentLine.bottom - bottomLimit)
                   : Math.max(0, currentLine.top - 16);
@@ -2810,7 +2808,29 @@ const textColor = isDark && !colorsCustomized
                   currentPage,
                   0
                 );
-                reportSourcePage();
+                const sourcePage = reportSourcePage();
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'readerPagination',
+                  current: currentPage + 1,
+                  total: pageCount,
+                  sourcePage: sourcePage
+                }));
+                const pageMap = {};
+                document.querySelectorAll('[data-source-page-section]').forEach(function(section) {
+                  const source = Number(section.dataset.sourcePageSection);
+                  const documentLeft = section.getBoundingClientRect().left +
+                    currentPage * window.innerWidth;
+                  if (source >= 1) {
+                    pageMap[source] = Math.max(
+                      1,
+                      Math.min(pageCount, Math.floor(documentLeft / window.innerWidth) + 1)
+                    );
+                  }
+                });
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'readerPageMap',
+                  pageMap: pageMap
+                }));
               }
 
               function finishPageChange(targetPage) {
@@ -2820,7 +2840,16 @@ const textColor = isDark && !colorsCustomized
                   currentPage,
                   0
                 );
-                reportSourcePage();
+                const sourcePage = reportSourcePage();
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'readerPagination',
+                  current: currentPage + 1,
+                  total: pageCount,
+                  sourcePage: sourcePage
+                }));
+                requestAnimationFrame(function() {
+                  window.__reportSwitchAnchor?.(true);
+                });
               }
 
               function sourcePageAtViewport() {
@@ -2828,6 +2857,19 @@ const textColor = isDark && !colorsCustomized
                   document.querySelectorAll('[data-source-page-section]')
                 );
                 if (!sections.length) return lastReportedSourcePage || 1;
+
+                if (window.__readerTransition !== 'scroll') {
+                  const edgeX = document.documentElement.dir === 'rtl'
+                    ? window.innerWidth - 24
+                    : 24;
+                  const hit = document.elementFromPoint(edgeX, 36) ||
+                    document.elementFromPoint(window.innerWidth / 2, 36);
+                  const visibleSection = hit?.closest?.('[data-source-page-section]');
+                  if (visibleSection) {
+                    return Number(visibleSection.dataset.sourcePageSection) ||
+                      lastReportedSourcePage || 1;
+                  }
+                }
 
                 // Use the reading area's top edge as the page boundary. An
                 // elementFromPoint probe farther down can still hit the prior
@@ -2878,7 +2920,7 @@ const textColor = isDark && !colorsCustomized
                 goToReaderPage(Math.floor(documentLeft / window.innerWidth));
               };
 
-              function goToReaderPage(targetPage) {
+              function goToReaderPage(targetPage, requestedDuration) {
                 if (
                   window.__readerTransition === 'scroll' ||
                   pageAnimationRunning ||
@@ -2891,18 +2933,38 @@ const textColor = isDark && !colorsCustomized
                   0,
                   Math.min(targetPage, pageCount - 1)
                 );
-
+                const duration = Math.max(
+                  95,
+                  Math.min(165, Number(requestedDuration) || 145)
+                );
                 if (nextPage === currentPage) {
+                  pagedContent.style.transition =
+                    'transform ' + duration +
+                    'ms cubic-bezier(0.2, 0.72, 0.28, 1)';
+                  pagedContent.style.transform = pageTransform(currentPage, 0);
                   return;
                 }
 
                 pageAnimationRunning = true;
+                pagedContent.style.transition =
+                  'transform ' + duration +
+                  'ms cubic-bezier(0.2, 0.72, 0.28, 1)';
                 finishPageChange(nextPage);
-                pageAnimationRunning = false;
+                setTimeout(function() {
+                  pageAnimationRunning = false;
+                  const sourcePage = reportSourcePage();
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'readerPagination',
+                    current: currentPage + 1,
+                    total: pageCount,
+                    sourcePage: sourcePage
+                  }));
+                  window.__reportSwitchAnchor?.(true);
+                }, duration + 12);
               }
 
               function applyReaderTransition(mode, resetPage) {
-                window.__readerTransition = 'scroll';
+                window.__readerTransition = mode === 'pager' ? 'pager' : 'scroll';
 
                 const paged = window.__readerTransition !== 'scroll';
                 document.documentElement.classList.toggle(
@@ -2985,6 +3047,91 @@ const textColor = isDark && !colorsCustomized
                 releaseProgrammaticSourcePage,
                 { passive: true }
               );
+
+              let pagerTouchStart = null;
+              window.addEventListener('touchstart', function(event) {
+                if (window.__readerTransition === 'scroll' || pageAnimationRunning) return;
+                const touch = event.touches[0];
+                pagerTouchStart = touch ? {
+                  x: touch.clientX,
+                  y: touch.clientY,
+                  time: Date.now(),
+                  swipeAnnounced: false
+                } : null;
+              }, { passive: true });
+              window.addEventListener('touchmove', function(event) {
+                if (window.__readerTransition === 'scroll' || !pagerTouchStart) return;
+                const touch = event.touches[0];
+                if (!touch) return;
+                const dx = touch.clientX - pagerTouchStart.x;
+                const dy = touch.clientY - pagerTouchStart.y;
+                if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.08) {
+                  const selection = window.getSelection();
+                  if (selection && !selection.isCollapsed) return;
+                  if (document.documentElement.dir !== 'rtl') {
+                    let preview = Math.max(
+                      -window.innerWidth * 0.34,
+                      Math.min(window.innerWidth * 0.34, dx)
+                    );
+                    if (
+                      (currentPage === 0 && preview > 0) ||
+                      (currentPage === pageCount - 1 && preview < 0)
+                    ) {
+                      preview *= 0.18;
+                    }
+                    pagedContent.style.transition = 'none';
+                    pagedContent.style.transform =
+                      'translate3d(' +
+                      (-currentPage * window.innerWidth + preview) +
+                      'px, 0, 0)';
+                  }
+                  if (!pagerTouchStart.swipeAnnounced) {
+                    pagerTouchStart.swipeAnnounced = true;
+                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                      type: 'readerSwipeStart'
+                    }));
+                  }
+                }
+              }, { passive: true });
+              window.addEventListener('touchend', function(event) {
+                if (window.__readerTransition === 'scroll' || !pagerTouchStart) return;
+                const touch = event.changedTouches[0];
+                const start = pagerTouchStart;
+                pagerTouchStart = null;
+                if (!touch) return;
+                const dx = touch.clientX - start.x;
+                const dy = touch.clientY - start.y;
+                const elapsed = Date.now() - start.time;
+                const velocity = Math.abs(dx) / Math.max(1, elapsed);
+                const horizontalIntent = Math.abs(dx) > Math.abs(dy) * 1.08;
+                const commitsPage = Math.abs(dx) > 28 ||
+                  (Math.abs(dx) > 16 && velocity > 0.32);
+                if (horizontalIntent && commitsPage && elapsed < 700) {
+                  const selection = window.getSelection();
+                  if (selection && !selection.isCollapsed) return;
+                  const isRtl = document.documentElement.dir === 'rtl';
+                  const direction = dx < 0
+                    ? (isRtl ? -1 : 1)
+                    : (isRtl ? 1 : -1);
+                  if (!start.swipeAnnounced) {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                      type: 'readerSwipeStart'
+                    }));
+                  }
+                  const duration = Math.round(155 - Math.min(60, velocity * 70));
+                  goToReaderPage(currentPage + direction, duration);
+                  return;
+                }
+                if (start.swipeAnnounced) {
+                  goToReaderPage(currentPage, 120);
+                  return;
+                }
+                if (Math.hypot(dx, dy) < 12 && elapsed < 350) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'readerTap'
+                  }));
+                }
+              }, { passive: true });
 
               let scrollTimer = null;
 
@@ -3103,6 +3250,7 @@ const textColor = isDark && !colorsCustomized
 
           />
           </View>
+          )}
           </View>
         </SafeAreaView>
 

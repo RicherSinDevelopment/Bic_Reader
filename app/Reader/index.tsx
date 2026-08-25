@@ -1180,9 +1180,8 @@ export default function ReaderScreen() {
         hidden={
           (activeTab === "reader" || activeTab === "translated") &&
           readerChromeHidden &&
-          (hideTopBarOnScroll ||
-            readerTransition === "pager" ||
-            readerGuideEnabled)
+          readerTransition !== "pager" &&
+          (hideTopBarOnScroll || readerGuideEnabled)
         }
         style="auto"
       />

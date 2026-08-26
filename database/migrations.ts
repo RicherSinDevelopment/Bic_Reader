@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
 
 export async function migrateDatabase(db: SQLiteDatabase) {
   await db.execAsync(`
@@ -75,6 +75,28 @@ export async function migrateDatabase(db: SQLiteDatabase) {
         updated_at TEXT NOT NULL,
         FOREIGN KEY (pdf_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
       );
+    `);
+  }
+
+  if (currentVersion < 4) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS reader_annotations (
+        id TEXT PRIMARY KEY NOT NULL,
+        annotation_id TEXT NOT NULL,
+        pdf_id TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('highlight', 'note')),
+        block_id TEXT NOT NULL,
+        start_offset INTEGER NOT NULL,
+        text_length INTEGER NOT NULL,
+        color TEXT,
+        note_text TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (pdf_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_reader_annotations_document_scope
+      ON reader_annotations(pdf_id, scope);
     `);
   }
 

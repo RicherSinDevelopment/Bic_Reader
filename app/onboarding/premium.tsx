@@ -14,6 +14,7 @@ import type { PurchasesPackage } from 'react-native-purchases';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { completeOnboarding } from '@/lib/onboarding';
+import { OnboardingBackButton } from '@/components/onboarding/OnboardingBackButton';
 import { useAuth } from '@/providers/AuthProvider';
 import { useRevenueCat } from '@/providers/RevenueCatProvider';
 
@@ -99,6 +100,7 @@ export default function PremiumOnboardingScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <View style={styles.container}>
+        <OnboardingBackButton onPress={() => router.back()} />
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -201,8 +203,8 @@ export default function PremiumOnboardingScreen() {
             {PRIVACY_URL ? <Pressable onPress={() => void Linking.openURL(PRIVACY_URL)}><Text style={styles.footerLink}>Privacy</Text></Pressable> : null}
           </View>
 
-          <View style={styles.pagination} accessibilityLabel="Onboarding page 4 of 4">
-            <View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} /><View style={styles.activeDot} />
+          <View style={styles.pagination} accessibilityLabel="Onboarding page 5 of 5">
+            <View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} /><View style={styles.activeDot} />
           </View>
         </View>
       </View>
@@ -254,7 +256,7 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#F7F5EC' },
   container: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingBottom: 14 },
-  copy: { alignItems: 'center', paddingTop: 12, paddingHorizontal: 12 },
+  copy: { alignItems: 'center', paddingTop: 12, paddingHorizontal: 18 },
   premiumIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#639922' },
   title: { maxWidth: 350, marginTop: 13, textAlign: 'center', color: '#1D221A', fontFamily: 'Lato_700Bold', fontSize: 29, lineHeight: 34, letterSpacing: -0.5 },
   subtitle: { marginTop: 8, textAlign: 'center', color: '#65705D', fontFamily: 'SourceSans3_400Regular', fontSize: 16, lineHeight: 22 },

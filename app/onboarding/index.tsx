@@ -78,8 +78,9 @@ export default function WelcomeOnboardingScreen() {
         </View>
 
         <View style={styles.footer}>
-          <View style={styles.pagination} accessibilityLabel="Onboarding page 1 of 4">
+          <View style={styles.pagination} accessibilityLabel="Onboarding page 1 of 5">
             <View style={styles.activeDot} />
+            <View style={styles.dot} />
             <View style={styles.dot} />
             <View style={styles.dot} />
             <View style={styles.dot} />

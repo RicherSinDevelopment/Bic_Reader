@@ -1320,6 +1320,8 @@ export default function ReaderScreen() {
         >
           {translatedBlocks.length > 0 ? (
             <ReaderView
+              documentId={pdf.id}
+              annotationScope={`translated:${translationLanguage?.code ?? "unknown"}`}
               key={`translated-${translationLanguage?.code ?? "unknown"}`}
               isActive={activeTab === "translated"}
               isLandscape={isLandscape}
@@ -1398,6 +1400,8 @@ export default function ReaderScreen() {
           {readerBlocks.length > 0 ? (
             <View style={{ flex: 1 }}>
               <ReaderView
+                documentId={pdf.id}
+                annotationScope="reader"
                 isActive={activeTab === "reader"}
                 isLandscape={isLandscape}
                 headerOverlayHeight={isLandscape ? 0 : headerHeight}

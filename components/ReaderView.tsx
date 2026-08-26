@@ -52,8 +52,15 @@ import { useAssets } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
 import { useRevenueCat } from "@/providers/RevenueCatProvider";
 import { useRouter } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
+import {
+  loadReaderAnnotations,
+  saveReaderAnnotations,
+} from "@/database/readerAnnotationRepository";
 
 type ReaderViewProps = {
+  documentId: string;
+  annotationScope: string;
   isActive?: boolean;
   isLandscape: boolean;
   headerOverlayHeight?: number;
@@ -96,6 +103,9 @@ const readerMenuItems = [
   { key: "removeHighlight", label: "Remove Highlight" },
   { key: "askAI", label: "Ask AI" },
 ];
+const readerMenuItemsWithoutRemove = readerMenuItems.filter(
+  (item) => item.key !== "removeHighlight",
+);
 
 const highlightColors = [
   "#fde68a",
@@ -192,6 +202,8 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
 }
 
 const ReaderView = ({
+  documentId,
+  annotationScope,
   isActive = true,
   isLandscape,
   headerOverlayHeight = 0,
@@ -213,6 +225,7 @@ const ReaderView = ({
   useTranslatedTextDirection = false,
 }: ReaderViewProps) => {
   const { height: windowHeight } = useWindowDimensions();
+  const db = useSQLiteContext();
   const isDark = useColorScheme() === "dark";
   const { isPremium } = useRevenueCat();
   const router = useRouter();
@@ -277,7 +290,14 @@ const ReaderView = ({
     length: number;
   }> | null>(null);
   const [selectedAIText, setSelectedAIText] = useState("");
+  const [selectionHasHighlight, setSelectionHasHighlight] = useState(false);
   const [readerNotes, setReaderNotes] = useState<ReaderNote[]>([]);
+  const annotationsLoadedKeyRef = useRef<string | null>(null);
+  const scrollSelectionRangesRef = useRef<Array<{
+    blockId: string;
+    offset: number;
+    length: number;
+  }>>([]);
   const [noteEditor, setNoteEditor] = useState<{
     id?: string;
     ranges: Array<{ blockId: string; offset: number; length: number }>;
@@ -285,6 +305,34 @@ const ReaderView = ({
     source: "paged" | "scroll";
   } | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
+
+  useEffect(() => {
+    const key = `${documentId}:${annotationScope}`;
+    let cancelled = false;
+    annotationsLoadedKeyRef.current = null;
+    void loadReaderAnnotations(db, documentId, annotationScope).then((annotations) => {
+      if (cancelled) return;
+      setPagerHighlights(annotations.highlights);
+      setReaderNotes(annotations.notes);
+      annotationsLoadedKeyRef.current = key;
+    }).catch((error) => console.error("Failed to load reader annotations:", error));
+    return () => { cancelled = true; };
+  }, [annotationScope, db, documentId]);
+
+  useEffect(() => {
+    const key = `${documentId}:${annotationScope}`;
+    if (annotationsLoadedKeyRef.current !== key) return;
+    const timer = setTimeout(() => {
+      void saveReaderAnnotations(
+        db,
+        documentId,
+        annotationScope,
+        pagerHighlights,
+        readerNotes,
+      ).catch((error) => console.error("Failed to save reader annotations:", error));
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [annotationScope, db, documentId, pagerHighlights, readerNotes]);
 
   useEffect(() => {
     const latoUri = fontAssets?.[0]?.localUri;
@@ -351,6 +399,15 @@ const ReaderView = ({
       html: blocksToMarkup(appended),
       hasMore,
     }));
+    webViewRef.current?.injectJavaScript(`
+      requestAnimationFrame(function() {
+        window.__renderReaderAnnotations?.(
+          ${JSON.stringify(pagerHighlights)},
+          ${JSON.stringify(readerNotes)}
+        );
+      });
+      true;
+    `);
     appended.forEach((block) => sentBlockIds.current.add(block.id));
     appendedBlockCount.current = blocks.length;
     if (remaining.length > appended.length) {
@@ -362,6 +419,8 @@ const ReaderView = ({
     blocks,
     destination,
     pageCount,
+    pagerHighlights,
+    readerNotes,
     sourcePageCount,
     webViewReady,
   ]);
@@ -378,6 +437,17 @@ const ReaderView = ({
     webViewRef,
     transition,
   });
+
+  useEffect(() => {
+    if (!webViewReady || isPaged) return;
+    webViewRef.current?.injectJavaScript(`
+      window.__renderReaderAnnotations?.(
+        ${JSON.stringify(pagerHighlights)},
+        ${JSON.stringify(readerNotes)}
+      );
+      true;
+    `);
+  }, [isPaged, pagerHighlights, readerNotes, webViewReady]);
 
   useEffect(() => {
     if (isPaged) setWebViewReady(false);
@@ -439,6 +509,14 @@ const ReaderView = ({
         return;
       }
       if (event.nativeEvent.key === "removeHighlight") {
+        const selectedRanges = scrollSelectionRangesRef.current;
+        setPagerHighlights((current) => current.filter((highlight) =>
+          !selectedRanges.some((range) =>
+            highlight.blockId === range.blockId &&
+            highlight.offset < range.offset + range.length &&
+            highlight.offset + highlight.length > range.offset
+          )
+        ));
         webViewRef.current?.injectJavaScript(`
           window.__removeReaderHighlightSelection?.();
           true;
@@ -448,7 +526,7 @@ const ReaderView = ({
       if (event.nativeEvent.key === "addNote") {
         setNoteDraft("");
         setNoteEditor({
-          ranges: [],
+          ranges: scrollSelectionRangesRef.current,
           selectedText: event.nativeEvent.selectedText?.trim() ?? "",
           source: "scroll",
         });
@@ -527,6 +605,17 @@ const ReaderView = ({
         ...pendingPagerHighlights.map((highlight) => ({ ...highlight, color })),
       ]);
       return;
+    }
+    const scrollRanges = scrollSelectionRangesRef.current;
+    if (scrollRanges.length) {
+      setPagerHighlights((current) => [
+        ...current.filter((highlight) => !scrollRanges.some((range) =>
+          highlight.blockId === range.blockId &&
+          highlight.offset === range.offset &&
+          highlight.length === range.length
+        )),
+        ...scrollRanges.map((range) => ({ ...range, color })),
+      ]);
     }
     webViewRef.current?.injectJavaScript(`
       window.__applyReaderHighlight?.(${JSON.stringify(color)});
@@ -1602,6 +1691,61 @@ const textColor = isDark && !colorsCustomized
     window.__readerSelectionRange = null;
   };
 
+  window.__renderReaderAnnotations = function(highlights, notes) {
+    document.querySelectorAll('.reader-note-marker').forEach(function(marker) { marker.remove(); });
+    Array.from(document.querySelectorAll('.reader-note, .reader-user-highlight')).reverse().forEach(function(annotation) {
+      const parent = annotation.parentNode;
+      annotation.replaceWith(...Array.from(annotation.childNodes));
+      parent?.normalize();
+    });
+
+    function wrapRange(annotation, kind) {
+      const block = Array.from(document.querySelectorAll('[data-reader-block]')).find(function(candidate) {
+        return candidate.dataset.blockId === annotation.blockId;
+      });
+      if (!block || annotation.length <= 0) return;
+      const startOffset = annotation.offset;
+      const endOffset = annotation.offset + annotation.length;
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let cursor = 0;
+      let textNode = walker.nextNode();
+      while (textNode) {
+        const length = (textNode.textContent || '').length;
+        nodes.push({ node: textNode, start: cursor, end: cursor + length });
+        cursor += length;
+        textNode = walker.nextNode();
+      }
+      let lastNoteSpan = null;
+      nodes.reverse().forEach(function(entry) {
+        if (endOffset <= entry.start || startOffset >= entry.end) return;
+        const start = Math.max(0, startOffset - entry.start);
+        const end = Math.min(entry.end - entry.start, endOffset - entry.start);
+        if (end <= start) return;
+        const range = document.createRange();
+        range.setStart(entry.node, start);
+        range.setEnd(entry.node, end);
+        const element = document.createElement(kind === 'note' ? 'span' : 'mark');
+        element.className = kind === 'note' ? 'reader-note' : 'reader-user-highlight';
+        if (kind === 'note') element.dataset.noteId = annotation.id;
+        else element.style.backgroundColor = annotation.color || '#fde68a';
+        range.surroundContents(element);
+        if (kind === 'note') lastNoteSpan = element;
+      });
+      if (kind === 'note' && lastNoteSpan) {
+        const marker = document.createElement('button');
+        marker.className = 'reader-note-marker';
+        marker.dataset.openNote = annotation.id;
+        marker.setAttribute('aria-label', 'Open note');
+        marker.textContent = '•';
+        lastNoteSpan.after(marker);
+      }
+    }
+
+    (highlights || []).forEach(function(highlight) { wrapRange(highlight, 'highlight'); });
+    (notes || []).forEach(function(note) { wrapRange(note, 'note'); });
+  };
+
   document.addEventListener('click', function(event) {
     const marker = event.target.closest?.('[data-open-note]');
     if (!marker) return;
@@ -1801,12 +1945,8 @@ const textColor = isDark && !colorsCustomized
       // ------------------------------
 
       if (data.type === "selection") {
-
-        console.log(
-          "Selected text:",
-          data.text
-        );
-
+        scrollSelectionRangesRef.current = Array.isArray(data.ranges) ? data.ranges : [];
+        setSelectionHasHighlight(Boolean(data.hasHighlight));
         return;
       }
 
@@ -2008,7 +2148,7 @@ const textColor = isDark && !colorsCustomized
       : activeItem === "ai"
       ? ["40%", "90%"]
       : activeItem === "font"
-      ? ["40%", "82%"]
+      ? ["40%", "88%"]
       : usesFixedSettingsSheet
         ? ["40%"]
         : ["40%", "82%"];
@@ -2298,7 +2438,7 @@ const textColor = isDark && !colorsCustomized
             handleWebViewMessage
           }
 
-          menuItems={readerMenuItems}
+          menuItems={selectionHasHighlight ? readerMenuItems : readerMenuItemsWithoutRemove}
 
           onCustomMenuSelection={handleCustomMenuSelection}
 
@@ -3516,10 +3656,50 @@ const textColor = isDark && !colorsCustomized
                               selection.getRangeAt(0).cloneRange();
                           }
 
+                          const selectionRange = window.__readerSelectionRange;
+                          const ranges = [];
+                          if (selectionRange) {
+                            document.querySelectorAll('[data-reader-block]').forEach(function(block) {
+                              try {
+                                if (!selectionRange.intersectsNode(block)) return;
+                                const startRange = document.createRange();
+                                startRange.selectNodeContents(block);
+                                if (block.contains(selectionRange.startContainer)) {
+                                  startRange.setEnd(selectionRange.startContainer, selectionRange.startOffset);
+                                } else {
+                                  startRange.collapse(true);
+                                }
+                                const endRange = document.createRange();
+                                endRange.selectNodeContents(block);
+                                if (block.contains(selectionRange.endContainer)) {
+                                  endRange.setEnd(selectionRange.endContainer, selectionRange.endOffset);
+                                }
+                                let start = startRange.toString().length;
+                                let end = endRange.toString().length;
+                                const sourceText = block.textContent || '';
+                                while (start < end && /\\s/.test(sourceText[start] || '')) start += 1;
+                                while (end > start && /\\s/.test(sourceText[end - 1] || '')) end -= 1;
+                                if (end > start) ranges.push({
+                                  blockId: block.dataset.blockId,
+                                  offset: start,
+                                  length: end - start
+                                });
+                              } catch (error) {}
+                            });
+                          }
+                          const hasHighlight = Boolean(selectionRange) && Array.from(
+                            document.querySelectorAll('.reader-user-highlight')
+                          ).some(function(mark) {
+                            try { return selectionRange.intersectsNode(mark); }
+                            catch (error) { return false; }
+                          });
+
                           window.ReactNativeWebView.postMessage(
                             JSON.stringify({
                               type: 'selection',
-                              text: text
+                              text: text,
+                              hasHighlight: hasHighlight,
+                              ranges: ranges
                             })
                           );
 

@@ -38,7 +38,6 @@ export default function Profile() {
     isLoading: isSubscriptionLoading,
     isPremium,
     restorePurchases,
-    showPaywall,
   } = useRevenueCat();
   const { pdfs, isLoading: isLibraryLoading } = usePdfLibrary();
   const router = useRouter();
@@ -181,7 +180,7 @@ export default function Profile() {
                 <Pressable
                   accessibilityRole="button"
                   disabled={isSubscriptionLoading}
-                  onPress={() => void showPaywall()}
+                  onPress={() => router.push('/onboarding/premium')}
                   style={({ pressed }) => [
                     styles.upgradeButton,
                     isSubscriptionLoading && styles.saveButtonDisabled,
@@ -275,8 +274,8 @@ export default function Profile() {
                 accessibilityHint="Opens your email app"
                 accessibilityRole="link"
                 onPress={() => void openExternalLink(
-                  'mailto:suppor@bicreader.com?subject=Bic%20Reader%20Support',
-                  'Unable to open your email app. Email suppor@bicreader.com directly.',
+                  'mailto:support@bicreader.com?subject=Bic%20Reader%20Support',
+                  'Unable to open your email app. Email support@bicreader.com directly.',
                 )}
                 style={({ pressed }) => [styles.supportRow, pressed && styles.supportRowPressed]}
               >
@@ -285,7 +284,7 @@ export default function Profile() {
                 </View>
                 <View style={styles.supportCopy}>
                   <Text style={styles.supportTitle}>Contact us</Text>
-                  <Text style={styles.supportCaption}>suppor@bicreader.com</Text>
+                  <Text style={styles.supportCaption}>support@bicreader.com</Text>
                 </View>
                 <ChevronRight color={isDark ? '#7F897A' : '#9A9D95'} size={19} />
               </Pressable>

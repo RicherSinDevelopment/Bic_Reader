@@ -4,11 +4,13 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ReaderFeatureShowcase } from "@/components/onboarding/ReaderFeatureShowcase";
+import { OnboardingBackButton } from "@/components/onboarding/OnboardingBackButton";
 
 export default function FeaturesOnboardingScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
       <View style={styles.container}>
+        <OnboardingBackButton onPress={() => router.back()} />
         <View style={styles.copy}>
           <Text style={styles.title}>Read. Listen. Understand.</Text>
           <Text style={styles.subtitle}>Everything you need to get more from your PDFs.</Text>
@@ -23,7 +25,8 @@ export default function FeaturesOnboardingScreen() {
         </Text>
 
         <View style={styles.footer}>
-          <View style={styles.pagination} accessibilityLabel="Onboarding page 3 of 4">
+          <View style={styles.pagination} accessibilityLabel="Onboarding page 4 of 5">
+            <View style={styles.dot} />
             <View style={styles.dot} />
             <View style={styles.dot} />
             <View style={styles.activeDot} />
@@ -48,7 +51,7 @@ export default function FeaturesOnboardingScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#F7F5EC" },
   container: { flex: 1, paddingHorizontal: 20 },
-  copy: { alignItems: "center", paddingTop: 19, paddingHorizontal: 8 },
+  copy: { alignItems: "center", paddingTop: 19, paddingHorizontal: 18 },
   title: { textAlign: "center", color: "#1D221A", fontFamily: "Lato_700Bold", fontSize: 31, lineHeight: 37, letterSpacing: -0.55 },
   subtitle: { maxWidth: 350, marginTop: 9, textAlign: "center", color: "#65705D", fontFamily: "SourceSans3_400Regular", fontSize: 16, lineHeight: 22 },
   previewArea: { flex: 1, minHeight: 355, maxHeight: 500, marginTop: 15 },

@@ -97,6 +97,9 @@ const horizontalReaderMenuItems = [
   { key: "removeHighlight", label: "Remove Highlight" },
   { key: "askAI", label: "Ask AI" },
 ];
+const horizontalReaderMenuItemsWithoutRemove = horizontalReaderMenuItems.filter(
+  (item) => item.key !== "removeHighlight",
+);
 
 function escapeHtml(value: string) {
   return value
@@ -165,6 +168,7 @@ function HorizontalSelectablePage({
 }) {
   const webViewRef = useRef<WebView>(null);
   const selectionRangesRef = useRef<TextRange[]>([]);
+  const [selectionHasHighlight, setSelectionHasHighlight] = useState(false);
 
   const markup = useMemo(() => page.map((segment) => {
     const highlights = (userHighlights ?? []).filter((highlight) =>
@@ -233,7 +237,7 @@ function HorizontalSelectablePage({
     }
     function captureSelection(){
       const selection=window.getSelection();
-      if(!selection||!selection.rangeCount||selection.isCollapsed){window.__selectionRanges=[];window.ReactNativeWebView.postMessage(JSON.stringify({type:'selection',text:'',ranges:[]}));return}
+      if(!selection||!selection.rangeCount||selection.isCollapsed){window.__selectionRanges=[];window.ReactNativeWebView.postMessage(JSON.stringify({type:'selection',text:'',ranges:[],hasHighlight:false}));return}
       const range=selection.getRangeAt(0);const ranges=[];
       document.querySelectorAll('[data-block-id]').forEach(function(segment){
         try{if(!range.intersectsNode(segment))return;const contents=document.createRange();contents.selectNodeContents(segment);
@@ -245,7 +249,8 @@ function HorizontalSelectablePage({
           if(end>start)ranges.push({blockId:segment.dataset.blockId,offset:Number(segment.dataset.start||0)+start,length:end-start});
         }catch(error){}
       });window.__selectionRanges=ranges;
-      window.ReactNativeWebView.postMessage(JSON.stringify({type:'selection',text:selection.toString(),ranges:ranges}));
+      const hasHighlight=Array.from(document.querySelectorAll('.reader-user-highlight')).some(function(mark){try{return range.intersectsNode(mark)}catch(error){return false}});
+      window.ReactNativeWebView.postMessage(JSON.stringify({type:'selection',text:selection.toString(),ranges:ranges,hasHighlight:hasHighlight}));
     }
     let timer;document.addEventListener('selectionchange',function(){clearTimeout(timer);timer=setTimeout(captureSelection,80)});
     document.addEventListener('click',function(event){const marker=event.target.closest('[data-open-note]');if(marker)window.ReactNativeWebView.postMessage(JSON.stringify({type:'openNote',noteId:marker.dataset.openNote}))});
@@ -269,7 +274,7 @@ function HorizontalSelectablePage({
     overScrollMode="never"
     showsHorizontalScrollIndicator={false}
     showsVerticalScrollIndicator={false}
-    menuItems={horizontalReaderMenuItems}
+    menuItems={selectionHasHighlight ? horizontalReaderMenuItems : horizontalReaderMenuItemsWithoutRemove}
     onLoadEnd={() => {
       webViewRef.current?.injectJavaScript(ttsInjection);
       onReady?.();
@@ -281,6 +286,7 @@ function HorizontalSelectablePage({
         if (message.type === "selection") {
           const hadSelection = selectionRangesRef.current.length > 0;
           selectionRangesRef.current = Array.isArray(message.ranges) ? message.ranges : [];
+          setSelectionHasHighlight(Boolean(message.hasHighlight));
           if (hadSelection && !selectionRangesRef.current.length) onReaderReveal?.();
         } else if (message.type === "openNote" && typeof message.noteId === "string") {
           onOpenNote?.(message.noteId);

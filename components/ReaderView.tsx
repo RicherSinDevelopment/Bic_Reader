@@ -22,7 +22,14 @@ import {
 } from "@/components/ui/bottomsheet";
 import { BottomSheetHandle as NativeBottomSheetHandle } from "@gorhom/bottom-sheet";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Animated,
   KeyboardAvoidingView,
@@ -58,6 +65,19 @@ import {
   saveReaderAnnotations,
 } from "@/database/readerAnnotationRepository";
 
+type ReaderDestination = {
+  page: number;
+  readerPage?: number;
+  blockId?: string;
+  searchQuery?: string;
+  searchMatchIndex?: number;
+  switchHighlightOffset?: number;
+  switchHighlightWordIndex?: number;
+  switchHighlightWordProgress?: number;
+  switchHighlightQuery?: string;
+  nonce: number;
+};
+
 type ReaderViewProps = {
   documentId: string;
   annotationScope: string;
@@ -68,18 +88,7 @@ type ReaderViewProps = {
   blocks: ExtractedPdfBlock[];
   pageCount: number;
   sourcePageCount?: number;
-  destination?: {
-    page: number;
-    readerPage?: number;
-    blockId?: string;
-    searchQuery?: string;
-    searchMatchIndex?: number;
-    switchHighlightOffset?: number;
-    switchHighlightWordIndex?: number;
-    switchHighlightWordProgress?: number;
-    switchHighlightQuery?: string;
-    nonce: number;
-  } | null;
+  destination?: ReaderDestination | null;
   stationarySwitchHighlight?: {
     blockId: string;
     offset: number;
@@ -105,6 +114,25 @@ const readerMenuItems = [
 ];
 const readerMenuItemsWithoutRemove = readerMenuItems.filter(
   (item) => item.key !== "removeHighlight",
+);
+
+const MemoizedFontSettings = React.memo(FontSettings);
+const MemoizedBackgroundSettings = React.memo(BackgroundSettings);
+const MemoizedSettings = React.memo(Settings);
+const HiddenBottomSheetHandle = () => null;
+const aiBottomSheetHandleStyle = {
+  borderTopLeftRadius: 12,
+  borderTopRightRadius: 12,
+  paddingVertical: 12,
+} as const;
+const ReaderAiBottomSheetHandle = (
+  props: React.ComponentProps<typeof NativeBottomSheetHandle>,
+) => (
+  <NativeBottomSheetHandle
+    {...props}
+    accessibilityLabel="Resize AI panel"
+    style={aiBottomSheetHandleStyle}
+  />
 );
 
 const highlightColors = [
@@ -359,6 +387,27 @@ const ReaderView = ({
   // Bottom Sheet reference
   const bottomSheetRef =
     useRef<BottomSheetRef>(null);
+  const activeItemRef = useRef(activeItem);
+  const pendingBottomSheetItemRef = useRef<ReaderBottomNavItem | null>(null);
+  activeItemRef.current = activeItem;
+
+  const openBottomSheet = useCallback((item: ReaderBottomNavItem) => {
+    if (activeItemRef.current === item) {
+      bottomSheetRef.current?.open(0);
+      return;
+    }
+
+    // Commit and measure the requested content before the native opening
+    // animation begins. This avoids animating while swapping the old panel.
+    pendingBottomSheetItemRef.current = item;
+    setActiveItem(item);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (pendingBottomSheetItemRef.current !== activeItem) return;
+    pendingBottomSheetItemRef.current = null;
+    bottomSheetRef.current?.open(0);
+  }, [activeItem]);
 
   useEffect(() => {
     if (isLandscape) {
@@ -367,14 +416,63 @@ const ReaderView = ({
   }, [isLandscape]);
   // WebView reference
   const webViewRef = useRef<WebView>(null);
+  const transition = useReaderSettingsStore((state) => state.transition);
+  const { isPaged, syncPageTransition } = usePageTransition({
+    webViewRef,
+    transition,
+  });
+  const [modeHandoff, setModeHandoff] = useState<{
+    isPaged: boolean;
+    destination: ReaderDestination | null;
+    previousDestinationNonce: number | null;
+  }>(() => ({
+    isPaged,
+    destination: null,
+    previousDestinationNonce: null,
+  }));
+
+  useLayoutEffect(() => {
+    setModeHandoff((current) => {
+      if (current.isPaged === isPaged) return current;
+      const anchor = modeTextAnchorRef.current;
+      return {
+        isPaged,
+        destination: {
+          page: Math.max(1, lastSourcePageRef.current),
+          blockId: anchor?.blockId,
+          // Horizontal pagination uses this offset to resolve the exact segment.
+          searchMatchIndex: anchor?.blockOffset,
+          // Vertical scrolling uses the word index to restore the precise line.
+          switchHighlightWordIndex: anchor?.wordIndex,
+          nonce: Date.now(),
+        },
+        previousDestinationNonce: destination?.nonce ?? null,
+      };
+    });
+  }, [destination?.nonce, isPaged]);
+
+  const modeHandoffReady = modeHandoff.isPaged === isPaged;
+
+  // A destination that arrives after the mode switch is explicit navigation
+  // (search, contents, or page picker) and must supersede the handoff. An old
+  // destination that was already consumed must not pull the new view backward.
+  const destinationChangedAfterHandoff = Boolean(
+    destination &&
+      destination.nonce !== modeHandoff.previousDestinationNonce,
+  );
+  const activeModeDestination = !modeHandoffReady
+    ? null
+    : destinationChangedAfterHandoff
+      ? destination
+      : modeHandoff.destination ?? destination;
 
   useEffect(() => {
     if (!webViewReady) return;
     const remaining = blocks.filter((block) => !sentBlockIds.current.has(block.id));
-    const destinationBlocks = destination
-      ? remaining.filter((block) => destination.blockId
-          ? block.id === destination.blockId
-          : block.page === destination.page)
+    const destinationBlocks = activeModeDestination
+      ? remaining.filter((block) => activeModeDestination.blockId
+          ? block.id === activeModeDestination.blockId
+          : block.page === activeModeDestination.page)
       : [];
     const appended = destinationBlocks.length
       ? destinationBlocks.slice(0, 220)
@@ -416,27 +514,14 @@ const ReaderView = ({
     }
   }, [
     appendPass,
+    activeModeDestination,
     blocks,
-    destination,
     pageCount,
     pagerHighlights,
     readerNotes,
     sourcePageCount,
     webViewReady,
   ]);
-
-  useEffect(() => {
-    if (!webViewReady || !destination) return;
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "goToSourcePage",
-      ...destination,
-    }));
-  }, [destination, webViewReady]);
-  const transition = useReaderSettingsStore((state) => state.transition);
-  const { isPaged, syncPageTransition } = usePageTransition({
-    webViewRef,
-    transition,
-  });
 
   useEffect(() => {
     if (!webViewReady || isPaged) return;
@@ -450,8 +535,15 @@ const ReaderView = ({
   }, [isPaged, pagerHighlights, readerNotes, webViewReady]);
 
   useEffect(() => {
-    if (isPaged) setWebViewReady(false);
-  }, [isPaged]);
+    if (!isPaged) return;
+
+    // Horizontal mode unmounts the vertical WebView. Reset its delivery
+    // bookkeeping at the same time so a fresh vertical WebView receives every
+    // block again instead of mistaking its initial batch for the whole book.
+    setWebViewReady(false);
+    appendedBlockCount.current = initialBlocks.length;
+    sentBlockIds.current = new Set(initialBlocks.map((block) => block.id));
+  }, [initialBlocks, isPaged]);
 
   const highlightSpokenWord = useCallback(
     (charIndex: number, charLength: number) => {
@@ -538,11 +630,10 @@ const ReaderView = ({
           return;
         }
         setSelectedAIText(event.nativeEvent.selectedText?.trim() ?? "");
-        setActiveItem("ai");
-        bottomSheetRef.current?.open(0);
+        openBottomSheet("ai");
       }
     },
-    [isPremium]
+    [isPremium, openBottomSheet]
   );
 
   const openReaderNote = useCallback((noteId: string) => {
@@ -737,25 +828,18 @@ const textColor = isDark && !colorsCustomized
     onPageChange?.(sourcePage);
   }, [blocks, onPageChange, onPaginationChange, onSwitchAnchorChange]);
 
-  const syncedPagedModeRef = useRef(isPaged);
   useEffect(() => {
-    if (!webViewReady) return;
-    const modeChanged = syncedPagedModeRef.current !== isPaged;
-    syncedPagedModeRef.current = isPaged;
+    if (!webViewReady || isPaged) return;
     syncPageTransition();
-    if (!modeChanged) return;
-    const sourcePage = Math.max(1, lastSourcePageRef.current);
-    const anchor = modeTextAnchorRef.current;
-    const timer = setTimeout(() => {
+    if (!activeModeDestination) return;
+    const frame = requestAnimationFrame(() => {
       webViewRef.current?.postMessage(JSON.stringify({
         type: "goToSourcePage",
-        page: sourcePage,
-        blockId: anchor?.blockId,
-        switchHighlightWordIndex: anchor?.wordIndex,
+        ...activeModeDestination,
       }));
-    }, 80);
-    return () => clearTimeout(timer);
-  }, [isPaged, syncPageTransition, webViewReady]);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeModeDestination, isPaged, syncPageTransition, webViewReady]);
 
 
   const sendReaderSettings = useCallback(() => {
@@ -830,6 +914,24 @@ const textColor = isDark && !colorsCustomized
       type: "setGuideBackgroundDimming",
       percentage: guideBackgroundDimming,
     }));
+    // iOS WKWebView can settle on a non-zero document offset after load (the
+    // native contentInset then tucks the opening line up under the header).
+    // A freshly opened reader must always start at the absolute top. Wait a
+    // couple of frames for WebKit's post-load layout to settle, then reset the
+    // document unless an explicit destination / recovery navigation took over.
+    webViewRef.current?.injectJavaScript(`
+      (function() {
+        if (window.__readerTransition === 'pager') return;
+        if (window.__pendingSourceDestination) return;
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            if (window.__pendingSourceDestination) return;
+            if (window.scrollY !== 0) window.scrollTo(0, 0);
+          });
+        });
+      })();
+      true;
+    `);
     const recoveryPage = recoveryPageRef.current;
     if (recoveryPage !== null) {
       recoveryPageRef.current = null;
@@ -1106,6 +1208,38 @@ const textColor = isDark && !colorsCustomized
             border-radius: 3px;
             background-color: rgba(250, 204, 21, 0.62);
             pointer-events: none;
+            animation: reader-switch-pulse 1.2s ease-out forwards;
+          }
+          @keyframes reader-switch-pulse {
+            0% {
+              background-color: rgba(250, 204, 21, 0.56);
+              box-shadow: 0 0 0 0 rgba(202, 138, 4, 0.3);
+              opacity: 0.82;
+            }
+            32% {
+              background-color: rgba(250, 204, 21, 0.92);
+              box-shadow: 0 0 0 4px rgba(202, 138, 4, 0.2);
+              opacity: 1;
+            }
+            62% {
+              background-color: rgba(250, 204, 21, 0.66);
+              box-shadow: 0 0 0 1px rgba(202, 138, 4, 0.12);
+              opacity: 0.9;
+            }
+            100% {
+              background-color: rgba(250, 204, 21, 0);
+              box-shadow: 0 0 0 0 rgba(202, 138, 4, 0);
+              opacity: 0;
+            }
+          }
+          @keyframes reader-switch-fade {
+            from { opacity: 0.9; }
+            to { opacity: 0; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            #reader-switch-highlight {
+              animation: reader-switch-fade 0.8s ease-out forwards;
+            }
           }
           #reader-line-guide,
           #reader-word-guide {
@@ -1533,7 +1667,13 @@ const textColor = isDark && !colorsCustomized
             if (anchorElement) {
               if (window.__readerTransition === 'scroll') {
                 const nextTop = anchorElement.getBoundingClientRect().top;
-                window.scrollBy(0, nextTop - anchorTop);
+                // Anchor-stability scrolling keeps the reading position still
+                // when typography changes mid-book. At the very top of a fresh
+                // document, preserving a mid-viewport anchor instead pushes the
+                // opening line up under the header, clipping the first words.
+                if (window.scrollY > 1) {
+                  window.scrollBy(0, nextTop - anchorTop);
+                }
               } else {
                 window.__goToElementPage?.(anchorElement);
               }
@@ -1971,8 +2111,7 @@ const textColor = isDark && !colorsCustomized
           return;
         }
         setSelectedAIText(typeof data.text === "string" ? data.text.trim() : "");
-        setActiveItem("ai");
-        bottomSheetRef.current?.open(0);
+        openBottomSheet("ai");
         return;
       }
 
@@ -2054,7 +2193,7 @@ const textColor = isDark && !colorsCustomized
     /*
      * Update selected toolbar item.
      */
-    setActiveItem(item);
+    openBottomSheet(item);
 
     if (item === "ai") {
       setAiExpanded(false);
@@ -2070,10 +2209,6 @@ const textColor = isDark && !colorsCustomized
      */
     showToolbar();
 
-    /*
-     * Open Bottom Sheet.
-     */
-    bottomSheetRef.current?.open(0);
   };
 
   // --------------------------------
@@ -2085,11 +2220,11 @@ const textColor = isDark && !colorsCustomized
     switch (activeItem) {
 
       case "font":
-        return <FontSettings />;
+        return <MemoizedFontSettings />;
 
       case "background":
         return (
-          <BackgroundSettings
+          <MemoizedBackgroundSettings
             onSelectedTypeChange={setBackgroundSettingsTab}
           />
         );
@@ -2131,7 +2266,7 @@ const textColor = isDark && !colorsCustomized
         );
 
       case "settings":
-        return <Settings />;
+        return <MemoizedSettings />;
 
       default:
         return null;
@@ -2142,8 +2277,8 @@ const textColor = isDark && !colorsCustomized
   const usesFixedSettingsSheet =
     activeItem === "background" && backgroundSettingsTab !== "presets";
 
-  const bottomSheetSnapPoints =
-    activeItem === "tts"
+  const bottomSheetSnapPoints = useMemo(
+    () => activeItem === "tts"
       ? undefined
       : activeItem === "ai"
       ? ["40%", "90%"]
@@ -2151,7 +2286,9 @@ const textColor = isDark && !colorsCustomized
       ? ["40%", "88%"]
       : usesFixedSettingsSheet
         ? ["40%"]
-        : ["40%", "82%"];
+        : ["40%", "82%"],
+    [activeItem, usesFixedSettingsSheet],
+  );
 
   if (!latoBoldBase64 || !sourceSansBase64) {
     return <View style={{ flex: 1, backgroundColor }} />;
@@ -2294,7 +2431,7 @@ const textColor = isDark && !colorsCustomized
           }}
         >
           <View className="flex-1">
-          {isPaged && (
+          {isPaged && modeHandoffReady && (
             <View style={StyleSheet.absoluteFill}>
               <HorizontalReaderPager
                 blocks={blocks}
@@ -2323,8 +2460,7 @@ const textColor = isDark && !colorsCustomized
                     return;
                   }
                   setSelectedAIText(text.trim());
-                  setActiveItem("ai");
-                  bottomSheetRef.current?.open(0);
+                  openBottomSheet("ai");
                 }}
                 readingDirection={readerDirection}
                 userNotes={readerNotes}
@@ -2332,7 +2468,7 @@ const textColor = isDark && !colorsCustomized
                 guideMode={readerGuideMode}
                 guideBackgroundDimming={guideBackgroundDimming}
                 onGuideClose={closeReaderGuide}
-                destination={destination}
+                destination={activeModeDestination}
                 stationarySwitchHighlight={stationarySwitchHighlight}
                 fontFamily={fontFamily.split(",")[0].replaceAll("'", "").trim()}
                 latoBoldBase64={latoBoldBase64}
@@ -2361,7 +2497,7 @@ const textColor = isDark && !colorsCustomized
               />
             </View>
           )}
-          {!isPaged && (
+          {!isPaged && modeHandoffReady && (
           <View
             pointerEvents="auto"
             style={StyleSheet.absoluteFill}
@@ -2457,6 +2593,9 @@ const textColor = isDark && !colorsCustomized
               }
 
               window.__readerInitialized = true;
+              if ('scrollRestoration' in history) {
+                history.scrollRestoration = 'manual';
+              }
               window.__readerHasMore = true;
               window.__showReaderSwitchHighlight = false;
               const paragraphs = Array.from(
@@ -2507,6 +2646,10 @@ const textColor = isDark && !colorsCustomized
                 marker.style.top = (rect.top + window.scrollY) + 'px';
                 marker.style.width = rect.width + 'px';
                 marker.style.height = rect.height + 'px';
+                marker.addEventListener('animationend', function() {
+                  if (marker.isConnected) marker.remove();
+                  window.__showReaderSwitchHighlight = false;
+                }, { once: true });
                 document.body.appendChild(marker);
               }
 
@@ -2664,7 +2807,6 @@ const textColor = isDark && !colorsCustomized
               }
 
               function reportSwitchAnchor(force) {
-                if (!window.__readerTopBarVisible && window.__readerTransition === 'scroll') return;
                 if (reportPreciseSwitchAnchor(force)) return;
                 let block = null;
                 const topBoundary = readerVisibleTopBoundary();
@@ -3775,23 +3917,14 @@ const textColor = isDark && !colorsCustomized
         {/* ========================= */}
 
         <BottomSheetPortal
+          preload
           snapPoints={bottomSheetSnapPoints}
           enableDynamicSizing={activeItem === "tts"}
           maxDynamicContentSize={windowHeight * 0.9}
           handleComponent={
             activeItem === "ai"
-              ? (props) => (
-                  <NativeBottomSheetHandle
-                    {...props}
-                    accessibilityLabel="Resize AI panel"
-                    style={{
-                      borderTopLeftRadius: 12,
-                      borderTopRightRadius: 12,
-                      paddingVertical: 12,
-                    }}
-                  />
-                )
-              : () => null
+              ? ReaderAiBottomSheetHandle
+              : HiddenBottomSheetHandle
           }
           keyboardBehavior={activeItem === "ai" ? "interactive" : undefined}
           keyboardBlurBehavior={activeItem === "ai" ? "restore" : undefined}

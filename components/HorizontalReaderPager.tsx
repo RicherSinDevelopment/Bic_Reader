@@ -179,6 +179,7 @@ function HorizontalSelectablePage({
       start: Math.max(0, highlight.offset - segment.startOffset),
       end: Math.min(segment.text.length, highlight.offset + highlight.length - segment.startOffset),
       color: highlight.color,
+      className: "reader-user-highlight",
       noteId: undefined as string | undefined,
     }));
     (userNotes ?? []).filter((note) =>
@@ -189,6 +190,7 @@ function HorizontalSelectablePage({
       start: Math.max(0, note.offset - segment.startOffset),
       end: Math.min(segment.text.length, note.offset + note.length - segment.startOffset),
       color: "transparent",
+      className: "reader-note",
       noteId: note.id,
     }));
     [searchHighlight, switchHighlight].forEach((highlight, index) => {
@@ -199,6 +201,7 @@ function HorizontalSelectablePage({
         start,
         end: Math.min(segment.text.length, start + highlight.length),
         color: index === 0 ? "#facc15" : "rgba(250, 204, 21, 0.68)",
+        className: index === 0 ? "reader-search-highlight" : "reader-switch-highlight",
         noteId: undefined,
       });
     });
@@ -213,7 +216,7 @@ function HorizontalSelectablePage({
       if (highlight.noteId) {
         return `${before}<span class="reader-note" data-note-id="${escapeHtml(highlight.noteId)}">${selected}</span><button class="reader-note-marker" data-open-note="${escapeHtml(highlight.noteId)}" aria-label="Open note">•</button>`;
       }
-      return `${before}<mark class="reader-user-highlight" style="background-color:${escapeHtml(highlight.color)}">${selected}</mark>`;
+      return `${before}<mark class="${highlight.className}" style="background-color:${escapeHtml(highlight.color)}">${selected}</mark>`;
     }).join("") + escapeHtml(displayText(segment.text.slice(cursor)));
     const scale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
     const indent = segment.paragraphStart && !segment.sectionOpening ? "&#8195;&#8194;" : "";
@@ -223,9 +226,14 @@ function HorizontalSelectablePage({
   const webFontFamily = fontFamily === "Lato_700Bold"
     ? "LatoReaderBold"
     : fontFamily === "SourceSans3_400Regular" ? "SourceSansReader" : fontFamily;
+  const fontFaceCss = webFontFamily === "LatoReaderBold" && latoBoldBase64
+    ? `@font-face{font-family:'LatoReaderBold';src:url('data:font/ttf;base64,${latoBoldBase64}') format('truetype');font-weight:700;font-display:block}`
+    : webFontFamily === "SourceSansReader" && sourceSansBase64
+      ? `@font-face{font-family:'SourceSansReader';src:url('data:font/ttf;base64,${sourceSansBase64}') format('truetype');font-weight:400;font-display:block}`
+      : "";
   const html = useMemo(() => `<!doctype html><html dir="${readingDirection}"><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
-    @font-face{font-family:'LatoReaderBold';src:url('data:font/ttf;base64,${latoBoldBase64 ?? ""}') format('truetype');font-weight:700;font-display:block}@font-face{font-family:'SourceSansReader';src:url('data:font/ttf;base64,${sourceSansBase64 ?? ""}') format('truetype');font-weight:400;font-display:block}
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:20px 0 ${bottomPadding}px;color:${textColor};font-family:${JSON.stringify(webFontFamily)},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.reader-user-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body>${markup}<script>
+    ${fontFaceCss}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:20px 0 ${bottomPadding}px;color:${textColor};font-family:${JSON.stringify(webFontFamily)},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.2s ease-out forwards}@keyframes readerSwitchPulse{0%{background-color:rgba(250,204,21,.56);box-shadow:0 0 0 0 rgba(202,138,4,.3);opacity:.82}32%{background-color:rgba(250,204,21,.92);box-shadow:0 0 0 4px rgba(202,138,4,.2);opacity:1}62%{background-color:rgba(250,204,21,.66);box-shadow:0 0 0 1px rgba(202,138,4,.12);opacity:.9}100%{background-color:rgba(250,204,21,0);box-shadow:0 0 0 0 rgba(202,138,4,0);opacity:0}}@keyframes readerSwitchFade{from{opacity:.9}to{opacity:0}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body>${markup}<script>
     window.__selectionRanges=[];
     function cleanLength(value){return String(value||'').replace(/\\u00ad/g,'').length}
     function rawIndexForClean(value,target){let clean=0;for(let index=0;index<value.length;index++){if(value[index]!=='\\u00ad'){if(clean===target)return index;clean++}}return value.length}
@@ -254,7 +262,7 @@ function HorizontalSelectablePage({
     }
     let timer;document.addEventListener('selectionchange',function(){clearTimeout(timer);timer=setTimeout(captureSelection,80)});
     document.addEventListener('click',function(event){const marker=event.target.closest('[data-open-note]');if(marker)window.ReactNativeWebView.postMessage(JSON.stringify({type:'openNote',noteId:marker.dataset.openNote}))});
-  </script></body></html>`, [automaticHyphenation, backgroundColor, bold, bottomPadding, latoBoldBase64, letterSpacing, markup, readingDirection, sourceSansBase64, textColor, webFontFamily, wordSpacing]);
+  </script></body></html>`, [automaticHyphenation, backgroundColor, bold, bottomPadding, fontFaceCss, letterSpacing, markup, readingDirection, textColor, webFontFamily, wordSpacing]);
 
   const source = useMemo(() => ({ html }), [html]);
   const ttsInjection = useMemo(
@@ -389,6 +397,56 @@ function buildPages(
   return pages.filter((page) => page.length > 0);
 }
 
+// ReaderView stays mounted while its horizontal child is swapped out. Keep a
+// small pagination cache keyed by that stable blocks array so returning to the
+// pager does not synchronously lay out the whole book again.
+const paginationCache = new WeakMap<
+  ExtractedPdfBlock[],
+  Map<string, Segment[][]>
+>();
+
+function cachedBuildPages(
+  blocks: ExtractedPdfBlock[],
+  charactersPerLine: number,
+  pageHeight: number,
+  baseLineHeight: number,
+  baseFontSize: number,
+  paragraphSpacing: number,
+) {
+  const key = [
+    blocks.length,
+    blocks[blocks.length - 1]?.id ?? "empty",
+    blocks[blocks.length - 1]?.text.length ?? 0,
+    charactersPerLine,
+    Math.round(pageHeight * 10),
+    Math.round(baseLineHeight * 100),
+    Math.round(baseFontSize * 100),
+    Math.round(paragraphSpacing * 100),
+  ].join(":");
+  let entries = paginationCache.get(blocks);
+  if (!entries) {
+    entries = new Map();
+    paginationCache.set(blocks, entries);
+  }
+  const cached = entries.get(key);
+  if (cached) return cached;
+
+  const pages = buildPages(
+    blocks,
+    charactersPerLine,
+    pageHeight,
+    baseLineHeight,
+    baseFontSize,
+    paragraphSpacing,
+  );
+  if (entries.size >= 4) {
+    const oldestKey = entries.keys().next().value;
+    if (oldestKey !== undefined) entries.delete(oldestKey);
+  }
+  entries.set(key, pages);
+  return pages;
+}
+
 function pageAnchor(
   page: Segment[] | undefined,
   blocks: ExtractedPdfBlock[],
@@ -445,6 +503,7 @@ export default function HorizontalReaderPager({
   const readyReportedRef = useRef(false);
   const navigatedDestinationKeyRef = useRef<string | null>(null);
   const [containerHeight, setContainerHeight] = useState(0);
+  const [pagerWarm, setPagerWarm] = useState(false);
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<number | null>(null);
   const [dismissedSwitchNonce, setDismissedSwitchNonce] = useState<number | null>(null);
   const [lineGuideIndex, setLineGuideIndex] = useState(0);
@@ -473,6 +532,7 @@ export default function HorizontalReaderPager({
   const insets = useSafeAreaInsets();
   const usableHeight = containerHeight || windowHeight;
   const reportReady = useCallback(() => {
+    setPagerWarm(true);
     if (readyReportedRef.current) return;
     readyReportedRef.current = true;
     onReady?.();
@@ -507,7 +567,7 @@ export default function HorizontalReaderPager({
     deferredFontSize * deferredLineHeight,
   );
   const pages = useMemo(
-    () => buildPages(
+    () => cachedBuildPages(
       blocks,
       charactersPerLine,
       pageContentHeight,
@@ -524,32 +584,17 @@ export default function HorizontalReaderPager({
       pageContentHeight,
     ]
   );
-  const sourcePageMap = useMemo(() => {
-    const direct: Record<number, number> = {};
-    let maximumSourcePage = 0;
-    pages.forEach((page, readerPageIndex) => {
-      page.forEach((segment) => {
-        maximumSourcePage = Math.max(maximumSourcePage, segment.sourcePage);
-        direct[segment.sourcePage] ??= readerPageIndex + 1;
-      });
-    });
-
-    const complete: Record<number, number> = {};
-    let nextReaderPage = pages.length || 1;
-    for (let sourcePage = maximumSourcePage; sourcePage >= 1; sourcePage -= 1) {
-      if (direct[sourcePage] !== undefined) nextReaderPage = direct[sourcePage];
-      complete[sourcePage] = nextReaderPage;
-    }
-    return complete;
-  }, [pages]);
-  const guideWords = useMemo(() => pages.flatMap((page, pageIndex) =>
-    page.flatMap((segments) => Array.from(segments.text.matchAll(/\S+/g)).map((match) => ({
-      pageIndex,
-      blockId: segments.blockId,
-      offset: segments.startOffset + (match.index ?? 0),
-      length: match[0].length,
-    }))),
-  ), [pages]);
+  const guideWords = useMemo(() => {
+    if (guideMode !== "word") return [];
+    return pages.flatMap((page, pageIndex) =>
+      page.flatMap((segments) => Array.from(segments.text.matchAll(/\S+/g)).map((match) => ({
+        pageIndex,
+        blockId: segments.blockId,
+        offset: segments.startOffset + (match.index ?? 0),
+        length: match[0].length,
+      }))),
+    );
+  }, [guideMode, pages]);
 
   useEffect(() => {
     if (!guideMode) return;
@@ -564,8 +609,27 @@ export default function HorizontalReaderPager({
   }, [guideMode, guideWords]);
 
   useEffect(() => {
-    onPageMapChange?.(sourcePageMap);
-  }, [onPageMapChange, sourcePageMap]);
+    if (!onPageMapChange) return;
+    const frame = requestAnimationFrame(() => {
+      const direct: Record<number, number> = {};
+      let maximumSourcePage = 0;
+      pages.forEach((page, readerPageIndex) => {
+        page.forEach((segment) => {
+          maximumSourcePage = Math.max(maximumSourcePage, segment.sourcePage);
+          direct[segment.sourcePage] ??= readerPageIndex + 1;
+        });
+      });
+
+      const complete: Record<number, number> = {};
+      let nextReaderPage = pages.length || 1;
+      for (let sourcePage = maximumSourcePage; sourcePage >= 1; sourcePage -= 1) {
+        if (direct[sourcePage] !== undefined) nextReaderPage = direct[sourcePage];
+        complete[sourcePage] = nextReaderPage;
+      }
+      onPageMapChange(complete);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [onPageMapChange, pages]);
   const destinationPage = useMemo(() => {
     if (!destination) return 0;
     if (destination.readerPage !== undefined) {
@@ -961,6 +1025,14 @@ export default function HorizontalReaderPager({
       stationarySwitchHighlight.nonce >= navigationSwitchHighlight.nonce)
     ? stationarySwitchHighlight
     : navigationSwitchHighlight;
+  const activeSwitchNonce = activeSwitchHighlight?.nonce;
+  useEffect(() => {
+    if (activeSwitchNonce === undefined || activeSwitchNonce === dismissedSwitchNonce) return;
+    const timer = setTimeout(() => {
+      setDismissedSwitchNonce(activeSwitchNonce);
+    }, 1600);
+    return () => clearTimeout(timer);
+  }, [activeSwitchNonce, dismissedSwitchNonce]);
   const selectableSearchHighlight = destination &&
     destination.nonce !== dismissedSearchNonce &&
     destination.blockId && destination.searchQuery && destination.searchMatchIndex !== undefined
@@ -1217,9 +1289,9 @@ export default function HorizontalReaderPager({
         initialScrollIndex={pages.length ? destinationPage : undefined}
         bounces={false}
         overScrollMode="never"
-        initialNumToRender={3}
-        maxToRenderPerBatch={3}
-        windowSize={3}
+        initialNumToRender={1}
+        maxToRenderPerBatch={pagerWarm ? 2 : 1}
+        windowSize={pagerWarm ? 3 : 1}
         removeClippedSubviews
         showsHorizontalScrollIndicator={false}
         keyExtractor={(_, pageIndex) => `reader-page-${pageIndex}`}

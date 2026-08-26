@@ -92,17 +92,19 @@ diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm b/node_m
 index de46c98..37cdf89 100644
 --- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
 +++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
-@@ -75,6 +75,9 @@ @implementation RNPDFPdfView
+@@ -75,6 +75,11 @@ @implementation RNPDFPdfView
      UIPinchGestureRecognizer *_pinchRecognizer;
      UILongPressGestureRecognizer *_longPressRecognizer;
      UITapGestureRecognizer *_doubleTapEmptyRecognizer;
 +    PDFSelection *_switchHighlightSelection;
 +    PDFAnnotation *_switchHighlightAnnotation;
 +    PDFPage *_switchHighlightPage;
++    CADisplayLink *_switchHighlightDisplayLink;
++    CFTimeInterval _switchHighlightPulseStart;
  }
  
  #ifdef RCT_NEW_ARCH_ENABLED
-@@ -234,6 +237,122 @@ - (void)setNativePage:(NSInteger)page
+@@ -234,6 +239,173 @@ - (void)setNativePage:(NSInteger)page
      [self didSetProps:[NSArray arrayWithObject:@"page"]];
  }
  
@@ -186,6 +188,16 @@ index de46c98..37cdf89 100644
 +    _switchHighlightAnnotation = annotation;
 +    _switchHighlightPage = pdfPage;
 +
++    // Animate only the annotation color. Keeping its bounds fixed avoids the
++    // word marker drifting or changing size while PDFKit scrolls into place.
++    _switchHighlightPulseStart = 0.0;
++    _switchHighlightDisplayLink = [CADisplayLink
++        displayLinkWithTarget:self
++        selector:@selector(updateSwitchHighlightPulse:)];
++    _switchHighlightDisplayLink.preferredFramesPerSecond = 30;
++    [_switchHighlightDisplayLink addToRunLoop:NSRunLoop.mainRunLoop
++                                      forMode:NSRunLoopCommonModes];
++
 +    // Keep enough page content above the marker so PDFKit does not align the
 +    // highlighted word against the top edge of the visible document area.
 +    // PDF coordinates grow upward, so extend the navigation rectangle much
@@ -206,8 +218,49 @@ index de46c98..37cdf89 100644
 +         NSStringFromCGRect(highlightRect));
 +}
 +
++- (void)updateSwitchHighlightPulse:(CADisplayLink *)displayLink
++{
++    if (displayLink != _switchHighlightDisplayLink || !_switchHighlightAnnotation) {
++        [displayLink invalidate];
++        return;
++    }
++
++    if (_switchHighlightPulseStart <= 0.0) {
++        _switchHighlightPulseStart = displayLink.timestamp;
++    }
++
++    BOOL reduceMotion = UIAccessibilityIsReduceMotionEnabled();
++    CFTimeInterval duration = reduceMotion ? 0.8 : 1.2;
++    CGFloat progress = MIN(1.0, MAX(0.0,
++        (displayLink.timestamp - _switchHighlightPulseStart) / duration));
++    CGFloat alpha = 0.0;
++
++    if (reduceMotion) {
++        alpha = 0.68 * (1.0 - progress);
++    } else if (progress < 0.24) {
++        CGFloat rise = progress / 0.24;
++        CGFloat easedRise = 1.0 - (1.0 - rise) * (1.0 - rise);
++        alpha = 0.56 + (0.36 * easedRise);
++    } else {
++        CGFloat fade = (progress - 0.24) / 0.76;
++        CGFloat easedFade = fade * fade * (3.0 - 2.0 * fade);
++        alpha = 0.92 * (1.0 - easedFade);
++    }
++
++    _switchHighlightAnnotation.color =
++        [[UIColor systemYellowColor] colorWithAlphaComponent:alpha];
++    [_pdfView setNeedsDisplay];
++
++    if (progress >= 1.0) {
++        [self clearNativeHighlight];
++    }
++}
++
 +- (void)clearNativeHighlight
 +{
++    [_switchHighlightDisplayLink invalidate];
++    _switchHighlightDisplayLink = nil;
++    _switchHighlightPulseStart = 0.0;
 +    BOOL hadHighlight = _switchHighlightSelection || _switchHighlightAnnotation;
 +    if (_switchHighlightAnnotation && _switchHighlightPage) {
 +        [_switchHighlightPage removeAnnotation:_switchHighlightAnnotation];
@@ -225,3 +278,7 @@ index de46c98..37cdf89 100644
  #endif
  
  - (instancetype)initWithBridge:(RCTBridge *)bridge
+@@ -603,2 +775,3 @@ - (void)dealloc{
++    [self clearNativeHighlight];
+     _pdfDocument = Nil;
+     _pdfView = Nil;

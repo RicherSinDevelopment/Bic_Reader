@@ -72,6 +72,29 @@ export default function Settings() {
 
       <View className="mt-4 flex-row items-center justify-between">
         <View className="mr-4 flex-1">
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Horizontal swipe:</Text>
+          <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
+            Turn off to read with vertical scrolling.
+          </Text>
+        </View>
+        <Center>
+          <Switch
+            accessibilityLabel="Horizontal swipe"
+            size="md"
+            value={transition === "pager"}
+            onValueChange={(enabled) =>
+              setTransition(enabled ? "pager" : "scroll")
+            }
+            isDisabled={false}
+            trackColor={{ false: "#d4d4d4", true: "#639922" }}
+            thumbColor="#fafafa"
+            ios_backgroundColor="#d4d4d4"
+          />
+        </Center>
+      </View>
+
+      <View className="mt-4 flex-row items-center justify-between">
+        <View className="mr-4 flex-1">
           <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Hide top bar:</Text>
           <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
             Hide the header and iPhone status icons while scrolling down.
@@ -179,29 +202,6 @@ export default function Settings() {
             formatValue={(value) => `${value}%`}
           />
         </View>
-      </View>
-
-      <View className="mt-4 flex-row items-center justify-between">
-        <View className="mr-4 flex-1">
-          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Horizontal swipe:</Text>
-          <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
-            Turn off to read with vertical scrolling.
-          </Text>
-        </View>
-        <Center>
-          <Switch
-            accessibilityLabel="Horizontal swipe"
-            size="md"
-            value={transition === "pager"}
-            onValueChange={(enabled) =>
-              setTransition(enabled ? "pager" : "scroll")
-            }
-            isDisabled={false}
-            trackColor={{ false: "#d4d4d4", true: "#639922" }}
-            thumbColor="#fafafa"
-            ios_backgroundColor="#d4d4d4"
-          />
-        </Center>
       </View>
 
     </View>

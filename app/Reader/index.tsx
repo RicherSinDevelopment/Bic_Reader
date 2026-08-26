@@ -18,10 +18,12 @@ import { Text } from "@/components/ui/text";
 import {
   getPdfById,
   markPdfOpened,
+  peekCachedPdfById,
   updatePdfProgress,
 } from "@/database/pdfRepository";
 import {
   getCachedPdfExtraction,
+  getCachedPdfExtractionPreview,
   savePdfExtraction,
 } from "@/database/pdfExtractionRepository";
 import {
@@ -117,6 +119,35 @@ const CHAPTER_EXTRACTION_PAGE_COUNT = 7;
 const TRANSLATION_PREFETCH_DISTANCE = 7;
 const EXTRACTION_CACHE_PAGE_INTERVAL = 32;
 
+const readerSnapshotCache = new WeakMap<
+  ExtractedPdfDocument,
+  {
+    blocks: ExtractedPdfBlock[];
+    pageSizes: Record<number, PdfPageSize>;
+  }
+>();
+
+function readerSnapshot(document: ExtractedPdfDocument) {
+  const cached = readerSnapshotCache.get(document);
+  if (cached) return cached;
+  const pageSizes: Record<number, PdfPageSize> = Object.fromEntries(
+    document.pages.map((page) => [
+      page.page,
+      { width: page.width, height: page.height },
+    ]),
+  );
+  const snapshot = {
+    blocks: normalizeReaderBlocks(
+      document.pages.flatMap((page) =>
+        page.blocks.filter(isVisibleReaderBlock),
+      ),
+    ),
+    pageSizes,
+  };
+  readerSnapshotCache.set(document, snapshot);
+  return snapshot;
+}
+
 function BookPageSkeleton() {
   const lineWidths = [
     "w-full",
@@ -167,6 +198,7 @@ function BookPageSkeleton() {
 export default function ReaderScreen() {
   const { pdfId } = useLocalSearchParams<{ pdfId?: string }>();
   const db = useSQLiteContext();
+  const initiallyCachedPdf = pdfId ? peekCachedPdfById(pdfId) : null;
   const readerTransition = useReaderSettingsStore((state) => state.transition);
   const hideTopBarOnScroll = useReaderSettingsStore(
     (state) => state.hideTopBarOnScroll,
@@ -180,8 +212,8 @@ export default function ReaderScreen() {
   const readerGuideEnabled = lineGuideEnabled || wordGuideEnabled;
   const [readerChromeHidden, setReaderChromeHidden] = useState(false);
   const isDark = useColorScheme() === "dark";
-  const [pdf, setPdf] = useState<PdfDocument | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [pdf, setPdf] = useState<PdfDocument | null>(initiallyCachedPdf);
+  const [isLoading, setIsLoading] = useState(!initiallyCachedPdf);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [headerVisibility] = useState(() => new Animated.Value(1));
   const [activeTab, setActiveTab] = useState<ReaderMode>("reader");
@@ -210,6 +242,7 @@ export default function ReaderScreen() {
   const [readerError, setReaderError] = useState<string | null>(null);
   const [readerPageCount, setReaderPageCount] = useState(0);
   const [readerContentReady, setReaderContentReady] = useState(false);
+  const readerContentReadyRef = React.useRef(false);
   const readerSkeletonOpacity = useSharedValue(1);
   const [, setReaderCurrentPage] = useState(1);
   const [readerDisplayCurrentPage, setReaderDisplayCurrentPage] = useState(1);
@@ -675,48 +708,46 @@ export default function ReaderScreen() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadTimer = setTimeout(() => {
-      void (async () => {
-        try {
-          if (!pdfId) {
-            throw new Error("No PDF was selected.");
-          }
-
-          const storedPdf = await getPdfById(db, pdfId);
-
-          if (!storedPdf) {
-            throw new Error("This PDF is no longer in your library.");
-          }
-
-          await markPdfOpened(db, pdfId);
-          const savedLanguageCode = await getPdfTranslationPreference(db, pdfId);
-
-          if (!cancelled) {
-            setPdf(storedPdf);
-            if (savedLanguageCode) {
-              setTranslationLanguage(
-                translationLanguages.find(({ code }) => code === savedLanguageCode),
-              );
-            }
-            setLoadError(null);
-          }
-        } catch (error) {
-          if (!cancelled) {
-            setLoadError(
-              error instanceof Error ? error.message : "Unable to load PDF.",
-            );
-          }
-        } finally {
-          if (!cancelled) {
-            setIsLoading(false);
-          }
+    void (async () => {
+      try {
+        if (!pdfId) {
+          throw new Error("No PDF was selected.");
         }
-      })();
-    }, 0);
+
+        const storedPdf = await getPdfById(db, pdfId);
+        if (!storedPdf) {
+          throw new Error("This PDF is no longer in your library.");
+        }
+
+        if (!cancelled) {
+          // The document shell can render now. Neither bookkeeping nor an
+          // optional translation preference should gate the first frame.
+          setPdf(storedPdf);
+          setLoadError(null);
+          setIsLoading(false);
+        }
+
+        void markPdfOpened(db, pdfId).catch(() => undefined);
+        void getPdfTranslationPreference(db, pdfId)
+          .then((savedLanguageCode) => {
+            if (cancelled || !savedLanguageCode) return;
+            setTranslationLanguage(
+              translationLanguages.find(({ code }) => code === savedLanguageCode),
+            );
+          })
+          .catch(() => undefined);
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(
+            error instanceof Error ? error.message : "Unable to load PDF.",
+          );
+          setIsLoading(false);
+        }
+      }
+    })();
 
     return () => {
       cancelled = true;
-      clearTimeout(loadTimer);
     };
   }, [db, pdfId]);
 
@@ -726,43 +757,46 @@ export default function ReaderScreen() {
     }
     readerExtractionStarted.current = true;
     let cancelled = false;
-    const extractionTimer = setTimeout(() => {
-      setReaderLoading(true);
-      setReaderError(null);
+    setReaderLoading(true);
+    setReaderError(null);
 
-      void (async () => {
-        try {
-          let document = await getCachedPdfExtraction(db, pdfId);
+    void (async () => {
+      try {
+        let document: ExtractedPdfDocument | null = null;
 
           const publish = (value: ExtractedPdfDocument) => {
             if (!cancelled) {
-              const normalizedBlocks = normalizeReaderBlocks(
-                value.pages.flatMap((page) =>
-                  page.blocks.filter(isVisibleReaderBlock),
-                ),
-              );
-              setReaderBlocks(normalizedBlocks);
+              const snapshot = readerSnapshot(value);
+              setReaderBlocks(snapshot.blocks);
               setReaderPageCount(value.pageCount);
-              setReaderPageSizes(
-                Object.fromEntries(
-                  value.pages.map((page) => [
-                    page.page,
-                    {
-                      width: page.width,
-                      height: page.height,
-                    },
-                  ]),
-                ),
-              );
+              setReaderPageSizes(snapshot.pageSizes);
               // Decorative/blank opening pages should not leave Reader Mode
               // looking empty while later batches continue toward real text.
               setReaderLoading(
-                normalizedBlocks.length === 0 && value.pages.length < value.pageCount,
+                snapshot.blocks.length === 0 && value.pages.length < value.pageCount,
               );
+              return snapshot.blocks.length > 0;
             }
+            return false;
           };
 
-          if (document?.pages.length) publish(document);
+          const preview = await getCachedPdfExtractionPreview(db, pdfId);
+          if (preview?.pages.length) {
+            const previewHasContent = publish(preview);
+            if (previewHasContent) {
+              // Let the first cached page paint before parsing and normalizing
+              // a potentially very large full-book JSON cache.
+              for (
+                let frame = 0;
+                frame < 32 && !cancelled && !readerContentReadyRef.current;
+                frame += 1
+              ) {
+                await new Promise<void>((resolve) => setTimeout(resolve, 16));
+              }
+            }
+            document = await getCachedPdfExtraction(db, pdfId) ?? preview;
+            if (document !== preview) publish(document);
+          }
 
           let nextPage = firstMissingPageIndex(document);
           let pageCount = document?.pageCount ?? Number.MAX_SAFE_INTEGER;
@@ -815,6 +849,7 @@ export default function ReaderScreen() {
             nextPage = firstMissingPageIndex(document);
             publish(document);
             const shouldSaveExtraction =
+              (lastSavedPageCount === 0 && document.pages.length > 0) ||
               document.pages.length - lastSavedPageCount >=
                 EXTRACTION_CACHE_PAGE_INTERVAL ||
               nextPage >= pageCount;
@@ -826,23 +861,21 @@ export default function ReaderScreen() {
             if (chunk.pages.length === 0) break;
             await new Promise<void>((resolve) => setTimeout(resolve, 16));
           }
-        } catch (error) {
-          if (!cancelled) {
-            setReaderError(
-              error instanceof Error
-                ? error.message
-                : "Unable to create Reader Mode.",
-            );
-          }
-        } finally {
-          if (!cancelled) setReaderLoading(false);
+      } catch (error) {
+        if (!cancelled) {
+          setReaderError(
+            error instanceof Error
+              ? error.message
+              : "Unable to create Reader Mode.",
+          );
         }
-      })();
-    }, 0);
+      } finally {
+        if (!cancelled) setReaderLoading(false);
+      }
+    })();
 
     return () => {
       cancelled = true;
-      clearTimeout(extractionTimer);
     };
   }, [db, pdf, pdfId]);
 
@@ -1420,7 +1453,10 @@ export default function ReaderScreen() {
                 showSwitchHighlight={
                   hasVisitedOriginal && activeTab === "reader"
                 }
-                onReady={() => setReaderContentReady(true)}
+                onReady={() => {
+                  readerContentReadyRef.current = true;
+                  setReaderContentReady(true);
+                }}
                 onToolbarVisibilityChange={handleReaderToolbarVisibilityChange}
                 translationLanguage={translationLanguage}
                 onTranslationLanguageChange={handleTranslationLanguageChange}

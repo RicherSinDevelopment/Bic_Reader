@@ -242,6 +242,8 @@ type IBottomSheetPortalProps = Omit<
   className?: string;
   backgroundClassName?: string;
   handleIndicatorClassName?: string;
+  /** Warm the closed sheet after the first frame for a faster first open. */
+  preload?: boolean;
 };
 
 export const BottomSheetPortal = ({
@@ -253,6 +255,8 @@ export const BottomSheetPortal = ({
   snapPoints,
   onChange,
   onAnimate,
+  preload = false,
+  animateOnMount,
   ...props
 }: IBottomSheetPortalProps) => {
   const {
@@ -263,6 +267,16 @@ export const BottomSheetPortal = ({
     currentIndex,
     openRequestId,
   } = useContext(BottomSheetContext);
+  const [isPreloaded, setIsPreloaded] = useState(false);
+
+  useEffect(() => {
+    if (!preload || isPreloaded) return;
+
+    // Give the reader's first visible frame priority, then prepare the hidden
+    // native sheet and its animation nodes before the first toolbar press.
+    const animationFrame = requestAnimationFrame(() => setIsPreloaded(true));
+    return () => cancelAnimationFrame(animationFrame);
+  }, [isPreloaded, preload]);
 
   const memoizedSnapPoints = useMemo(
     () => snapPoints,
@@ -290,14 +304,15 @@ export const BottomSheetPortal = ({
     return () => cancelAnimationFrame(animationFrame);
   }, [bottomSheetRef, isVisible, openRequestId]);
 
-  if (!isVisible) return null;
+  if (!isVisible && !isPreloaded) return null;
 
   return (
     <Overlay isOpen={true} isKeyboardDismissable={false} style={{ flex: 1 }}>
       <StyledGorhomBottomSheet
         ref={bottomSheetRef}
         snapPoints={memoizedSnapPoints}
-        index={validIndex}
+        index={isVisible ? validIndex : -1}
+        animateOnMount={preload ? false : animateOnMount}
         // Consumers render BottomSheetDragIndicator as the sheet handle.
         // Disable Gorhom's default handle so only one indicator is shown.
         handleComponent={() => null}

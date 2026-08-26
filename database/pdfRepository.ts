@@ -16,6 +16,12 @@ type PdfDocumentRow = {
   completion_percentage: number;
 };
 
+const pdfMemoryCache = new Map<string, PdfDocument>();
+
+export function peekCachedPdfById(id: string) {
+  return pdfMemoryCache.get(id) ?? null;
+}
+
 function mapPdfRow(row: PdfDocumentRow): PdfDocument {
   return {
     id: row.id,
@@ -41,10 +47,15 @@ export async function getAllPdfs(db: SQLiteDatabase) {
     ORDER BY added_at DESC
   `);
 
-  return rows.map(mapPdfRow);
+  const documents = rows.map(mapPdfRow);
+  pdfMemoryCache.clear();
+  documents.forEach((document) => pdfMemoryCache.set(document.id, document));
+  return documents;
 }
 
 export async function getPdfById(db: SQLiteDatabase, id: string) {
+  const cached = pdfMemoryCache.get(id);
+  if (cached) return cached;
   const row = await db.getFirstAsync<PdfDocumentRow>(
     `SELECT id, display_name, original_name, file_uri, file_size, mime_type,
             added_at, last_opened_at, current_page, total_pages,
@@ -55,15 +66,21 @@ export async function getPdfById(db: SQLiteDatabase, id: string) {
     id,
   );
 
-  return row ? mapPdfRow(row) : null;
+  if (!row) return null;
+  const document = mapPdfRow(row);
+  pdfMemoryCache.set(id, document);
+  return document;
 }
 
 export async function markPdfOpened(db: SQLiteDatabase, id: string) {
+  const openedAt = new Date().toISOString();
   await db.runAsync(
     "UPDATE pdf_documents SET last_opened_at = ? WHERE id = ?",
-    new Date().toISOString(),
+    openedAt,
     id,
   );
+  const cached = pdfMemoryCache.get(id);
+  if (cached) pdfMemoryCache.set(id, { ...cached, dateOpened: openedAt });
 }
 
 export async function updatePdfProgress(
@@ -84,6 +101,15 @@ export async function updatePdfProgress(
     completionPercentage,
     id,
   );
+  const cached = pdfMemoryCache.get(id);
+  if (cached) {
+    pdfMemoryCache.set(id, {
+      ...cached,
+      currentPage,
+      totalPages,
+      completionPercentage,
+    });
+  }
 }
 export async function findPdfByNormalizedName(
   db: SQLiteDatabase,
@@ -115,6 +141,7 @@ export async function insertPdf(db: SQLiteDatabase, pdf: NewPdfDocument) {
     pdf.totalPages ?? null,
     pdf.completionPercentage,
   );
+  pdfMemoryCache.set(pdf.id, pdf);
 }
 
 export async function renamePdf(
@@ -127,8 +154,11 @@ export async function renamePdf(
     name,
     id,
   );
+  const cached = pdfMemoryCache.get(id);
+  if (cached) pdfMemoryCache.set(id, { ...cached, name });
 }
 
 export async function deletePdfRecord(db: SQLiteDatabase, id: string) {
   await db.runAsync("DELETE FROM pdf_documents WHERE id = ?", id);
+  pdfMemoryCache.delete(id);
 }

@@ -71,6 +71,8 @@ type Props = {
   } | null;
   guideMode?: "line" | "word" | null;
   guideBackgroundDimming?: number;
+  guideColor?: string;
+  switchHighlightColor?: string;
   onGuideClose?: () => void;
   destination?: Destination;
   stationarySwitchHighlight?: {
@@ -129,6 +131,7 @@ function HorizontalSelectablePage({
   spokenWordHighlight,
   searchHighlight,
   switchHighlight,
+  switchHighlightColor,
   displayText,
   readingDirection,
   fontFamily,
@@ -162,6 +165,7 @@ function HorizontalSelectablePage({
   spokenWordHighlight: Props["spokenWordHighlight"];
   searchHighlight?: TextRange;
   switchHighlight?: TextRange;
+  switchHighlightColor: string;
   displayText: (text: string) => string;
   readingDirection: "ltr" | "rtl";
   fontFamily: string;
@@ -231,7 +235,7 @@ function HorizontalSelectablePage({
       highlights.push({
         start,
         end: Math.min(segment.text.length, start + highlight.length),
-        color: index === 0 ? "#facc15" : "rgba(250, 204, 21, 0.68)",
+        color: index === 0 ? "#facc15" : `${switchHighlightColor}AD`,
         className: index === 0 ? "reader-search-highlight" : "reader-switch-highlight",
         noteId: undefined,
       });
@@ -252,7 +256,7 @@ function HorizontalSelectablePage({
     const scale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
     const indent = segment.paragraphStart && !segment.sectionOpening ? "&#8195;" : "";
     return `<div class="segment ${segment.sectionOpening ? "section-opening" : ""}" data-block-id="${escapeHtml(segment.blockId)}" data-start="${segment.startOffset}" data-prefix="${indent ? 1 : 0}" style="font-size:${fontSize * scale}px;line-height:${fontSize * scale * lineHeight}px;margin-top:${segment.spacingBefore}px;margin-bottom:${segment.spacingAfter}px">${indent}${contents}</div>`;
-  }).join(""), [displayText, fontSize, lineHeight, page, searchHighlight, switchHighlight, userHighlights, userNotes]);
+  }).join(""), [displayText, fontSize, lineHeight, page, searchHighlight, switchHighlight, switchHighlightColor, userHighlights, userNotes]);
 
   const webFontFamily = fontFamily === "Lato_700Bold"
     ? "LatoReaderBold"
@@ -264,7 +268,7 @@ function HorizontalSelectablePage({
       : "";
   const html = useMemo(() => `<!doctype html><html dir="${readingDirection}"><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
     ${fontFaceCss}
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:${topContentInset}px 0 ${bottomPadding}px;color:${textColor};font-family:${JSON.stringify(webFontFamily)},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.page-running-header,.page-number{position:fixed;z-index:2;left:0;right:0;color:${textColor};opacity:.5;text-align:center;pointer-events:none}.page-running-header{top:${Math.max(topSafeInset + 6, verticalMargin * 0.45)}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${Math.max(11, fontSize * 0.58)}px;font-weight:600;letter-spacing:.02em}.page-number{bottom:${Math.max(14, bottomPadding - 2)}px;font-size:${Math.max(11, fontSize * 0.62)}px;font-variant-numeric:tabular-nums}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.2s ease-out forwards}@keyframes readerSwitchPulse{0%{background-color:rgba(250,204,21,.56);box-shadow:0 0 0 0 rgba(202,138,4,.3)}32%{background-color:rgba(250,204,21,.92);box-shadow:0 0 0 4px rgba(202,138,4,.2)}62%{background-color:rgba(250,204,21,.66);box-shadow:0 0 0 1px rgba(202,138,4,.12)}100%{background-color:rgba(250,204,21,0);box-shadow:0 0 0 0 rgba(202,138,4,0)}}@keyframes readerSwitchFade{from{background-color:rgba(250,204,21,.66)}to{background-color:rgba(250,204,21,0)}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body><div class="page-running-header">${escapeHtml(runningHeader)}</div>${markup}<div class="page-number">${pageNumber}</div><script>
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:${topContentInset}px 0 ${bottomPadding}px;color:${textColor};font-family:${JSON.stringify(webFontFamily)},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.page-running-header,.page-number{position:fixed;z-index:2;left:0;right:0;color:${textColor};opacity:.5;text-align:center;pointer-events:none}.page-running-header{top:${Math.max(topSafeInset + 6, verticalMargin * 0.45)}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${Math.max(11, fontSize * 0.58)}px;font-weight:600;letter-spacing:.02em}.page-number{bottom:${Math.max(14, bottomPadding - 2)}px;font-size:${Math.max(11, fontSize * 0.62)}px;font-variant-numeric:tabular-nums}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.2s ease-out forwards}@keyframes readerSwitchPulse{0%{background-color:color-mix(in srgb,${switchHighlightColor} 56%,transparent);box-shadow:0 0 0 0 color-mix(in srgb,${switchHighlightColor} 30%,transparent)}32%{background-color:color-mix(in srgb,${switchHighlightColor} 92%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,${switchHighlightColor} 20%,transparent)}62%{background-color:color-mix(in srgb,${switchHighlightColor} 66%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,${switchHighlightColor} 12%,transparent)}100%{background-color:transparent;box-shadow:0 0 0 0 transparent}}@keyframes readerSwitchFade{from{background-color:color-mix(in srgb,${switchHighlightColor} 66%,transparent)}to{background-color:transparent}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body><div class="page-running-header">${escapeHtml(runningHeader)}</div>${markup}<div class="page-number">${pageNumber}</div><script>
     window.__selectionRanges=[];
     function cleanLength(value){return String(value||'').replace(/\\u00ad/g,'').length}
     function rawIndexForClean(value,target){let clean=0;for(let index=0;index<value.length;index++){if(value[index]!=='\\u00ad'){if(clean===target)return index;clean++}}return value.length}
@@ -293,7 +297,7 @@ function HorizontalSelectablePage({
     }
     let timer;document.addEventListener('selectionchange',function(){clearTimeout(timer);timer=setTimeout(captureSelection,80)});
     document.addEventListener('click',function(event){const marker=event.target.closest('[data-open-note]');if(marker)window.ReactNativeWebView.postMessage(JSON.stringify({type:'openNote',noteId:marker.dataset.openNote}))});
-  </script></body></html>`, [automaticHyphenation, backgroundColor, bold, bottomPadding, fontFaceCss, fontSize, letterSpacing, markup, pageNumber, readingDirection, runningHeader, textColor, topContentInset, topSafeInset, verticalMargin, webFontFamily, wordSpacing]);
+  </script></body></html>`, [automaticHyphenation, backgroundColor, bold, bottomPadding, fontFaceCss, fontSize, letterSpacing, markup, pageNumber, readingDirection, runningHeader, switchHighlightColor, textColor, topContentInset, topSafeInset, verticalMargin, webFontFamily, wordSpacing]);
 
   const source = useMemo(() => ({ html }), [html]);
   const ttsInjection = useMemo(
@@ -661,6 +665,8 @@ export default function HorizontalReaderPager({
   spokenWordHighlight,
   guideMode = null,
   guideBackgroundDimming = 60,
+  guideColor = "#F59E0B",
+  switchHighlightColor = "#F59E0B",
   onGuideClose,
   destination,
   stationarySwitchHighlight,
@@ -693,6 +699,7 @@ export default function HorizontalReaderPager({
   const navigatedDestinationKeyRef = useRef<string | null>(null);
   const [paginationAnchor, setPaginationAnchor] = useState<PageAnchor>();
   const [containerHeight, setContainerHeight] = useState(0);
+  const heightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pagerWarm, setPagerWarm] = useState(false);
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<number | null>(null);
   const [dismissedSwitchNonce, setDismissedSwitchNonce] = useState<number | null>(null);
@@ -720,8 +727,30 @@ export default function HorizontalReaderPager({
   }>());
   const touchStart = useRef({ x: 0, y: 0, time: 0 });
   const hyphenationCache = useRef(new Map<string, string>());
-  const { width, height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const [width, setWidth] = useState(windowWidth);
+  const widthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    if (Math.abs(windowWidth - width) < 1) return;
+    if (widthTimerRef.current) clearTimeout(widthTimerRef.current);
+    widthTimerRef.current = setTimeout(() => {
+      setWidth(windowWidth);
+      widthTimerRef.current = null;
+    }, 100);
+
+    return () => {
+      if (widthTimerRef.current) {
+        clearTimeout(widthTimerRef.current);
+        widthTimerRef.current = null;
+      }
+    };
+  }, [windowWidth, width]);
+
+  useEffect(() => () => {
+    if (heightTimerRef.current) clearTimeout(heightTimerRef.current);
+  }, []);
   const usableHeight = containerHeight || windowHeight;
   const reportReady = useCallback(() => {
     setPagerWarm(true);
@@ -882,6 +911,23 @@ export default function HorizontalReaderPager({
     return () => cancelAnimationFrame(frame);
   }, [onPageMapChange, pages]);
   const destinationPage = useMemo(() => {
+    if (destination?.readerPage !== undefined) {
+      return Math.max(0, Math.min(pages.length - 1, destination.readerPage - 1));
+    }
+    if (destination) {
+      const exactIndex = pages.findIndex((page) => page.some((segment) =>
+        segment.blockId === destination.blockId &&
+        (destination.searchMatchIndex === undefined || (
+          destination.searchMatchIndex >= segment.startOffset &&
+          destination.searchMatchIndex < segment.startOffset + segment.text.length
+        ))
+      ));
+      if (exactIndex >= 0) return exactIndex;
+      const sourcePageIndex = pages.findIndex((page) =>
+        page.some((segment) => segment.sourcePage >= destination.page)
+      );
+      if (sourcePageIndex >= 0) return sourcePageIndex;
+    }
     const anchoredPage = pageIndexForAnchor(
       pages,
       paginationAnchor
@@ -889,23 +935,9 @@ export default function HorizontalReaderPager({
         : undefined,
     );
     if (anchoredPage >= 0) return anchoredPage;
-    if (!destination) return 0;
-    if (destination.readerPage !== undefined) {
-      return Math.max(0, Math.min(pages.length - 1, destination.readerPage - 1));
-    }
-    const exactIndex = pages.findIndex((page) => page.some((segment) =>
-      segment.blockId === destination.blockId &&
-      (destination.searchMatchIndex === undefined || (
-        destination.searchMatchIndex >= segment.startOffset &&
-        destination.searchMatchIndex < segment.startOffset + segment.text.length
-      ))
-    ));
-    if (exactIndex >= 0) return exactIndex;
-    return Math.max(0, pages.findIndex((page) =>
-      page.some((segment) => segment.sourcePage >= destination.page)
-    ));
+    return 0;
   }, [destination, pages, paginationAnchor]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!destination || !pages.length) return;
     currentPageRef.current = destinationPage;
     reportPageChange(destinationPage);
@@ -920,23 +952,20 @@ export default function HorizontalReaderPager({
     const navigationKey = [
       destination.nonce,
       destinationPage,
-      pages.length,
       Math.round(width),
       Math.round(pageContentHeight),
     ].join(':');
     if (navigatedDestinationKeyRef.current === navigationKey) return;
-    const timer = setTimeout(() => {
-      pagerRef.current?.scrollToIndex({
-        animated: false,
-        index: destinationPage,
-      });
-      currentPageRef.current = destinationPage;
-      navigatedDestinationKeyRef.current = navigationKey;
-    }, 0);
-    return () => clearTimeout(timer);
+    pagerRef.current?.scrollToOffset({
+      animated: false,
+      offset: destinationPage * width,
+    });
+    currentPageRef.current = destinationPage;
+    navigatedDestinationKeyRef.current = navigationKey;
   }, [destination, destinationPage, pageContentHeight, pages.length, width]);
 
   useLayoutEffect(() => {
+    if (destination) return;
     if (pages.length) {
       const anchor = visiblePageAnchorRef.current ?? paginationAnchor;
       const anchoredPage = pageIndexForAnchor(pages, anchor);
@@ -955,7 +984,7 @@ export default function HorizontalReaderPager({
         return () => cancelAnimationFrame(frame);
       }
     }
-  }, [pages, paginationAnchor, reportPageChange]);
+  }, [destination, pages, paginationAnchor, reportPageChange]);
 
   useEffect(() => {
     if (!spokenWordHighlight || !pages.length) return;
@@ -1395,7 +1424,7 @@ export default function HorizontalReaderPager({
     };
     const highlightStyle = {
       ...typographyStyle,
-      backgroundColor: "rgba(250, 204, 21, 0.82)",
+      backgroundColor: `${switchHighlightColor}D1`,
     };
     const renderHighlightableText = () => {
       const displayedText = textForDisplay(segment.text);
@@ -1524,7 +1553,7 @@ export default function HorizontalReaderPager({
         ) : switchStart >= 0 ? (
           <>
             {textForDisplay(segment.text.slice(0, switchStart))}
-            <Text style={{ backgroundColor: "rgba(250, 204, 21, 0.68)" }}>
+            <Text style={{ backgroundColor: `${switchHighlightColor}AD` }}>
               {textForDisplay(segment.text.slice(switchStart, switchStart + switchLength))}
             </Text>
             {textForDisplay(segment.text.slice(switchStart + switchLength))}
@@ -1546,9 +1575,17 @@ export default function HorizontalReaderPager({
         // orientation change or split-screen resize.
         const isMeaningfulResize =
           containerHeight === 0 || Math.abs(nextHeight - containerHeight) > 80;
-        if (nextHeight > 0 && isMeaningfulResize) {
+        if (nextHeight <= 0 || !isMeaningfulResize) return;
+        if (containerHeight === 0) {
           setContainerHeight(nextHeight);
+          return;
         }
+
+        if (heightTimerRef.current) clearTimeout(heightTimerRef.current);
+        heightTimerRef.current = setTimeout(() => {
+          setContainerHeight(nextHeight);
+          heightTimerRef.current = null;
+        }, 100);
       }}
       onTouchStartCapture={(event) => {
         touchStart.current = {
@@ -1650,6 +1687,7 @@ export default function HorizontalReaderPager({
                 spokenWordHighlight={spokenWordHighlight}
                 searchHighlight={selectableSearchHighlight}
                 switchHighlight={selectableSwitchHighlight}
+                switchHighlightColor={switchHighlightColor}
                 displayText={textForDisplay}
                 readingDirection={readingDirection}
                 fontFamily={fontFamily}
@@ -1747,7 +1785,7 @@ export default function HorizontalReaderPager({
           <View style={{ height: visibleGuideRect.top, backgroundColor, opacity: guideBackgroundDimming / 100 }} />
           <View style={{ height: visibleGuideRect.height, flexDirection: "row" }}>
             <View style={{ width: visibleGuideRect.left, backgroundColor, opacity: guideBackgroundDimming / 100 }} />
-            <View style={{ width: visibleGuideRect.width, backgroundColor: "rgba(245, 158, 11, 0.28)", borderColor: "rgba(217, 119, 6, 0.55)", borderWidth: 1, borderRadius: 4 }} />
+            <View style={{ width: visibleGuideRect.width, backgroundColor: `${guideColor}47`, borderColor: `${guideColor}8C`, borderWidth: 1, borderRadius: 4 }} />
             <View style={{ flex: 1, backgroundColor, opacity: guideBackgroundDimming / 100 }} />
           </View>
           <View style={{ flex: 1, backgroundColor, opacity: guideBackgroundDimming / 100 }} />

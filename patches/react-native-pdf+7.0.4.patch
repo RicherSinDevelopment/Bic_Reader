@@ -20,6 +20,9 @@ index 43fea3b..8c52bcd 100644
 +    bottom: Float,
 +    pageWidth: Float,
 +    pageHeight: Float,
++    red: Float,
++    green: Float,
++    blue: Float,
 +  ) => void;
 +  +clearNativeHighlight: (viewRef: React.ElementRef<ComponentType>) => void;
  }
@@ -40,7 +43,7 @@ index cfcea72..c84509f 100644
  export interface PdfRef {
 -    setPage(pageNumber: number): void
 +    setPage(pageNumber: number): void;
-+    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number, pageWidth: number, pageHeight: number): void;
++    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number, pageWidth: number, pageHeight: number, red: number, green: number, blue: number): void;
 +    clearHighlight(): void;
  }
  
@@ -53,10 +56,10 @@ index f807178..4284c01 100644
          
      }
  
-+    setHighlight(pageNumber, left, top, right, bottom, pageWidth, pageHeight) {
++    setHighlight(pageNumber, left, top, right, bottom, pageWidth, pageHeight, red, green, blue) {
 +        if (!this._root) return;
 +        PdfViewCommands.setNativeHighlight(
-+            this._root, pageNumber, left, top, right, bottom, pageWidth, pageHeight,
++            this._root, pageNumber, left, top, right, bottom, pageWidth, pageHeight, red, green, blue,
 +        );
 +    }
 +
@@ -82,7 +85,10 @@ index 723ca7b..9ec3941 100644
 +                     right:(float)right
 +                    bottom:(float)bottom
 +                 pageWidth:(float)pageWidth
-+                pageHeight:(float)pageHeight;
++                pageHeight:(float)pageHeight
++                       red:(float)red
++                     green:(float)green
++                      blue:(float)blue;
 +- (void)clearNativeHighlight;
 +
  @end
@@ -101,6 +107,7 @@ index de46c98..37cdf89 100644
 +    PDFPage *_switchHighlightPage;
 +    CADisplayLink *_switchHighlightDisplayLink;
 +    CFTimeInterval _switchHighlightPulseStart;
++    UIColor *_switchHighlightColor;
  }
  
  #ifdef RCT_NEW_ARCH_ENABLED
@@ -115,6 +122,9 @@ index de46c98..37cdf89 100644
 +                    bottom:(float)bottom
 +                 pageWidth:(float)pageWidth
 +                pageHeight:(float)pageHeight
++                       red:(float)red
++                     green:(float)green
++                      blue:(float)blue
 +{
 +    [self clearNativeHighlight];
 +    if (!_pdfDocument || page < 1 || page > (NSInteger)_pdfDocument.pageCount) {
@@ -173,15 +183,26 @@ index de46c98..37cdf89 100644
 +                highlightRect = clippedSelection;
 +            }
 +        }
-+        selection.color = [[UIColor systemYellowColor] colorWithAlphaComponent:0.50];
++        _switchHighlightColor = [UIColor colorWithRed:MIN(MAX(red, 0.0), 1.0)
++                                                green:MIN(MAX(green, 0.0), 1.0)
++                                                 blue:MIN(MAX(blue, 0.0), 1.0)
++                                                alpha:1.0];
++        selection.color = [_switchHighlightColor colorWithAlphaComponent:0.50];
 +        _switchHighlightSelection = selection;
++    }
++
++    if (!_switchHighlightColor) {
++        _switchHighlightColor = [UIColor colorWithRed:MIN(MAX(red, 0.0), 1.0)
++                                                green:MIN(MAX(green, 0.0), 1.0)
++                                                 blue:MIN(MAX(blue, 0.0), 1.0)
++                                                alpha:1.0];
 +    }
 +
 +    PDFAnnotation *annotation = [[PDFAnnotation alloc]
 +        initWithBounds:CGRectInset(highlightRect, -1.5, -1.0)
 +        forType:PDFAnnotationSubtypeHighlight
 +        withProperties:nil];
-+    annotation.color = [[UIColor systemYellowColor] colorWithAlphaComponent:0.55];
++    annotation.color = [_switchHighlightColor colorWithAlphaComponent:0.55];
 +    annotation.shouldDisplay = YES;
 +    annotation.shouldPrint = NO;
 +    [pdfPage addAnnotation:annotation];
@@ -248,7 +269,7 @@ index de46c98..37cdf89 100644
 +    }
 +
 +    _switchHighlightAnnotation.color =
-+        [[UIColor systemYellowColor] colorWithAlphaComponent:alpha];
++        [_switchHighlightColor colorWithAlphaComponent:alpha];
 +    [_pdfView setNeedsDisplay];
 +
 +    if (progress >= 1.0) {

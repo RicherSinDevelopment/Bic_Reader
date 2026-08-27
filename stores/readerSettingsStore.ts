@@ -7,6 +7,12 @@ export type ReaderSpacingPreset =
   | "relaxed"
   | "custom";
 export type ReaderMarginPreset = "compact" | "comfortable" | "relaxed";
+export type ReaderGuideColor =
+  | "#F59E0B"
+  | "#65A30D"
+  | "#3B82F6"
+  | "#8B5CF6"
+  | "#F43F5E";
 
 type ReaderSettingsState = {
   fontFamily: string;
@@ -25,6 +31,8 @@ type ReaderSettingsState = {
   lineGuideEnabled: boolean;
   wordGuideEnabled: boolean;
   guideBackgroundDimming: number;
+  guideColor: ReaderGuideColor;
+  switchHighlightColor: ReaderGuideColor;
   transition: ReaderTransition;
 
   setFontFamily: (fontFamily: string) => void;
@@ -55,6 +63,8 @@ type ReaderSettingsState = {
   setLineGuideEnabled: (enabled: boolean) => void;
   setWordGuideEnabled: (enabled: boolean) => void;
   setGuideBackgroundDimming: (percentage: number) => void;
+  setGuideColor: (color: ReaderGuideColor) => void;
+  setSwitchHighlightColor: (color: ReaderGuideColor) => void;
   setTransition: (transition: ReaderTransition) => void;
 
   setBackgroundColor: (color: string) => void;
@@ -80,6 +90,8 @@ export const useReaderSettingsStore =
     lineGuideEnabled: false,
     wordGuideEnabled: false,
     guideBackgroundDimming: 60,
+    guideColor: "#F59E0B",
+    switchHighlightColor: "#F59E0B",
     transition: "scroll",
 
     setFontFamily: (fontFamily) => set({ fontFamily }),
@@ -192,6 +204,8 @@ export const useReaderSettingsStore =
     setGuideBackgroundDimming: (percentage) => set({
       guideBackgroundDimming: Math.max(0, Math.min(90, percentage)),
     }),
+    setGuideColor: (guideColor) => set({ guideColor }),
+    setSwitchHighlightColor: (switchHighlightColor) => set({ switchHighlightColor }),
     setTransition: (transition) => set({ transition }),
 
     // Change background

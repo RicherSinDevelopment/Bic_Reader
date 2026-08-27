@@ -47,7 +47,7 @@ export default function SortButton({ value, onValueChange }: SortButtonProps) {
         accessibilityLabel={`Sort PDFs by ${selectedLabel}`}
         accessibilityRole="button"
         onPress={openMenu}
-        className="h-10 max-w-full flex-row items-center gap-2 rounded-md border border-black/10 bg-white px-3 active:translate-y-0.5 active:bg-black/5 dark:border-white/10 dark:bg-[#1A1E18] dark:active:bg-white/5"
+        className="h-11 max-w-full flex-row items-center gap-2 rounded-full border border-[#E1E4D9] bg-[#FFFDF8] px-4 active:translate-y-0.5 active:bg-black/5 dark:border-white/10 dark:bg-[#1A1E18] dark:active:bg-white/5"
         style={homepageDepth.control}
       >
         <Text

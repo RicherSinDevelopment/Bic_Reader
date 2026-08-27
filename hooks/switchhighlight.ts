@@ -1,5 +1,5 @@
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 export type PdfPageSize = { width: number; height: number };
 
@@ -52,8 +52,10 @@ export function useSwitchHighlight(
     word: string;
     wordIndex: number;
   } | null>(null);
+  const anchorRef = useRef(anchor);
 
   const reportVisibleBlock = useCallback((blockId: string, word: string, wordIndex: number) => {
+    anchorRef.current = { blockId, word, wordIndex };
     setAnchor((current) =>
       current?.blockId === blockId && current.wordIndex === wordIndex
         ? current
@@ -61,13 +63,13 @@ export function useSwitchHighlight(
     );
   }, []);
 
-  const target = useMemo<SwitchHighlightTarget | null>(() => {
-    const block = anchor
-      ? blocks.find((candidate) => candidate.id === anchor.blockId)
+  const resolveTarget = useCallback((latestAnchor: typeof anchor) => {
+    const block = latestAnchor
+      ? blocks.find((candidate) => candidate.id === latestAnchor.blockId)
       : blocks.find((candidate) => Boolean(pageSizes[candidate.page]) && candidate.text.trim());
     const pageSize = block ? pageSizes[block.page] : undefined;
     if (!block || !pageSize) return null;
-    const wordIndex = anchor?.wordIndex ?? 0;
+    const wordIndex = latestAnchor?.wordIndex ?? 0;
     const candidateWordBounds = block.wordBounds?.[wordIndex];
     const exactWordBounds = candidateWordBounds &&
       candidateWordBounds.every(Number.isFinite) &&
@@ -79,8 +81,8 @@ export function useSwitchHighlight(
     const fallbackWordBounds = estimatedWordBounds(block, wordIndex);
     return {
       blockId: block.id,
-      word: anchor?.word || block.text.trim().split(/\s+/, 1)[0] || "",
-      wordIndex: anchor?.wordIndex ?? 0,
+      word: latestAnchor?.word || block.text.trim().split(/\s+/, 1)[0] || "",
+      wordIndex: latestAnchor?.wordIndex ?? 0,
       blockOffset: wordMatch?.index ?? 0,
       sourceWordCount: block.text.trim().split(/\s+/).filter(Boolean).length,
       page: block.page,
@@ -92,7 +94,16 @@ export function useSwitchHighlight(
       } : fallbackWordBounds ?? block.sourceBounds,
       pageSize,
     };
-  }, [anchor, blocks, pageSizes]);
+  }, [blocks, pageSizes]);
 
-  return { reportVisibleBlock, target };
+  const target = useMemo<SwitchHighlightTarget | null>(
+    () => resolveTarget(anchor),
+    [anchor, resolveTarget],
+  );
+  const getLatestTarget = useCallback(
+    () => resolveTarget(anchorRef.current),
+    [resolveTarget],
+  );
+
+  return { getLatestTarget, reportVisibleBlock, target };
 }

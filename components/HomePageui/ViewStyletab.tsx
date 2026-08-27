@@ -32,7 +32,7 @@ export default function PdfLayoutTabs({ onColumnsChange }: PdfLayoutTabsProps) {
           width: SEGMENT_WIDTH * 3 + CONTAINER_PADDING * 2,
           height: SEGMENT_HEIGHT + CONTAINER_PADDING * 2,
         }}
-        className="relative overflow-hidden rounded-md border border-black/10 bg-white dark:border-white/10 dark:bg-[#1A1E18]"
+        className="relative overflow-hidden rounded-full border border-[#E1E4D9] bg-[#FFFDF8] dark:border-white/10 dark:bg-[#1A1E18]"
       >
         <Animated.View
           pointerEvents="none"
@@ -42,7 +42,7 @@ export default function PdfLayoutTabs({ onColumnsChange }: PdfLayoutTabsProps) {
             top: CONTAINER_PADDING,
             bottom: CONTAINER_PADDING,
             width: SEGMENT_WIDTH,
-            borderRadius: 4,
+            borderRadius: 20,
             borderWidth: 1,
             borderColor: "#639922",
             backgroundColor: "#639922",

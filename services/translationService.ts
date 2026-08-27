@@ -8,10 +8,11 @@ import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 
 // Native progress events make the first results immediate, so every session
 // can stay alive long enough to process a substantial section of the book.
-const FIRST_BATCH_ITEMS = 80;
-const FIRST_BATCH_CHARACTERS = 35_000;
-const MAX_BATCH_ITEMS = 80;
-const MAX_BATCH_CHARACTERS = 35_000;
+const FIRST_BATCH_ITEMS = 12;
+const FIRST_BATCH_CHARACTERS = 5_000;
+const MAX_BATCH_ITEMS = 48;
+const MAX_BATCH_CHARACTERS = 18_000;
+const PROGRESS_PUBLISH_INTERVAL_MS = 40;
 
 export const isOnDeviceTranslationSupported = isTranslationSupported();
 
@@ -149,7 +150,19 @@ export async function translatePdfBlocks(
     const batch = batches[batchIndex];
     const publishedIndices = new Set<number>();
     const pendingProgress = new Map<number, ExtractedPdfBlock>();
+    let progressPublishTimer: ReturnType<typeof setTimeout> | null = null;
     let nextProgressIndex = 0;
+    const flushProgress = () => {
+      progressPublishTimer = null;
+      const readyBlocks: ExtractedPdfBlock[] = [];
+      while (pendingProgress.has(nextProgressIndex)) {
+        readyBlocks.push(pendingProgress.get(nextProgressIndex)!);
+        pendingProgress.delete(nextProgressIndex);
+        publishedIndices.add(nextProgressIndex);
+        nextProgressIndex += 1;
+      }
+      if (readyBlocks.length > 0) onBatch?.(readyBlocks);
+    };
     const result = await translateBatch(
       batch.map((block) => block.text),
       targetLanguage,
@@ -166,18 +179,18 @@ export async function translatePdfBlocks(
           id: `translated-${targetLanguage}-${batch[progress.index].id}`,
         });
 
-        // Apple may finish requests out of order. Only expose the contiguous
-        // ordered prefix so the reader never inserts text into earlier pages.
-        const readyBlocks: ExtractedPdfBlock[] = [];
-        while (pendingProgress.has(nextProgressIndex)) {
-          readyBlocks.push(pendingProgress.get(nextProgressIndex)!);
-          pendingProgress.delete(nextProgressIndex);
-          publishedIndices.add(nextProgressIndex);
-          nextProgressIndex += 1;
+        // Coalesce Apple's per-item events to avoid a React render and SQLite
+        // write for every individual paragraph.
+        if (!progressPublishTimer) {
+          progressPublishTimer = setTimeout(
+            flushProgress,
+            PROGRESS_PUBLISH_INTERVAL_MS,
+          );
         }
-        if (readyBlocks.length > 0) onBatch?.(readyBlocks);
       },
     );
+    if (progressPublishTimer) clearTimeout(progressPublishTimer);
+    flushProgress();
     const translatedTexts = result.translatedTexts;
 
     if (!Array.isArray(translatedTexts) || translatedTexts.length !== batch.length) {

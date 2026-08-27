@@ -64,13 +64,13 @@ const HomePage = () => {
   };
 
   return (
-<View className="flex-1 bg-[#F7F5EC] dark:bg-[#10120F]">
+<View className="flex-1 bg-[#F5F3EA] dark:bg-[#10120F]">
 
   {/* ========================= */}
   {/* HEADER */}
   {/* ========================= */}
 
-  <View className="px-6 pt-12 pb-4">
+  <View className="px-6 pb-5 pt-14">
 
     {/* Title + Top Actions */}
     <View className="flex-row items-center justify-between">
@@ -80,9 +80,9 @@ const HomePage = () => {
         className="text-black dark:text-[#F4F5F1]"
         style={{
           fontFamily: "Lato_700Bold",
-          fontSize: 38,
-          lineHeight: 44,
-          letterSpacing: -0.8,
+          fontSize: 36,
+          lineHeight: 42,
+          letterSpacing: -1,
         }}
       >
         <Text style={{ color: "#639922" }}>Bic</Text>
@@ -102,7 +102,7 @@ const HomePage = () => {
     {/* SORT + VIEW CONTROLS */}
     {/* ========================= */}
 
-    <View className="mt-6 w-full flex-row items-center justify-between gap-3">
+    <View className="mt-7 w-full flex-row items-center justify-between gap-3">
 
       {/* Sort Button */}
       <View className="min-w-0 flex-1 items-start">
@@ -118,7 +118,7 @@ const HomePage = () => {
     </View>
 
     {!isPremium ? (
-      <View className="mt-4 rounded-2xl border border-[#DDE3D5] bg-white/70 px-4 py-3 dark:border-[#343A31] dark:bg-[#1A1E18]">
+      <View className="mt-5 rounded-[22px] border border-[#E0E4D8] bg-[#FFFDF8] px-5 py-4 dark:border-[#343A31] dark:bg-[#1A1E18]">
         <View className="flex-row items-center justify-between">
           <Text
             className="text-[#485242] dark:text-[#F4F5F1]"
@@ -130,13 +130,13 @@ const HomePage = () => {
             {freePdfUsage} of {FREE_PDF_LIMIT} PDFs
           </Text>
         </View>
-        <View className="mt-2 h-2 overflow-hidden rounded-full bg-[#DDE3D5] dark:bg-[#343A31]">
+        <View className="mt-3 h-2 overflow-hidden rounded-full bg-[#E6E9DE] dark:bg-[#343A31]">
           <View
             className="h-full rounded-full bg-[#639922]"
             style={{ width: `${(freePdfUsage / FREE_PDF_LIMIT) * 100}%` }}
           />
         </View>
-        <Text className="mt-2 text-xs text-black/50 dark:text-white/50">
+        <Text className="mt-2.5 text-xs text-[#71786B] dark:text-white/50">
           {isAtFreeLimit ? "Upgrade to add more PDFs." : `${FREE_PDF_LIMIT - freePdfUsage} free PDF slots remaining.`}
         </Text>
       </View>
@@ -161,7 +161,7 @@ const HomePage = () => {
   {/* ADD PDF BUTTON */}
   {/* ========================= */}
 
-  <View className="absolute bottom-8 left-6 right-6">
+  <View className="absolute bottom-7 left-6 right-6">
     <AddButton
       isLocked={isAtFreeLimit}
       onLockedPress={() => setShowLibraryLimit(true)}

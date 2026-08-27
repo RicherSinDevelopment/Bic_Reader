@@ -252,12 +252,29 @@ const ReaderView = ({
   onTranslationLanguageChange,
   useTranslatedTextDirection = false,
 }: ReaderViewProps) => {
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const readerResizeOpacity = useRef(new Animated.Value(1)).current;
+  const previousWindowWidth = useRef(windowWidth);
   const db = useSQLiteContext();
   const isDark = useColorScheme() === "dark";
   const { isPremium } = useRevenueCat();
   const router = useRouter();
   const [fontAssets] = useAssets([Lato_700Bold, SourceSans3_400Regular]);
+
+  useLayoutEffect(() => {
+    if (Math.abs(previousWindowWidth.current - windowWidth) < 1) return;
+    previousWindowWidth.current = windowWidth;
+    readerResizeOpacity.stopAnimation();
+    readerResizeOpacity.setValue(0.08);
+    const timer = setTimeout(() => {
+      Animated.timing(readerResizeOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }).start();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [readerResizeOpacity, windowWidth]);
   const [latoBoldBase64, setLatoBoldBase64] = useState<string | null>(null);
   const [sourceSansBase64, setSourceSansBase64] = useState<string | null>(null);
   const [activeItem, setActiveItem] =
@@ -388,6 +405,7 @@ const ReaderView = ({
   // Bottom Sheet reference
   const bottomSheetRef =
     useRef<BottomSheetRef>(null);
+  const bottomSheetViewportWidthRef = useRef(windowWidth);
   const closeSettingsForTransitionChange = useCallback(() => {
     bottomSheetRef.current?.close();
   }, []);
@@ -395,7 +413,18 @@ const ReaderView = ({
   const pendingBottomSheetItemRef = useRef<ReaderBottomNavItem | null>(null);
   activeItemRef.current = activeItem;
 
+  useLayoutEffect(() => {
+    if (Math.abs(bottomSheetViewportWidthRef.current - windowWidth) < 1) return;
+    bottomSheetViewportWidthRef.current = windowWidth;
+    pendingBottomSheetItemRef.current = null;
+    bottomSheetRef.current?.close();
+  }, [windowWidth]);
+
   const openBottomSheet = useCallback((item: ReaderBottomNavItem) => {
+    // The landscape reader hides all chrome. Ignore stale taps while the
+    // orientation transition is in progress so a sheet cannot open behind it.
+    if (isLandscape) return;
+
     if (activeItemRef.current === item) {
       bottomSheetRef.current?.open(0);
       return;
@@ -405,13 +434,18 @@ const ReaderView = ({
     // animation begins. This avoids animating while swapping the old panel.
     pendingBottomSheetItemRef.current = item;
     setActiveItem(item);
-  }, []);
+  }, [isLandscape]);
 
   useLayoutEffect(() => {
+    if (isLandscape) {
+      pendingBottomSheetItemRef.current = null;
+      return;
+    }
+
     if (pendingBottomSheetItemRef.current !== activeItem) return;
     pendingBottomSheetItemRef.current = null;
     bottomSheetRef.current?.open(0);
-  }, [activeItem]);
+  }, [activeItem, isLandscape]);
 
   useEffect(() => {
     if (isLandscape) {
@@ -791,6 +825,10 @@ const textColor = isDark && !colorsCustomized
   const guideBackgroundDimming = useReaderSettingsStore(
     (state) => state.guideBackgroundDimming
   );
+  const guideColor = useReaderSettingsStore((state) => state.guideColor);
+  const switchHighlightColor = useReaderSettingsStore(
+    (state) => state.switchHighlightColor
+  );
   const readerGuideMode = lineGuideEnabled
     ? "line"
     : wordGuideEnabled
@@ -833,11 +871,13 @@ const textColor = isDark && !colorsCustomized
       const word = block
         ? Array.from(block.text.matchAll(/\S+/g))[anchor.wordIndex]?.[0] ?? ""
         : "";
-      onSwitchAnchorChange?.(anchor.blockId, word, anchor.wordIndex);
+      if (isActive) {
+        onSwitchAnchorChange?.(anchor.blockId, word, anchor.wordIndex);
+      }
     }
     onPaginationChange?.(current, total);
     onPageChange?.(sourcePage);
-  }, [blocks, onPageChange, onPaginationChange, onSwitchAnchorChange]);
+  }, [blocks, isActive, onPageChange, onPaginationChange, onSwitchAnchorChange]);
 
   useEffect(() => {
     if (!webViewReady || isPaged) return;
@@ -910,6 +950,22 @@ const textColor = isDark && !colorsCustomized
     }));
   }, [guideBackgroundDimming, webViewReady]);
 
+  useEffect(() => {
+    if (!webViewReady) return;
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "setReaderGuideColor",
+      color: guideColor,
+    }));
+  }, [guideColor, webViewReady]);
+
+  useEffect(() => {
+    if (!webViewReady) return;
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "setSwitchHighlightColor",
+      color: switchHighlightColor,
+    }));
+  }, [switchHighlightColor, webViewReady]);
+
   const handleReaderLoadEnd = useCallback(() => {
     setWebViewReady(true);
     onReady?.();
@@ -926,6 +982,14 @@ const textColor = isDark && !colorsCustomized
     webViewRef.current?.postMessage(JSON.stringify({
       type: "setGuideBackgroundDimming",
       percentage: guideBackgroundDimming,
+    }));
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "setReaderGuideColor",
+      color: guideColor,
+    }));
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "setSwitchHighlightColor",
+      color: switchHighlightColor,
     }));
     // iOS WKWebView can settle on a non-zero document offset after load (the
     // native contentInset then tucks the opening line up under the header).
@@ -955,7 +1019,7 @@ const textColor = isDark && !colorsCustomized
         }));
       }, 0);
     }
-  }, [guideBackgroundDimming, onReady, readerGuideMode, sendReaderSettings, showSwitchHighlight, syncPageTransition]);
+  }, [guideBackgroundDimming, guideColor, onReady, readerGuideMode, sendReaderSettings, showSwitchHighlight, switchHighlightColor, syncPageTransition]);
   // Toolbar animation
   const [toolbarTranslateY] = useState(() => new Animated.Value(0));
 
@@ -1221,29 +1285,29 @@ const textColor = isDark && !colorsCustomized
             position: absolute;
             z-index: 12;
             border-radius: 3px;
-            background-color: rgba(250, 204, 21, 0.62);
+            background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 62%, transparent);
             pointer-events: none;
             animation: reader-switch-pulse 1.2s ease-out forwards;
           }
           @keyframes reader-switch-pulse {
             0% {
-              background-color: rgba(250, 204, 21, 0.56);
-              box-shadow: 0 0 0 0 rgba(202, 138, 4, 0.3);
+              background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 56%, transparent);
+              box-shadow: 0 0 0 0 color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 30%, transparent);
               opacity: 0.82;
             }
             32% {
-              background-color: rgba(250, 204, 21, 0.92);
-              box-shadow: 0 0 0 4px rgba(202, 138, 4, 0.2);
+              background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 92%, transparent);
+              box-shadow: 0 0 0 4px color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 20%, transparent);
               opacity: 1;
             }
             62% {
-              background-color: rgba(250, 204, 21, 0.66);
-              box-shadow: 0 0 0 1px rgba(202, 138, 4, 0.12);
+              background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 66%, transparent);
+              box-shadow: 0 0 0 1px color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 12%, transparent);
               opacity: 0.9;
             }
             100% {
-              background-color: rgba(250, 204, 21, 0);
-              box-shadow: 0 0 0 0 rgba(202, 138, 4, 0);
+              background-color: transparent;
+              box-shadow: 0 0 0 0 transparent;
               opacity: 0;
             }
           }
@@ -1263,14 +1327,14 @@ const textColor = isDark && !colorsCustomized
             z-index: 30;
             pointer-events: none;
             border-radius: 4px;
-            background: rgba(245, 158, 11, 0.3);
+            background: color-mix(in srgb, var(--guide-color, #F59E0B) 30%, transparent);
             box-shadow:
               0 0 0 9999px color-mix(
                 in srgb,
                 var(--reader-background, #f8fafc) var(--guide-dimming, 60%),
                 transparent
               ),
-              inset 0 0 0 1px rgba(217, 119, 6, 0.38);
+              inset 0 0 0 1px color-mix(in srgb, var(--guide-color, #F59E0B) 55%, transparent);
             transition: left 90ms ease, top 90ms ease, width 90ms ease, height 90ms ease;
           }
 
@@ -1468,6 +1532,25 @@ const textColor = isDark && !colorsCustomized
           '--guide-dimming',
           percentage + '%'
         );
+        return;
+      }
+
+      if (message.type === 'setReaderGuideColor') {
+        const color = String(message.color || '');
+        if (/^#[0-9a-f]{6}$/i.test(color)) {
+          document.documentElement.style.setProperty('--guide-color', color);
+        }
+        return;
+      }
+
+      if (message.type === 'setSwitchHighlightColor') {
+        const color = String(message.color || '');
+        if (/^#[0-9a-f]{6}$/i.test(color)) {
+          document.documentElement.style.setProperty(
+            '--switch-highlight-color',
+            color
+          );
+        }
         return;
       }
 
@@ -2208,11 +2291,13 @@ const textColor = isDark && !colorsCustomized
           ttsStartOffsetRef.current = nextTtsOffset;
           setTtsStartOffset(nextTtsOffset);
         }
-        onSwitchAnchorChange?.(
-          data.blockId,
-          typeof data.word === "string" ? data.word : "",
-          typeof data.wordIndex === "number" ? data.wordIndex : 0,
-        );
+        if (isActive) {
+          onSwitchAnchorChange?.(
+            data.blockId,
+            typeof data.word === "string" ? data.word : "",
+            typeof data.wordIndex === "number" ? data.wordIndex : 0,
+          );
+        }
         return;
       }
 
@@ -2488,6 +2573,7 @@ const textColor = isDark && !colorsCustomized
         {/* HTML READER */}
         {/* ========================= */}
 
+        <Animated.View style={{ flex: 1, opacity: readerResizeOpacity }}>
         <SafeAreaView
           edges={isLandscape ? ["left", "right"] : []}
           style={{
@@ -2536,6 +2622,8 @@ const textColor = isDark && !colorsCustomized
                 spokenWordHighlight={spokenWordHighlight}
                 guideMode={readerGuideMode}
                 guideBackgroundDimming={guideBackgroundDimming}
+                guideColor={guideColor}
+                switchHighlightColor={switchHighlightColor}
                 onGuideClose={closeReaderGuide}
                 destination={activeModeDestination}
                 stationarySwitchHighlight={stationarySwitchHighlight}
@@ -2784,8 +2872,9 @@ const textColor = isDark && !colorsCustomized
                 const didDraw = drawReaderSwitchHighlight(range, true);
                 if (window.__readerTransition === 'scroll') {
                   const rect = range.getBoundingClientRect();
+                  const desiredTop = readerVisibleTopBoundary() + 8;
                   window.scrollBy({
-                    top: rect.top - window.innerHeight * 0.28,
+                    top: rect.top - desiredTop,
                     left: 0,
                     behavior: 'auto'
                   });
@@ -3950,6 +4039,7 @@ const textColor = isDark && !colorsCustomized
           )}
           </View>
         </SafeAreaView>
+        </Animated.View>
 
         {/* ========================= */}
         {/* ANIMATED READER TOOLBAR */}
@@ -4003,7 +4093,6 @@ const textColor = isDark && !colorsCustomized
         {/* ========================= */}
 
         <BottomSheetPortal
-          preload
           snapPoints={bottomSheetSnapPoints}
           enableDynamicSizing={activeItem === "tts"}
           maxDynamicContentSize={windowHeight * 0.9}

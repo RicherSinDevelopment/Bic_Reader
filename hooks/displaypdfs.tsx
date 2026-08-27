@@ -1,6 +1,7 @@
 import PdfCoverCard from "@/components/pdfcardcomponent/createpdfcard";
 import type { PdfDocument } from "@/database/types";
 import { useRouter } from "expo-router";
+import { memo, useCallback } from "react";
 import {
   FlatList,
   Text,
@@ -21,6 +22,45 @@ interface PdfLibraryProps {
   onRenamePdf: (id: string, name: string) => void;
 }
 
+interface PdfLibraryRowProps {
+  item: PdfLibraryItem;
+  cardWidth: number;
+  isListView: boolean;
+  onDeletePdf: (id: string) => void;
+  onRenamePdf: (id: string, name: string) => void;
+}
+
+const PdfLibraryRow = memo(function PdfLibraryRow({
+  item,
+  cardWidth,
+  isListView,
+  onDeletePdf,
+  onRenamePdf,
+}: PdfLibraryRowProps) {
+  const router = useRouter();
+  const openPdf = useCallback(() => {
+    router.push({ pathname: "/Reader/[pdfId]", params: { pdfId: item.id } });
+  }, [item.id, router]);
+  const deletePdf = useCallback(() => onDeletePdf(item.id), [item.id, onDeletePdf]);
+  const renamePdf = useCallback((name: string) => onRenamePdf(item.id, name), [item.id, onRenamePdf]);
+
+  return (
+    <View style={{ width: cardWidth, marginBottom: isListView ? 14 : 0 }}>
+      <PdfCoverCard
+        pdfPath={item.uri}
+        fileName={item.name}
+        width={cardWidth}
+        list={isListView}
+        dateOpened={item.dateOpened}
+        completionPercentage={item.completionPercentage}
+        onDelete={deletePdf}
+        onRename={renamePdf}
+        onOpen={openPdf}
+      />
+    </View>
+  );
+});
+
 // ========================================
 // PDF LIBRARY
 // ========================================
@@ -31,17 +71,15 @@ export default function PdfLibrary({
   onDeletePdf,
   onRenamePdf,
 }: PdfLibraryProps) {
-  const router = useRouter();
-
   // ========================================
   // CUSTOMIZE SPACING
   // ========================================
 
   // Space between PDF cards
-  const gap = 16;
+  const gap = 14;
 
   // Space between screen edges and cards
-  const horizontalPadding = 20;
+  const horizontalPadding = 22;
 
   const { width: screenWidth } = useWindowDimensions();
   const isListView = numColumns === 3;
@@ -67,6 +105,10 @@ export default function PdfLibrary({
       <FlatList
         data={pdfs}
         keyExtractor={(item) => item.id}
+        initialNumToRender={6}
+        maxToRenderPerBatch={4}
+        windowSize={7}
+        updateCellsBatchingPeriod={50}
 
         // Number of columns comes from HomePage
         numColumns={effectiveColumns}
@@ -78,8 +120,8 @@ export default function PdfLibrary({
         // Overall spacing around the grid
         contentContainerStyle={{
           paddingHorizontal: horizontalPadding,
-          paddingTop: 20,
-          paddingBottom: 100,
+          paddingTop: 8,
+          paddingBottom: 112,
           flexGrow: 1,
         }}
 
@@ -103,29 +145,13 @@ export default function PdfLibrary({
 
         // Render each PDF
         renderItem={({ item }) => (
-          <View
-            style={{
-              width: cardWidth,
-              marginBottom: effectiveColumns === 1 ? gap : 0,
-            }}
-          >
-            <PdfCoverCard
-              pdfPath={item.uri}
-              fileName={item.name}
-              width={cardWidth}
-              list={isListView}
-              dateOpened={item.dateOpened}
-              completionPercentage={item.completionPercentage}
-              onDelete={() => onDeletePdf(item.id)}
-              onRename={(name) => onRenamePdf(item.id, name)}
-              onOpen={() =>
-                router.push({
-                  pathname: "/Reader/[pdfId]",
-                  params: { pdfId: item.id },
-                })
-              }
-            />
-          </View>
+          <PdfLibraryRow
+            item={item}
+            cardWidth={cardWidth}
+            isListView={isListView}
+            onDeletePdf={onDeletePdf}
+            onRenamePdf={onRenamePdf}
+          />
         )}
       />
     </View>

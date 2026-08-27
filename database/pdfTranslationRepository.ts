@@ -32,32 +32,34 @@ export async function savePdfTranslations(
   blocks: ExtractedPdfBlock[],
 ) {
   if (blocks.length === 0) return;
-  const statement = await db.prepareAsync(
-    `INSERT INTO pdf_translations (
-       pdf_id, language_code, source_block_id, block_json, translated_at
-     ) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(pdf_id, language_code, source_block_id) DO UPDATE SET
-       block_json = excluded.block_json,
-       translated_at = excluded.translated_at`,
-  );
-  try {
-    const translatedAt = new Date().toISOString();
-    for (const block of blocks) {
-      const prefix = `translated-${languageCode}-`;
-      const sourceBlockId = block.id.startsWith(prefix)
-        ? block.id.slice(prefix.length)
-        : block.id;
-      await statement.executeAsync([
-        pdfId,
-        languageCode,
-        sourceBlockId,
-        JSON.stringify(block),
-        translatedAt,
-      ]);
+  await db.withTransactionAsync(async () => {
+    const statement = await db.prepareAsync(
+      `INSERT INTO pdf_translations (
+         pdf_id, language_code, source_block_id, block_json, translated_at
+       ) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(pdf_id, language_code, source_block_id) DO UPDATE SET
+         block_json = excluded.block_json,
+         translated_at = excluded.translated_at`,
+    );
+    try {
+      const translatedAt = new Date().toISOString();
+      for (const block of blocks) {
+        const prefix = `translated-${languageCode}-`;
+        const sourceBlockId = block.id.startsWith(prefix)
+          ? block.id.slice(prefix.length)
+          : block.id;
+        await statement.executeAsync([
+          pdfId,
+          languageCode,
+          sourceBlockId,
+          JSON.stringify(block),
+          translatedAt,
+        ]);
+      }
+    } finally {
+      await statement.finalizeAsync();
     }
-  } finally {
-    await statement.finalizeAsync();
-  }
+  });
 }
 
 export async function getPdfTranslationPreference(

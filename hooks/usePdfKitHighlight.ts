@@ -5,7 +5,23 @@ import type { PdfRef } from "react-native-pdf";
 type UsePdfKitHighlightOptions = {
   documentKey: string;
   target?: SwitchHighlightTarget | null;
+  color?: string;
 };
+
+function hexToRgb(color: string) {
+  const normalized = color.trim().replace(/^#/, "");
+  const expanded = normalized.length === 3
+    ? normalized.split("").map((part) => `${part}${part}`).join("")
+    : normalized;
+  const parsed = /^[0-9a-f]{6}$/i.test(expanded)
+    ? Number.parseInt(expanded, 16)
+    : 0xf59e0b;
+  return {
+    red: ((parsed >> 16) & 0xff) / 255,
+    green: ((parsed >> 8) & 0xff) / 255,
+    blue: (parsed & 0xff) / 255,
+  };
+}
 
 function isFiniteBounds(target: SwitchHighlightTarget) {
   const { left, top, right, bottom } = target.sourceBounds;
@@ -36,6 +52,7 @@ function isFiniteBounds(target: SwitchHighlightTarget) {
 export function usePdfKitHighlight({
   documentKey,
   target,
+  color = "#F59E0B",
 }: UsePdfKitHighlightOptions) {
   const pdfRef = useRef<PdfRef>(null);
   const [documentReady, setDocumentReady] = useState(false);
@@ -67,6 +84,7 @@ export function usePdfKitHighlight({
 
     const { left, top, right, bottom } = target.sourceBounds;
     const { width, height } = target.pageSize;
+    const { red, green, blue } = hexToRgb(color);
     const nextKey = [
       target.page,
       left,
@@ -75,6 +93,7 @@ export function usePdfKitHighlight({
       bottom,
       width,
       height,
+      color,
     ].join(":");
     if (lastAppliedKey.current === nextKey) return;
 
@@ -87,12 +106,15 @@ export function usePdfKitHighlight({
         bottom,
         width,
         height,
+        red,
+        green,
+        blue,
       );
       lastAppliedKey.current = nextKey;
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [clearHighlight, documentReady, target]);
+  }, [clearHighlight, color, documentReady, target]);
 
   return {
     clearHighlight,

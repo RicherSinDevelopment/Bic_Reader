@@ -1,6 +1,7 @@
 import { Text } from "@/components/ui/text";
 import type { SwitchHighlightTarget } from "@/hooks/switchhighlight";
 import { usePdfKitHighlight } from "@/hooks/usePdfKitHighlight";
+import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, useColorScheme, View } from "react-native";
 import Pdf, { type TableContent } from "react-native-pdf";
@@ -53,9 +54,13 @@ export default function OriginalPDF({
   const [loading, setLoading] = useState(true);
   const isDark = useColorScheme() === "dark";
   const source = useMemo(() => ({ uri: pdfUri, cache: false }), [pdfUri]);
+  const switchHighlightColor = useReaderSettingsStore(
+    (state) => state.switchHighlightColor,
+  );
   const { markDocumentReady, pdfRef } = usePdfKitHighlight({
     documentKey: pdfUri,
     target: highlightTarget,
+    color: switchHighlightColor,
   });
 
   useEffect(() => {

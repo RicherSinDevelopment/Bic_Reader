@@ -5,6 +5,14 @@ import { Switch } from "@/components/ui/switch";
 import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
 import { Pressable, Text, View } from "react-native";
 
+const guideColorPresets = [
+  { label: "Amber", value: "#F59E0B" },
+  { label: "Green", value: "#65A30D" },
+  { label: "Blue", value: "#3B82F6" },
+  { label: "Violet", value: "#8B5CF6" },
+  { label: "Rose", value: "#F43F5E" },
+] as const;
+
 const dimmingLevels = Array.from({ length: 9 }, (_, index) => (index + 1) * 10);
 const marginPresets = [
   { label: "Small", value: "compact" },
@@ -53,6 +61,14 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
   );
   const setGuideBackgroundDimming = useReaderSettingsStore(
     (state) => state.setGuideBackgroundDimming
+  );
+  const guideColor = useReaderSettingsStore((state) => state.guideColor);
+  const setGuideColor = useReaderSettingsStore((state) => state.setGuideColor);
+  const switchHighlightColor = useReaderSettingsStore(
+    (state) => state.switchHighlightColor
+  );
+  const setSwitchHighlightColor = useReaderSettingsStore(
+    (state) => state.setSwitchHighlightColor
   );
   const setTransition = useReaderSettingsStore((state) => state.setTransition);
   const verticalMarginPreset = useReaderSettingsStore((state) => state.verticalMarginPreset);
@@ -195,6 +211,72 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
             ios_backgroundColor="#d4d4d4"
           />
         </Center>
+      </View>
+
+      <View className="mt-5">
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+          Switch highlight color
+        </Text>
+        <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
+          Marks your position when switching Reader and Translated modes.
+        </Text>
+        <View className="mt-3 flex-row items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-white/10 dark:bg-[#1A1E18]">
+          {guideColorPresets.map((preset) => {
+            const selected = switchHighlightColor === preset.value;
+            const swatchColor = preset.value;
+            return (
+              <Pressable
+                key={preset.value}
+                accessibilityLabel={`${preset.label} switch highlight color`}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selected }}
+                hitSlop={6}
+                onPress={() => setSwitchHighlightColor(preset.value)}
+                className={`h-11 w-11 items-center justify-center rounded-full border-2 ${selected ? "border-[#20251D] dark:border-white" : "border-transparent"}`}
+              >
+                <View
+                  className="h-8 w-8 items-center justify-center rounded-full"
+                  style={{ backgroundColor: swatchColor }}
+                >
+                  {selected ? <View className="h-2.5 w-2.5 rounded-full bg-white" /> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      <View className="mt-5">
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+          Guide color
+        </Text>
+        <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
+          Used by both the line guide and word guide.
+        </Text>
+        <View className="mt-3 flex-row items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-white/10 dark:bg-[#1A1E18]">
+          {guideColorPresets.map((preset) => {
+            const selected = guideColor === preset.value;
+            const swatchColor = preset.value;
+            return (
+              <Pressable
+                key={preset.value}
+                accessibilityLabel={`${preset.label} guide color`}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selected }}
+                hitSlop={6}
+                onPress={() => setGuideColor(preset.value)}
+                className={`h-11 w-11 items-center justify-center rounded-full border-2 ${selected ? "border-[#20251D] dark:border-white" : "border-transparent"}`}
+              >
+                <View
+                  className="h-8 w-8 items-center justify-center rounded-full"
+                  style={{ backgroundColor: swatchColor }}
+                >
+                  {selected ? <View className="h-2.5 w-2.5 rounded-full bg-white" /> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
       <View className="mt-5">

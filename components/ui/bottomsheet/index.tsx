@@ -140,6 +140,16 @@ export const BottomSheet = forwardRef<BottomSheetRef, IBottomSheetRootProps>(
 
     const handleSheetChanges = useCallback(
       (index: number) => {
+        // Gorhom can emit a temporary non-negative index while recalculating
+        // snap points after an orientation or viewport change. Only honor an
+        // opening index when our imperative API actually requested a sheet.
+        if (index >= 0 && !shouldBeOpenRef.current) {
+          bottomSheetRef.current?.close();
+          setCurrentIndex(-1);
+          setIsVisible(false);
+          return;
+        }
+
         setCurrentIndex(index);
         onChange?.(index);
         if (index === -1) {

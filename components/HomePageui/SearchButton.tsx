@@ -45,7 +45,7 @@ export default function SearchButton({ pdfs }: SearchButtonProps) {
         accessibilityLabel="Search PDFs"
         variant="outline"
         size="sm"
-        className="h-12 w-12 rounded-xl border-black/10 bg-white p-3 active:translate-y-0.5 dark:border-white/10 dark:bg-[#1A1E18]"
+        className="h-11 w-11 rounded-full border-[#E1E4D9] bg-[#FFFDF8] p-2.5 active:translate-y-0.5 dark:border-white/10 dark:bg-[#1A1E18]"
         style={homepageDepth.control}
         onPress={() => bottomSheetRef.current?.open(1)}
       >

@@ -5,7 +5,7 @@ import {
   getCachedPdfThumbnail,
   getOrCreatePdfThumbnail,
 } from "@/services/pdfThumbnailService";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { ActivityIndicator, Image, Pressable, View } from "react-native";
 
 interface PdfCoverCardProps {
@@ -50,7 +50,7 @@ function formatDateOpened(date: Date | string) {
   });
 }
 
-export default function PdfCoverCard({
+function PdfCoverCard({
   pdfPath,
   fileName,
   dateOpened,
@@ -98,14 +98,14 @@ export default function PdfCoverCard({
 
   if (list) {
     return (
-      <View className="h-32 flex-row items-center rounded-2xl border border-black/5 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-[#1A1E18]">
+      <View className="h-[132px] flex-row items-center rounded-[22px] border border-[#E5E5DB] bg-[#FFFDF8] p-3.5 shadow-sm dark:border-white/10 dark:bg-[#1A1E18]">
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Open ${displayName}`}
           onPress={onOpen}
           className="min-w-0 flex-1 flex-row items-center active:opacity-75"
         >
-          <View className="h-24 w-[68px] overflow-hidden rounded-xl bg-black shadow-sm">
+          <View className="h-24 w-[68px] overflow-hidden rounded-[14px] bg-[#1C211A] shadow-sm">
             {thumbnailUri ? (
               <Image
                 source={{ uri: thumbnailUri }}
@@ -130,11 +130,11 @@ export default function PdfCoverCard({
             >
               {displayName}
             </Text>
-            <Text className="mt-2 text-xs text-gray-400">
+            <Text className="mt-2 text-xs text-[#858C80]">
               Opened {formatDateOpened(dateOpened)}
             </Text>
             <View className="mt-3 flex-row items-center gap-3">
-              <Progress value={clampedPercent} className="h-1.5 flex-1 bg-black/10 dark:bg-white/10">
+              <Progress value={clampedPercent} className="h-2 flex-1 bg-[#E4E8DD] dark:bg-white/10">
                 <ProgressFilledTrack className="bg-[#639922]" />
               </Progress>
               <Text className="w-9 text-right text-xs text-gray-400">{clampedPercent}%</Text>
@@ -202,7 +202,7 @@ export default function PdfCoverCard({
         accessibilityLabel={`Open ${displayName}`}
         onPress={onOpen}
         style={{ width, height }}
-        className="overflow-hidden rounded-2xl bg-black shadow-lg active:opacity-90"
+        className="overflow-hidden rounded-[22px] bg-[#1C211A] shadow-lg active:opacity-90"
       >
         {thumbnailUri ? (
           <Image
@@ -230,7 +230,7 @@ export default function PdfCoverCard({
       </Pressable>
 
       {/* Meta row: name, completion %, date opened */}
-      <View className="mt-2 flex-row items-center">
+      <View className="mt-3 flex-row items-center px-0.5">
         <View className="min-w-0 flex-1">
           <Text numberOfLines={1} className="font-lato-bold text-black text-sm dark:text-[#F4F5F1]">
             {displayName}
@@ -256,3 +256,5 @@ export default function PdfCoverCard({
     </View>
   );
 }
+
+export default memo(PdfCoverCard);

@@ -225,7 +225,7 @@ export default function PdfCoverCard({
           value={clampedPercent}
           className="absolute bottom-0 left-0 right-0 rounded-none bg-white/10"
         >
-          <ProgressFilledTrack className="bg-[#8fb996]" />
+          <ProgressFilledTrack className="bg-[#639922]" />
         </Progress>
       </Pressable>
 

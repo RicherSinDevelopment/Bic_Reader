@@ -62,7 +62,9 @@ export function useSwitchHighlight(
   }, []);
 
   const target = useMemo<SwitchHighlightTarget | null>(() => {
-    const block = blocks.find((candidate) => candidate.id === anchor?.blockId);
+    const block = anchor
+      ? blocks.find((candidate) => candidate.id === anchor.blockId)
+      : blocks.find((candidate) => Boolean(pageSizes[candidate.page]) && candidate.text.trim());
     const pageSize = block ? pageSizes[block.page] : undefined;
     if (!block || !pageSize) return null;
     const wordIndex = anchor?.wordIndex ?? 0;

@@ -1,12 +1,22 @@
 import { Center } from "@/components/ui/center";
+import { BottomSheetScrollView } from "@/components/ui/bottomsheet";
 import SteppedSlider from "@/components/ui/SteppedSlider";
 import { Switch } from "@/components/ui/switch";
 import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 
 const dimmingLevels = Array.from({ length: 9 }, (_, index) => (index + 1) * 10);
+const marginPresets = [
+  { label: "Small", value: "compact" },
+  { label: "Default", value: "comfortable" },
+  { label: "Big", value: "relaxed" },
+] as const;
 
-export default function Settings() {
+type SettingsProps = {
+  onTransitionChange?: () => void;
+};
+
+export default function Settings({ onTransitionChange }: SettingsProps) {
   const disableRotation = useReaderSettingsStore(
     (state) => state.disableRotation
   );
@@ -45,9 +55,16 @@ export default function Settings() {
     (state) => state.setGuideBackgroundDimming
   );
   const setTransition = useReaderSettingsStore((state) => state.setTransition);
+  const verticalMarginPreset = useReaderSettingsStore((state) => state.verticalMarginPreset);
+  const horizontalMarginPreset = useReaderSettingsStore((state) => state.horizontalMarginPreset);
+  const setVerticalMarginPreset = useReaderSettingsStore((state) => state.setVerticalMarginPreset);
+  const setHorizontalMarginPreset = useReaderSettingsStore((state) => state.setHorizontalMarginPreset);
 
   return (
-    <View className="px-4 py-4">
+    <BottomSheetScrollView
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 }}
+      showsVerticalScrollIndicator={false}
+    >
       <Text className="text-lg font-semibold text-slate-900 dark:text-[#F4F5F1]">
         Reader Settings
       </Text>
@@ -82,9 +99,10 @@ export default function Settings() {
             accessibilityLabel="Horizontal swipe"
             size="md"
             value={transition === "pager"}
-            onValueChange={(enabled) =>
-              setTransition(enabled ? "pager" : "scroll")
-            }
+            onValueChange={(enabled) => {
+              setTransition(enabled ? "pager" : "scroll");
+              onTransitionChange?.();
+            }}
             isDisabled={false}
             trackColor={{ false: "#d4d4d4", true: "#639922" }}
             thumbColor="#fafafa"
@@ -204,6 +222,64 @@ export default function Settings() {
         </View>
       </View>
 
-    </View>
+      {transition === "pager" ? (
+        <View className="mt-6 border-t border-slate-200 pt-5 dark:border-white/10">
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+            Top & bottom margin
+          </Text>
+          <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
+            Controls the breathing room above and below the text.
+          </Text>
+          <View className="mt-3 flex-row gap-2">
+            {marginPresets.map((preset) => {
+              const selected = verticalMarginPreset === preset.value;
+              return (
+                <Pressable
+                  key={preset.value}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`${preset.label} top and bottom margin`}
+                  onPress={() => setVerticalMarginPreset(preset.value)}
+                  className={`flex-1 rounded-lg border px-2 py-2 ${selected ? "border-[#639922] bg-[#639922]" : "border-slate-200 bg-white dark:border-white/10 dark:bg-[#1A1E18]"}`}
+                >
+                  <Text className={`text-center text-xs font-semibold ${selected ? "text-white" : "text-slate-600 dark:text-[#D8DDD3]"}`}>
+                    {preset.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+
+      <View className={transition === "pager" ? "mt-5" : "mt-6 border-t border-slate-200 pt-5 dark:border-white/10"}>
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+          Left & right margin
+        </Text>
+        <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
+          Controls the line length and side space for reading.
+        </Text>
+        <View className="mt-3 flex-row gap-2">
+          {marginPresets.map((preset) => {
+            const selected = horizontalMarginPreset === preset.value;
+            return (
+              <Pressable
+                key={preset.value}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`${preset.label} left and right margin`}
+                onPress={() => setHorizontalMarginPreset(preset.value)}
+                className={`flex-1 rounded-lg border px-2 py-2 ${selected ? "border-[#639922] bg-[#639922]" : "border-slate-200 bg-white dark:border-white/10 dark:bg-[#1A1E18]"}`}
+              >
+                <Text className={`text-center text-xs font-semibold ${selected ? "text-white" : "text-slate-600 dark:text-[#D8DDD3]"}`}>
+                  {preset.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+    </BottomSheetScrollView>
   );
 }

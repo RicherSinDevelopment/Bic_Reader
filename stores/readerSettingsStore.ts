@@ -6,6 +6,7 @@ export type ReaderSpacingPreset =
   | "comfortable"
   | "relaxed"
   | "custom";
+export type ReaderMarginPreset = "compact" | "comfortable" | "relaxed";
 
 type ReaderSettingsState = {
   fontFamily: string;
@@ -13,6 +14,8 @@ type ReaderSettingsState = {
   lineHeight: number;
   paragraphSpacing: number;
   spacingPreset: ReaderSpacingPreset;
+  verticalMarginPreset: ReaderMarginPreset;
+  horizontalMarginPreset: ReaderMarginPreset;
   letterSpacing: number;
   wordSpacing: number;
   bold: boolean;
@@ -36,6 +39,8 @@ type ReaderSettingsState = {
   increaseLineHeight: () => void;
   decreaseLineHeight: () => void;
   setSpacingPreset: (preset: Exclude<ReaderSpacingPreset, "custom">) => void;
+  setVerticalMarginPreset: (preset: ReaderMarginPreset) => void;
+  setHorizontalMarginPreset: (preset: ReaderMarginPreset) => void;
 
   increaseLetterSpacing: () => void;
   decreaseLetterSpacing: () => void;
@@ -64,6 +69,8 @@ export const useReaderSettingsStore =
     lineHeight: 1.6,
     paragraphSpacing: 0.65,
     spacingPreset: "comfortable",
+    verticalMarginPreset: "comfortable",
+    horizontalMarginPreset: "comfortable",
     letterSpacing: 0,
     wordSpacing: 0,
     bold: false,
@@ -123,6 +130,8 @@ export const useReaderSettingsStore =
         spacingPreset: preset,
       });
     },
+    setVerticalMarginPreset: (verticalMarginPreset) => set({ verticalMarginPreset }),
+    setHorizontalMarginPreset: (horizontalMarginPreset) => set({ horizontalMarginPreset }),
 
     increaseLetterSpacing: () =>
       set((state) => ({

@@ -1,5 +1,13 @@
 import { hyphenateText, type ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { FlatList, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
@@ -8,6 +16,9 @@ type Destination = {
   page: number;
   readerPage?: number;
   switchHighlightOffset?: number;
+  switchHighlightWordIndex?: number;
+  switchHighlightWordProgress?: number;
+  switchHighlightQuery?: string;
   blockId?: string;
   searchQuery?: string;
   searchMatchIndex?: number;
@@ -36,6 +47,7 @@ type GuideLine = { left: number; top: number; width: number; height: number; tex
 
 type TextRange = { blockId: string; offset: number; length: number };
 export type ReaderNote = TextRange & { id: string; text: string };
+type MarginPreset = "compact" | "comfortable" | "relaxed";
 
 type Props = {
   blocks: ExtractedPdfBlock[];
@@ -76,6 +88,8 @@ type Props = {
   wordSpacing: number;
   bold: boolean;
   automaticHyphenation: boolean;
+  verticalMarginPreset: MarginPreset;
+  horizontalMarginPreset: MarginPreset;
   backgroundColor: string;
   textColor: string;
   onPageChange?: (
@@ -137,6 +151,11 @@ function HorizontalSelectablePage({
   userNotes,
   onReaderReveal,
   onReady,
+  topContentInset,
+  onGuideLines,
+  guideWord,
+  onGuideWordRects,
+  guideActive,
 }: {
   page: Segment[];
   userHighlights: Props["userHighlights"];
@@ -165,8 +184,20 @@ function HorizontalSelectablePage({
   userNotes: ReaderNote[];
   onReaderReveal?: () => void;
   onReady?: () => void;
+  topContentInset: number;
+  onGuideLines?: (lines: GuideLine[]) => void;
+  guideWord?: TextRange;
+  onGuideWordRects?: (rects: GuideLine[], target?: TextRange) => void;
+  guideActive: boolean;
 }) {
   const webViewRef = useRef<WebView>(null);
+  // The page surface intentionally has no running header/footer. Those
+  // decorations made OCR-heavy documents look like a fragmented contents
+  // page and introduced unnecessary layout movement.
+  const runningHeader = "";
+  const pageNumber = "";
+  const verticalMargin = 0;
+  const topSafeInset = 0;
   const selectionRangesRef = useRef<TextRange[]>([]);
   const [selectionHasHighlight, setSelectionHasHighlight] = useState(false);
 
@@ -219,8 +250,8 @@ function HorizontalSelectablePage({
       return `${before}<mark class="${highlight.className}" style="background-color:${escapeHtml(highlight.color)}">${selected}</mark>`;
     }).join("") + escapeHtml(displayText(segment.text.slice(cursor)));
     const scale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
-    const indent = segment.paragraphStart && !segment.sectionOpening ? "&#8195;&#8194;" : "";
-    return `<div class="segment ${segment.sectionOpening ? "section-opening" : ""}" data-block-id="${escapeHtml(segment.blockId)}" data-start="${segment.startOffset}" data-prefix="${indent ? 2 : 0}" style="font-size:${fontSize * scale}px;line-height:${fontSize * scale * lineHeight}px;margin-top:${segment.spacingBefore}px;margin-bottom:${segment.spacingAfter}px">${indent}${contents}</div>`;
+    const indent = segment.paragraphStart && !segment.sectionOpening ? "&#8195;" : "";
+    return `<div class="segment ${segment.sectionOpening ? "section-opening" : ""}" data-block-id="${escapeHtml(segment.blockId)}" data-start="${segment.startOffset}" data-prefix="${indent ? 1 : 0}" style="font-size:${fontSize * scale}px;line-height:${fontSize * scale * lineHeight}px;margin-top:${segment.spacingBefore}px;margin-bottom:${segment.spacingAfter}px">${indent}${contents}</div>`;
   }).join(""), [displayText, fontSize, lineHeight, page, searchHighlight, switchHighlight, userHighlights, userNotes]);
 
   const webFontFamily = fontFamily === "Lato_700Bold"
@@ -233,7 +264,7 @@ function HorizontalSelectablePage({
       : "";
   const html = useMemo(() => `<!doctype html><html dir="${readingDirection}"><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
     ${fontFaceCss}
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:20px 0 ${bottomPadding}px;color:${textColor};font-family:${JSON.stringify(webFontFamily)},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.2s ease-out forwards}@keyframes readerSwitchPulse{0%{background-color:rgba(250,204,21,.56);box-shadow:0 0 0 0 rgba(202,138,4,.3);opacity:.82}32%{background-color:rgba(250,204,21,.92);box-shadow:0 0 0 4px rgba(202,138,4,.2);opacity:1}62%{background-color:rgba(250,204,21,.66);box-shadow:0 0 0 1px rgba(202,138,4,.12);opacity:.9}100%{background-color:rgba(250,204,21,0);box-shadow:0 0 0 0 rgba(202,138,4,0);opacity:0}}@keyframes readerSwitchFade{from{opacity:.9}to{opacity:0}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body>${markup}<script>
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:${topContentInset}px 0 ${bottomPadding}px;color:${textColor};font-family:${JSON.stringify(webFontFamily)},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.page-running-header,.page-number{position:fixed;z-index:2;left:0;right:0;color:${textColor};opacity:.5;text-align:center;pointer-events:none}.page-running-header{top:${Math.max(topSafeInset + 6, verticalMargin * 0.45)}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${Math.max(11, fontSize * 0.58)}px;font-weight:600;letter-spacing:.02em}.page-number{bottom:${Math.max(14, bottomPadding - 2)}px;font-size:${Math.max(11, fontSize * 0.62)}px;font-variant-numeric:tabular-nums}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.2s ease-out forwards}@keyframes readerSwitchPulse{0%{background-color:rgba(250,204,21,.56);box-shadow:0 0 0 0 rgba(202,138,4,.3)}32%{background-color:rgba(250,204,21,.92);box-shadow:0 0 0 4px rgba(202,138,4,.2)}62%{background-color:rgba(250,204,21,.66);box-shadow:0 0 0 1px rgba(202,138,4,.12)}100%{background-color:rgba(250,204,21,0);box-shadow:0 0 0 0 rgba(202,138,4,0)}}@keyframes readerSwitchFade{from{background-color:rgba(250,204,21,.66)}to{background-color:rgba(250,204,21,0)}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body><div class="page-running-header">${escapeHtml(runningHeader)}</div>${markup}<div class="page-number">${pageNumber}</div><script>
     window.__selectionRanges=[];
     function cleanLength(value){return String(value||'').replace(/\\u00ad/g,'').length}
     function rawIndexForClean(value,target){let clean=0;for(let index=0;index<value.length;index++){if(value[index]!=='\\u00ad'){if(clean===target)return index;clean++}}return value.length}
@@ -262,7 +293,7 @@ function HorizontalSelectablePage({
     }
     let timer;document.addEventListener('selectionchange',function(){clearTimeout(timer);timer=setTimeout(captureSelection,80)});
     document.addEventListener('click',function(event){const marker=event.target.closest('[data-open-note]');if(marker)window.ReactNativeWebView.postMessage(JSON.stringify({type:'openNote',noteId:marker.dataset.openNote}))});
-  </script></body></html>`, [automaticHyphenation, backgroundColor, bold, bottomPadding, fontFaceCss, letterSpacing, markup, readingDirection, textColor, webFontFamily, wordSpacing]);
+  </script></body></html>`, [automaticHyphenation, backgroundColor, bold, bottomPadding, fontFaceCss, fontSize, letterSpacing, markup, pageNumber, readingDirection, runningHeader, textColor, topContentInset, topSafeInset, verticalMargin, webFontFamily, wordSpacing]);
 
   const source = useMemo(() => ({ html }), [html]);
   const ttsInjection = useMemo(
@@ -272,6 +303,14 @@ function HorizontalSelectablePage({
   useEffect(() => {
     webViewRef.current?.injectJavaScript(ttsInjection);
   }, [ttsInjection]);
+  const guideWordInjection = useMemo(() => `window.__reportGuideWord?.(${JSON.stringify(guideWord ?? null)});true;`, [guideWord]);
+  useEffect(() => {
+    webViewRef.current?.injectJavaScript(guideWordInjection);
+  }, [guideWordInjection]);
+  useEffect(() => {
+    if (!guideActive) return;
+    webViewRef.current?.injectJavaScript("window.__reportGuideGeometry?.();true;");
+  }, [guideActive]);
   return <WebView
     ref={webViewRef}
     source={source}
@@ -285,6 +324,94 @@ function HorizontalSelectablePage({
     menuItems={selectionHasHighlight ? horizontalReaderMenuItems : horizontalReaderMenuItemsWithoutRemove}
     onLoadEnd={() => {
       webViewRef.current?.injectJavaScript(ttsInjection);
+      webViewRef.current?.injectJavaScript(`
+        window.__reportGuideGeometry = function() {
+          setTimeout(function() {
+          const rects = [];
+          document.querySelectorAll('.segment').forEach(function(segment) {
+            const range = document.createRange();
+            range.selectNodeContents(segment);
+            Array.from(range.getClientRects()).forEach(function(rect) {
+              if (rect.width > 0 && rect.height > 0) {
+                rects.push({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+              }
+            });
+          });
+          const uniqueRects = rects.filter(function(rect, index) {
+            return !rects.slice(0, index).some(function(previous) {
+              return Math.abs(previous.left - rect.left) < 0.5 && Math.abs(previous.top - rect.top) < 0.5 && Math.abs(previous.width - rect.width) < 0.5;
+            });
+          }).sort(function(a, b) {
+            const vertical = a.top - b.top;
+            if (Math.abs(vertical) > 1) return vertical;
+            return document.documentElement.dir === 'rtl'
+              ? (b.left + b.width) - (a.left + a.width)
+              : a.left - b.left;
+          });
+          const lines = [];
+          uniqueRects.forEach(function(rect) {
+            const line = lines.find(function(candidate) {
+              return Math.abs(candidate.top - rect.top) < 1.5;
+            });
+            if (!line) {
+              lines.push({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+              return;
+            }
+            const right = Math.max(line.left + line.width, rect.left + rect.width);
+            line.left = Math.min(line.left, rect.left);
+            line.width = right - line.left;
+            line.height = Math.max(line.height, rect.height);
+          });
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'guideLines', lines: lines }));
+          window.__reportGuideWord = function(target) {
+            if (!target || !target.blockId || !target.length) return;
+            const segment = Array.from(document.querySelectorAll('[data-block-id]')).find(function(item) {
+              const start = Number(item.dataset.start || 0);
+              const prefix = Number(item.dataset.prefix || 0);
+              return item.dataset.blockId === target.blockId && target.offset >= start && target.offset < start + cleanLength(item.textContent) - prefix;
+            });
+            if (!segment) return;
+            const prefix = Number(segment.dataset.prefix || 0);
+            const localStart = target.offset - Number(segment.dataset.start || 0) + prefix;
+            const localEnd = localStart + target.length;
+            const nodes = [];
+            let cursor = 0;
+            const walker = document.createTreeWalker(segment, NodeFilter.SHOW_TEXT);
+            let node = walker.nextNode();
+            while (node) {
+              const length = cleanLength(node.textContent || '');
+              nodes.push({ node: node, start: cursor, end: cursor + length });
+              cursor += length;
+              node = walker.nextNode();
+            }
+            const pointFor = function(offset, isEnd) {
+              const entry = nodes.find(function(item) { return offset >= item.start && (offset < item.end || (isEnd && offset === item.end)); }) || nodes[nodes.length - 1];
+              if (!entry) return null;
+              return { node: entry.node, offset: rawIndexForClean(entry.node.textContent || '', Math.max(0, Math.min(entry.end - entry.start, offset - entry.start))) };
+            };
+            const startPoint = pointFor(localStart, false);
+            const endPoint = pointFor(localEnd, true);
+            if (!startPoint || !endPoint) return;
+            const range = document.createRange();
+            range.setStart(startPoint.node, startPoint.offset);
+            range.setEnd(endPoint.node, endPoint.offset);
+            const wordRects = Array.from(range.getClientRects()).filter(function(rect) { return rect.width > 0 && rect.height > 0; }).map(function(rect) {
+              return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+            }).sort(function(first, second) {
+              const vertical = first.top - second.top;
+              if (Math.abs(vertical) > 1) return vertical;
+              return document.documentElement.dir === 'rtl'
+                ? (second.left + second.width) - (first.left + first.width)
+                : first.left - second.left;
+            });
+            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'guideWordRects', target: target, rects: wordRects }));
+          };
+          window.__reportGuideWord(${JSON.stringify(guideWord ?? null)});
+          }, 80);
+        };
+        if (${guideActive ? "true" : "false"}) window.__reportGuideGeometry();
+        true;
+      `);
       onReady?.();
     }}
     onContentProcessDidTerminate={() => webViewRef.current?.reload()}
@@ -298,6 +425,18 @@ function HorizontalSelectablePage({
           if (hadSelection && !selectionRangesRef.current.length) onReaderReveal?.();
         } else if (message.type === "openNote" && typeof message.noteId === "string") {
           onOpenNote?.(message.noteId);
+        } else if (message.type === "guideLines" && Array.isArray(message.lines)) {
+          onGuideLines?.(message.lines.filter((line): line is GuideLine =>
+            typeof line?.left === "number" && typeof line.top === "number" &&
+            typeof line.width === "number" && typeof line.height === "number"
+          ));
+        } else if (message.type === "guideWordRects" && Array.isArray(message.rects)) {
+          onGuideWordRects?.(message.rects.filter((rect): rect is GuideLine =>
+            typeof rect?.left === "number" && typeof rect.top === "number" &&
+            typeof rect.width === "number" && typeof rect.height === "number"
+          ), message.target && typeof message.target.blockId === "string" &&
+            typeof message.target.offset === "number" && typeof message.target.length === "number"
+            ? message.target : undefined);
         }
       } catch {}
     }}
@@ -324,12 +463,17 @@ function buildPages(
   baseLineHeight: number,
   baseFontSize: number,
   paragraphSpacing: number,
+  fixedPageAnchor?: PageAnchor,
 ) {
   const pages: Segment[][] = [[]];
   let usedHeight = 0;
 
   blocks.forEach((block, blockIndex) => {
     let sourceOffset = 0;
+    const fixedOffset = fixedPageAnchor?.blockId === block.id
+      ? Math.max(0, Math.min(block.text.length, fixedPageAnchor.blockOffset))
+      : undefined;
+    let fixedBreakApplied = fixedOffset === undefined;
     const previousKind = blocks[blockIndex - 1]?.kind;
     const sectionOpening = block.kind === "paragraph" && (
       blockIndex === 0 || previousKind === "title" || previousKind === "heading"
@@ -339,6 +483,14 @@ function buildPages(
     const scaledCharactersPerLine = Math.max(8, Math.floor(charactersPerLine / textScale));
 
     while (sourceOffset < block.text.length) {
+      if (!fixedBreakApplied && sourceOffset === fixedOffset) {
+        if (usedHeight > 0) {
+          pages.push([]);
+          usedHeight = 0;
+        }
+        fixedBreakApplied = true;
+      }
+
       let spacingBefore = sourceOffset === 0 && usedHeight > 0
         ? block.kind === "title"
           ? baseFontSize * 1.15
@@ -348,7 +500,15 @@ function buildPages(
         : 0;
       let remainingHeight = pageHeight - usedHeight - spacingBefore;
       let availableLines = Math.floor(remainingHeight / scaledLineHeight);
-      if (availableLines < 1 && usedHeight > 0) {
+      const estimatedRemainingLines = Math.ceil(
+        (block.text.length - sourceOffset) / scaledCharactersPerLine,
+      );
+      // Avoid leaving a single opening line of a paragraph or heading at the
+      // bottom of a page when the content continues onto the next page.
+      if (
+        usedHeight > 0 &&
+        (availableLines < 1 || (availableLines === 1 && estimatedRemainingLines > 1))
+      ) {
         pages.push([]);
         usedHeight = 0;
         spacingBefore = 0;
@@ -361,6 +521,17 @@ function buildPages(
       if (end < block.text.length) {
         const breakAt = block.text.lastIndexOf(" ", end);
         if (breakAt > sourceOffset) end = breakAt + 1;
+      }
+      if (
+        !fixedBreakApplied &&
+        fixedOffset !== undefined &&
+        fixedOffset > sourceOffset &&
+        fixedOffset < end
+      ) {
+        // Preserve the current leading word as a real page boundary. Merely
+        // navigating to the page containing it can leave it halfway down the
+        // page after a font-size or spacing change.
+        end = fixedOffset;
       }
       if (end <= sourceOffset) end = Math.min(block.text.length, sourceOffset + available);
 
@@ -412,6 +583,7 @@ function cachedBuildPages(
   baseLineHeight: number,
   baseFontSize: number,
   paragraphSpacing: number,
+  fixedPageAnchor?: PageAnchor,
 ) {
   const key = [
     blocks.length,
@@ -422,6 +594,8 @@ function cachedBuildPages(
     Math.round(baseLineHeight * 100),
     Math.round(baseFontSize * 100),
     Math.round(paragraphSpacing * 100),
+    fixedPageAnchor?.blockId ?? "no-anchor",
+    fixedPageAnchor?.blockOffset ?? -1,
   ].join(":");
   let entries = paginationCache.get(blocks);
   if (!entries) {
@@ -438,6 +612,7 @@ function cachedBuildPages(
     baseLineHeight,
     baseFontSize,
     paragraphSpacing,
+    fixedPageAnchor,
   );
   if (entries.size >= 4) {
     const oldestKey = entries.keys().next().value;
@@ -454,12 +629,23 @@ function pageAnchor(
   const segment = page?.[0];
   if (!segment) return undefined;
   const block = blocks.find((item) => item.id === segment.blockId);
-  const prefix = block?.text.slice(0, segment.startOffset) ?? "";
+  const firstWord = segment.text.match(/\S+/);
+  const blockOffset = segment.startOffset + (firstWord?.index ?? 0);
+  const prefix = block?.text.slice(0, blockOffset) ?? "";
   return {
     blockId: segment.blockId,
-    blockOffset: segment.startOffset,
+    blockOffset,
     wordIndex: prefix.match(/\S+/g)?.length ?? 0,
   };
+}
+
+function pageIndexForAnchor(pages: Segment[][], anchor?: PageAnchor) {
+  if (!anchor) return -1;
+  return pages.findIndex((page) => page.some((segment) =>
+    segment.blockId === anchor.blockId &&
+    anchor.blockOffset >= segment.startOffset &&
+    anchor.blockOffset < segment.startOffset + segment.text.length
+  ));
 }
 
 export default function HorizontalReaderPager({
@@ -488,6 +674,8 @@ export default function HorizontalReaderPager({
   wordSpacing,
   bold,
   automaticHyphenation,
+  verticalMarginPreset,
+  horizontalMarginPreset,
   backgroundColor,
   textColor,
   onPageChange,
@@ -500,8 +688,10 @@ export default function HorizontalReaderPager({
   const isRtl = readingDirection === "rtl";
   const pagerRef = useRef<FlatList<Segment[]>>(null);
   const currentPageRef = useRef(0);
+  const visiblePageAnchorRef = useRef<PageAnchor | undefined>(undefined);
   const readyReportedRef = useRef(false);
   const navigatedDestinationKeyRef = useRef<string | null>(null);
+  const [paginationAnchor, setPaginationAnchor] = useState<PageAnchor>();
   const [containerHeight, setContainerHeight] = useState(0);
   const [pagerWarm, setPagerWarm] = useState(false);
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<number | null>(null);
@@ -510,6 +700,8 @@ export default function HorizontalReaderPager({
   const [wordGuideIndex, setWordGuideIndex] = useState(0);
   const [wordGuideFragmentIndex, setWordGuideFragmentIndex] = useState(0);
   const [guideLinesByPage, setGuideLinesByPage] = useState<Record<number, GuideLine[]>>({});
+  const [webGuideLinesByPage, setWebGuideLinesByPage] = useState<Record<number, GuideLine[]>>({});
+  const [webGuideWordRects, setWebGuideWordRects] = useState<Record<string, GuideLine[]>>({});
   const [wordMeasurement, setWordMeasurement] = useState<{
     key: string;
     prefixWidth?: number;
@@ -545,7 +737,31 @@ export default function HorizontalReaderPager({
   const deferredParagraphSpacing = useDeferredValue(paragraphSpacing);
   const deferredLetterSpacing = useDeferredValue(letterSpacing);
   const deferredWordSpacing = useDeferredValue(wordSpacing);
-  const horizontalPadding = Math.max(24, (width - 680) / 2);
+  const typographyKey = [
+    fontFamily,
+    fontSize,
+    lineHeight,
+    paragraphSpacing,
+    letterSpacing,
+    wordSpacing,
+    bold ? 1 : 0,
+    automaticHyphenation ? 1 : 0,
+  ].join(":");
+  const previousTypographyKeyRef = useRef(typographyKey);
+  const previousDestinationNonceRef = useRef(destination?.nonce);
+  const sideMargin = {
+    compact: 18,
+    comfortable: 30,
+    relaxed: 46,
+  }[horizontalMarginPreset];
+  const verticalMargin = {
+    compact: 14,
+    comfortable: 24,
+    relaxed: 38,
+  }[verticalMarginPreset];
+  const topContentInset = verticalMargin;
+  const bottomContentInset = verticalMargin + 12 + insets.bottom;
+  const horizontalPadding = Math.max(sideMargin, (width - 680) / 2);
   const charactersPerLine = Math.max(
     12,
     Math.floor(
@@ -560,7 +776,7 @@ export default function HorizontalReaderPager({
   );
   const pageContentHeight = Math.max(
     120,
-    (usableHeight - 32 - insets.bottom) * 0.94
+    usableHeight - topContentInset - bottomContentInset,
   );
   const baseLineHeight = Math.max(
     16,
@@ -574,6 +790,7 @@ export default function HorizontalReaderPager({
       baseLineHeight,
       deferredFontSize,
       deferredParagraphSpacing,
+      paginationAnchor,
     ),
     [
       baseLineHeight,
@@ -582,8 +799,42 @@ export default function HorizontalReaderPager({
       deferredFontSize,
       deferredParagraphSpacing,
       pageContentHeight,
+      paginationAnchor,
     ]
   );
+
+  useLayoutEffect(() => {
+    if (previousDestinationNonceRef.current === destination?.nonce) return;
+    previousDestinationNonceRef.current = destination?.nonce;
+    setPaginationAnchor(undefined);
+  }, [destination?.nonce]);
+
+  useLayoutEffect(() => {
+    if (previousTypographyKeyRef.current === typographyKey) return;
+    previousTypographyKeyRef.current = typographyKey;
+    const anchor = visiblePageAnchorRef.current ??
+      pageAnchor(pages[currentPageRef.current], blocks);
+    if (!anchor) return;
+    setPaginationAnchor((current) =>
+      current?.blockId === anchor.blockId &&
+      current.blockOffset === anchor.blockOffset
+        ? current
+        : anchor
+    );
+  }, [blocks, pages, typographyKey]);
+
+  const reportPageChange = useCallback((pageIndex: number) => {
+    if (!pages.length) return;
+    const safeIndex = Math.max(0, Math.min(pages.length - 1, pageIndex));
+    const anchor = pageAnchor(pages[safeIndex], blocks);
+    visiblePageAnchorRef.current = anchor;
+    onPageChange?.(
+      safeIndex + 1,
+      pages.length,
+      pages[safeIndex]?.[0]?.sourcePage ?? 1,
+      anchor,
+    );
+  }, [blocks, onPageChange, pages]);
   const guideWords = useMemo(() => {
     if (guideMode !== "word") return [];
     return pages.flatMap((page, pageIndex) =>
@@ -631,6 +882,13 @@ export default function HorizontalReaderPager({
     return () => cancelAnimationFrame(frame);
   }, [onPageMapChange, pages]);
   const destinationPage = useMemo(() => {
+    const anchoredPage = pageIndexForAnchor(
+      pages,
+      paginationAnchor
+        ? visiblePageAnchorRef.current ?? paginationAnchor
+        : undefined,
+    );
+    if (anchoredPage >= 0) return anchoredPage;
     if (!destination) return 0;
     if (destination.readerPage !== undefined) {
       return Math.max(0, Math.min(pages.length - 1, destination.readerPage - 1));
@@ -646,18 +904,12 @@ export default function HorizontalReaderPager({
     return Math.max(0, pages.findIndex((page) =>
       page.some((segment) => segment.sourcePage >= destination.page)
     ));
-  }, [destination, pages]);
+  }, [destination, pages, paginationAnchor]);
   useEffect(() => {
     if (!destination || !pages.length) return;
     currentPageRef.current = destinationPage;
-    const sourcePage = pages[destinationPage]?.[0]?.sourcePage ?? destination.page;
-    onPageChange?.(
-      destinationPage + 1,
-      pages.length,
-      sourcePage,
-      pageAnchor(pages[destinationPage], blocks),
-    );
-  }, [blocks, destination, destinationPage, onPageChange, pages]);
+    reportPageChange(destinationPage);
+  }, [destination, destinationPage, pages.length, reportPageChange]);
 
   useEffect(() => {
     if (!destination || !pages.length) return;
@@ -684,18 +936,26 @@ export default function HorizontalReaderPager({
     return () => clearTimeout(timer);
   }, [destination, destinationPage, pageContentHeight, pages.length, width]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (pages.length) {
-      const current = Math.min(currentPageRef.current, pages.length - 1);
+      const anchor = visiblePageAnchorRef.current ?? paginationAnchor;
+      const anchoredPage = pageIndexForAnchor(pages, anchor);
+      const current = anchoredPage >= 0
+        ? anchoredPage
+        : Math.min(currentPageRef.current, pages.length - 1);
       currentPageRef.current = current;
-      onPageChange?.(
-        current + 1,
-        pages.length,
-        pages[current]?.[0]?.sourcePage ?? 1,
-        pageAnchor(pages[current], blocks),
-      );
+      reportPageChange(current);
+      if (anchoredPage >= 0) {
+        pagerRef.current?.scrollToIndex({ animated: false, index: current });
+        const frame = requestAnimationFrame(() => {
+          // FlatList can finish applying its new data after the layout effect;
+          // repeat once before paint as a fallback without showing a slide.
+          pagerRef.current?.scrollToIndex({ animated: false, index: current });
+        });
+        return () => cancelAnimationFrame(frame);
+      }
     }
-  }, [blocks, onPageChange, pages]);
+  }, [pages, paginationAnchor, reportPageChange]);
 
   useEffect(() => {
     if (!spokenWordHighlight || !pages.length) return;
@@ -707,14 +967,8 @@ export default function HorizontalReaderPager({
     if (pageIndex < 0 || pageIndex === currentPageRef.current) return;
     pagerRef.current?.scrollToIndex({ animated: true, index: pageIndex });
     currentPageRef.current = pageIndex;
-    const sourcePage = pages[pageIndex]?.[0]?.sourcePage ?? 1;
-    onPageChange?.(
-      pageIndex + 1,
-      pages.length,
-      sourcePage,
-      pageAnchor(pages[pageIndex], blocks),
-    );
-  }, [blocks, onPageChange, pages, spokenWordHighlight]);
+    reportPageChange(pageIndex);
+  }, [pages, reportPageChange, spokenWordHighlight]);
 
   const textForDisplay = useCallback((text: string) => {
     if (!automaticHyphenation || Platform.OS !== "ios") return text;
@@ -729,7 +983,7 @@ export default function HorizontalReaderPager({
   const activeGuideWord = guideMode === "word"
     ? guideWords[wordGuideIndex]
     : undefined;
-  const activeGuideLines = guideLinesByPage[currentPageRef.current] ?? [];
+  const activeGuideLines = webGuideLinesByPage[currentPageRef.current] ?? guideLinesByPage[currentPageRef.current] ?? [];
   const activeGuideLine = activeGuideLines[Math.min(lineGuideIndex, Math.max(0, activeGuideLines.length - 1))];
 
   const recordSegmentMeasurement = useCallback((
@@ -906,7 +1160,7 @@ export default function HorizontalReaderPager({
     textForDisplay,
     wordGuideFragmentIndex,
   ]);
-  const activeGuideWordRect = useMemo<GuideLine | undefined>(() => {
+  const approximatedGuideWordRect = useMemo<GuideLine | undefined>(() => {
     const target = activeWordMeasurementTarget;
     if (!target || wordMeasurement?.key !== target.key ||
       wordMeasurement.prefixWidth === undefined ||
@@ -923,6 +1177,23 @@ export default function HorizontalReaderPager({
       height: target.line.height,
     };
   }, [activeWordMeasurementTarget, isRtl, wordMeasurement]);
+  const guideWordKey = activeGuideWord
+    ? `${activeGuideWord.pageIndex}:${activeGuideWord.blockId}:${activeGuideWord.offset}:${activeGuideWord.length}`
+    : undefined;
+  const activeGuideWordRect = useMemo<GuideLine | undefined>(() => {
+    const exactRects = guideWordKey ? webGuideWordRects[guideWordKey] : undefined;
+    if (exactRects?.length) {
+      const index = wordGuideFragmentIndex < 0
+        ? exactRects.length - 1
+        : Math.min(wordGuideFragmentIndex, exactRects.length - 1);
+      return exactRects[index];
+    }
+    // Once a page has supplied its browser layout, never briefly fall back to
+    // the native Text measurement. Its font metrics differ just enough to
+    // make the word guide jump sideways before the precise rect arrives.
+    if (webGuideLinesByPage[currentPageRef.current]?.length) return undefined;
+    return approximatedGuideWordRect;
+  }, [approximatedGuideWordRect, guideWordKey, webGuideLinesByPage, webGuideWordRects, wordGuideFragmentIndex]);
   useEffect(() => {
     if (!activeWordMeasurementTarget) {
       setWordMeasurement(null);
@@ -966,19 +1237,16 @@ export default function HorizontalReaderPager({
     if (target === currentPageRef.current) return;
     pagerRef.current?.scrollToIndex({ animated: true, index: target });
     currentPageRef.current = target;
-    const sourcePage = pages[target]?.[0]?.sourcePage ?? 1;
-    onPageChange?.(
-      target + 1,
-      pages.length,
-      sourcePage,
-      pageAnchor(pages[target], blocks),
-    );
-  }, [blocks, onPageChange, pages]);
+    reportPageChange(target);
+  }, [pages.length, reportPageChange]);
 
   const moveGuide = useCallback((direction: -1 | 1) => {
     if (guideMode === "word") {
-      const selectedFragment = activeWordMeasurementTarget?.selectedFragmentIndex ?? 0;
-      const fragmentCount = activeWordMeasurementTarget?.fragmentCount ?? 1;
+      const exactFragments = guideWordKey ? webGuideWordRects[guideWordKey] : undefined;
+      const selectedFragment = exactFragments?.length
+        ? (wordGuideFragmentIndex < 0 ? exactFragments.length - 1 : Math.min(wordGuideFragmentIndex, exactFragments.length - 1))
+        : activeWordMeasurementTarget?.selectedFragmentIndex ?? 0;
+      const fragmentCount = exactFragments?.length ?? activeWordMeasurementTarget?.fragmentCount ?? 1;
       if (direction > 0 && selectedFragment < fragmentCount - 1) {
         setWordGuideFragmentIndex(selectedFragment + 1);
         return;
@@ -995,7 +1263,7 @@ export default function HorizontalReaderPager({
       if (nextPage !== undefined) moveToPage(nextPage);
       return;
     }
-    const currentLines = guideLinesByPage[currentPageRef.current] ?? [];
+    const currentLines = webGuideLinesByPage[currentPageRef.current] ?? guideLinesByPage[currentPageRef.current] ?? [];
     const maximumLine = Math.max(0, currentLines.length - 1);
     const next = lineGuideIndex + direction;
     if (next > maximumLine) {
@@ -1005,18 +1273,36 @@ export default function HorizontalReaderPager({
     }
     if (next < 0) {
       const previousPage = Math.max(0, currentPageRef.current - 1);
-      setLineGuideIndex(Math.max(0, (guideLinesByPage[previousPage]?.length ?? 1) - 1));
+      setLineGuideIndex(Math.max(0, ((webGuideLinesByPage[previousPage] ?? guideLinesByPage[previousPage])?.length ?? 1) - 1));
       moveToPage(previousPage);
       return;
     }
     setLineGuideIndex(next);
-  }, [activeWordMeasurementTarget, guideLinesByPage, guideMode, guideWords, lineGuideIndex, moveToPage, wordGuideIndex]);
+  }, [activeWordMeasurementTarget, guideLinesByPage, guideMode, guideWordKey, guideWords, lineGuideIndex, moveToPage, webGuideLinesByPage, webGuideWordRects, wordGuideFragmentIndex, wordGuideIndex]);
 
+  const destinationSwitchHighlightOffset = useMemo(() => {
+    if (!destination?.blockId) return undefined;
+    if (destination.switchHighlightOffset !== undefined) return destination.switchHighlightOffset;
+    const block = blocks.find((candidate) => candidate.id === destination.blockId);
+    if (!block) return undefined;
+    const query = destination.switchHighlightQuery?.trim();
+    if (query) {
+      const index = block.text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+      if (index >= 0) return index;
+    }
+    const words = Array.from(block.text.matchAll(/\S+/g));
+    if (!words.length) return undefined;
+    const index = destination.switchHighlightWordIndex ??
+      (destination.switchHighlightWordProgress !== undefined
+        ? Math.round(destination.switchHighlightWordProgress * (words.length - 1))
+        : undefined);
+    return index === undefined ? undefined : words[Math.max(0, Math.min(words.length - 1, index))]?.index;
+  }, [blocks, destination]);
   const navigationSwitchHighlight = destination?.blockId &&
-    destination.switchHighlightOffset !== undefined
+    destinationSwitchHighlightOffset !== undefined
     ? {
         blockId: destination.blockId,
-        offset: destination.switchHighlightOffset,
+        offset: destinationSwitchHighlightOffset,
         nonce: destination.nonce,
       }
     : null;
@@ -1090,7 +1376,7 @@ export default function HorizontalReaderPager({
     const headingScale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
     const openingWord = "";
     const paragraphIndent = segment.paragraphStart && !segment.sectionOpening
-      ? "\u2003\u2002"
+      ? "\u2003"
       : "";
     const typographyStyle = {
       color: textColor,
@@ -1318,13 +1604,7 @@ export default function HorizontalReaderPager({
           );
           if (position === currentPageRef.current) return;
           currentPageRef.current = position;
-          const sourcePage = pages[position]?.[0]?.sourcePage ?? 1;
-          onPageChange?.(
-            position + 1,
-            pages.length,
-            sourcePage,
-            pageAnchor(pages[position], blocks),
-          );
+          reportPageChange(position);
         }}
         onMomentumScrollEnd={(event) => {
           const position = Math.max(
@@ -1338,13 +1618,7 @@ export default function HorizontalReaderPager({
           if (destination?.searchQuery && position !== destinationPage) {
             setDismissedSearchNonce(destination.nonce);
           }
-          const sourcePage = pages[position]?.[0]?.sourcePage ?? 1;
-          onPageChange?.(
-            position + 1,
-            pages.length,
-            sourcePage,
-            pageAnchor(pages[position], blocks),
-          );
+          reportPageChange(position);
         }}
         onScrollToIndexFailed={({ index }) => {
           pagerRef.current?.scrollToOffset({
@@ -1358,14 +1632,16 @@ export default function HorizontalReaderPager({
               backgroundColor,
               height: "100%",
               paddingHorizontal: horizontalPadding,
-              paddingTop: 20,
-              paddingBottom: 12 + insets.bottom,
+              paddingTop: topContentInset,
+              paddingBottom: bottomContentInset,
               width,
             }}
           >
-            <View pointerEvents="none" style={{ opacity: 0 }}>
-              {page.map((segment, segmentIndex) => renderSegment(segment, segmentIndex, pageIndex))}
-            </View>
+            {guideMode ? (
+              <View pointerEvents="none" style={{ opacity: 0 }}>
+                {page.map((segment, segmentIndex) => renderSegment(segment, segmentIndex, pageIndex))}
+              </View>
+            ) : null}
             <View style={{ position: "absolute", left: horizontalPadding, right: horizontalPadding, top: 0, bottom: 0 }}>
               <HorizontalSelectablePage
                 page={page}
@@ -1385,9 +1661,10 @@ export default function HorizontalReaderPager({
                 wordSpacing={wordSpacing}
                 bold={bold}
                 automaticHyphenation={automaticHyphenation}
+                topContentInset={topContentInset}
                 backgroundColor={backgroundColor}
                 textColor={textColor}
-                bottomPadding={12 + insets.bottom}
+                bottomPadding={bottomContentInset}
                 onHighlight={onSelectionHighlightRequest}
                 onRemoveHighlight={onSelectionRemoveHighlight}
                 onAddNote={onSelectionAddNote}
@@ -1395,6 +1672,38 @@ export default function HorizontalReaderPager({
                 onAskAI={onSelectionAskAI}
                 onReaderReveal={onReaderReveal}
                 onReady={reportReady}
+                guideActive={Boolean(guideMode) && pageIndex === currentPageRef.current}
+                guideWord={activeGuideWord?.pageIndex === pageIndex ? activeGuideWord : undefined}
+                onGuideLines={(lines) => {
+                  const pageLines = lines.map((line) => ({ ...line, left: line.left + horizontalPadding }));
+                  setWebGuideLinesByPage((current) => {
+                    const previous = current[pageIndex] ?? [];
+                    const unchanged = previous.length === pageLines.length && previous.every((line, index) => {
+                      const candidate = pageLines[index];
+                      return Math.abs(line.left - candidate.left) < 0.5 &&
+                        Math.abs(line.top - candidate.top) < 0.5 &&
+                        Math.abs(line.width - candidate.width) < 0.5 &&
+                        Math.abs(line.height - candidate.height) < 0.5;
+                    });
+                    return unchanged ? current : { ...current, [pageIndex]: pageLines };
+                  });
+                }}
+                onGuideWordRects={(rects, target) => {
+                  if (!target || activeGuideWord?.pageIndex !== pageIndex) return;
+                  const key = `${pageIndex}:${target.blockId}:${target.offset}:${target.length}`;
+                  const adjusted = rects.map((rect) => ({ ...rect, left: rect.left + horizontalPadding }));
+                  setWebGuideWordRects((current) => {
+                    const previous = current[key] ?? [];
+                    const unchanged = previous.length === adjusted.length && previous.every((rect, index) => {
+                      const candidate = adjusted[index];
+                      return Math.abs(rect.left - candidate.left) < 0.5 &&
+                        Math.abs(rect.top - candidate.top) < 0.5 &&
+                        Math.abs(rect.width - candidate.width) < 0.5 &&
+                        Math.abs(rect.height - candidate.height) < 0.5;
+                    });
+                    return unchanged ? current : { ...current, [key]: adjusted };
+                  });
+                }}
               />
             </View>
           </View>

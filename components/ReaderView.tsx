@@ -295,6 +295,7 @@ const ReaderView = ({
   const readerMarkup = useMemo(() => blocksToMarkup(initialBlocks), [initialBlocks]);
   const appendedBlockCount = useRef(initialBlocks.length);
   const sentBlockIds = useRef(new Set(initialBlocks.map((block) => block.id)));
+  const annotationDeliveryRevisionRef = useRef(0);
   const lastSourcePageRef = useRef(1);
   const modeTextAnchorRef = useRef<{
     blockId: string;
@@ -387,6 +388,9 @@ const ReaderView = ({
   // Bottom Sheet reference
   const bottomSheetRef =
     useRef<BottomSheetRef>(null);
+  const closeSettingsForTransitionChange = useCallback(() => {
+    bottomSheetRef.current?.close();
+  }, []);
   const activeItemRef = useRef(activeItem);
   const pendingBottomSheetItemRef = useRef<ReaderBottomNavItem | null>(null);
   activeItemRef.current = activeItem;
@@ -442,6 +446,9 @@ const ReaderView = ({
           blockId: anchor?.blockId,
           // Horizontal pagination uses this offset to resolve the exact segment.
           searchMatchIndex: anchor?.blockOffset,
+          // Use the same anchor for the temporary handoff marker. Previously
+          // only the vertical destination received a switch-highlight target.
+          switchHighlightOffset: anchor?.blockOffset,
           // Vertical scrolling uses the word index to restore the precise line.
           switchHighlightWordIndex: anchor?.wordIndex,
           nonce: Date.now(),
@@ -468,6 +475,7 @@ const ReaderView = ({
 
   useEffect(() => {
     if (!webViewReady) return;
+    const revision = ++annotationDeliveryRevisionRef.current;
     const remaining = blocks.filter((block) => !sentBlockIds.current.has(block.id));
     const destinationBlocks = activeModeDestination
       ? remaining.filter((block) => activeModeDestination.blockId
@@ -487,25 +495,22 @@ const ReaderView = ({
     if (!appended.length) {
       webViewRef.current?.postMessage(JSON.stringify({
         type: "appendBlocks",
+        revision,
         html: "",
         hasMore,
+        highlights: pagerHighlights,
+        notes: readerNotes,
       }));
       return;
     }
     webViewRef.current?.postMessage(JSON.stringify({
       type: "appendBlocks",
+      revision,
       html: blocksToMarkup(appended),
       hasMore,
+      highlights: pagerHighlights,
+      notes: readerNotes,
     }));
-    webViewRef.current?.injectJavaScript(`
-      requestAnimationFrame(function() {
-        window.__renderReaderAnnotations?.(
-          ${JSON.stringify(pagerHighlights)},
-          ${JSON.stringify(readerNotes)}
-        );
-      });
-      true;
-    `);
     appended.forEach((block) => sentBlockIds.current.add(block.id));
     appendedBlockCount.current = blocks.length;
     if (remaining.length > appended.length) {
@@ -731,6 +736,12 @@ const ReaderView = ({
   const paragraphSpacing = useReaderSettingsStore(
     (state) => state.paragraphSpacing
   );
+  const verticalMarginPreset = useReaderSettingsStore(
+    (state) => state.verticalMarginPreset
+  );
+  const horizontalMarginPreset = useReaderSettingsStore(
+    (state) => state.horizontalMarginPreset
+  );
   const letterSpacing = useReaderSettingsStore(
   (state) => state.letterSpacing
 );
@@ -850,6 +861,8 @@ const textColor = isDark && !colorsCustomized
       fontSize: fontSize,
       lineHeight: lineHeight,
       paragraphSpacing: paragraphSpacing,
+      verticalMarginPreset,
+      horizontalMarginPreset,
       letterSpacing: letterSpacing,
       wordSpacing: wordSpacing,
       bold: bold,
@@ -858,7 +871,7 @@ const textColor = isDark && !colorsCustomized
       textColor: textColor,
     })
     );
-  }, [fontFamily, fontSize, lineHeight, paragraphSpacing, letterSpacing, wordSpacing, bold, automaticHyphenation, backgroundColor, textColor]);
+  }, [fontFamily, fontSize, lineHeight, paragraphSpacing, verticalMarginPreset, horizontalMarginPreset, letterSpacing, wordSpacing, bold, automaticHyphenation, backgroundColor, textColor]);
 
   useEffect(() => {
     sendReaderSettings();
@@ -1001,7 +1014,9 @@ const textColor = isDark && !colorsCustomized
 
           :root {
             --paragraph-spacing: 0.65em;
-            --reader-side-padding: clamp(24px, 5vw, 32px);
+            --reader-side-padding: 28px;
+            --reader-top-padding: 24px;
+            --reader-bottom-padding: 160px;
           }
 
           html,
@@ -1019,8 +1034,8 @@ const textColor = isDark && !colorsCustomized
           }
 
           body {
-            padding: 24px var(--reader-side-padding);
-            padding-bottom: 160px;
+            padding: var(--reader-top-padding) var(--reader-side-padding);
+            padding-bottom: var(--reader-bottom-padding);
 
             color: #1e293b;
 
@@ -1292,15 +1307,86 @@ const textColor = isDark && !colorsCustomized
 
 
         <script>
+  window.__processedReaderRevisions = new Set();
+  window.__renderReaderAnnotations = function(highlights, notes) {
+    document.querySelectorAll('.reader-note-marker').forEach(function(marker) { marker.remove(); });
+    Array.from(document.querySelectorAll('.reader-note, .reader-user-highlight')).reverse().forEach(function(annotation) {
+      const parent = annotation.parentNode;
+      annotation.replaceWith(...Array.from(annotation.childNodes));
+      parent?.normalize();
+    });
+
+    function wrapRange(annotation, kind) {
+      const block = Array.from(document.querySelectorAll('[data-reader-block]')).find(function(candidate) {
+        return candidate.dataset.blockId === annotation.blockId;
+      });
+      if (!block || annotation.length <= 0) return;
+      const startOffset = annotation.offset;
+      const endOffset = annotation.offset + annotation.length;
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let cursor = 0;
+      let textNode = walker.nextNode();
+      while (textNode) {
+        const length = (textNode.textContent || '').length;
+        nodes.push({ node: textNode, start: cursor, end: cursor + length });
+        cursor += length;
+        textNode = walker.nextNode();
+      }
+      let lastNoteSpan = null;
+      nodes.reverse().forEach(function(entry) {
+        if (endOffset <= entry.start || startOffset >= entry.end) return;
+        const start = Math.max(0, startOffset - entry.start);
+        const end = Math.min(entry.end - entry.start, endOffset - entry.start);
+        if (end <= start) return;
+        const range = document.createRange();
+        range.setStart(entry.node, start);
+        range.setEnd(entry.node, end);
+        const element = document.createElement(kind === 'note' ? 'span' : 'mark');
+        element.className = kind === 'note' ? 'reader-note' : 'reader-user-highlight';
+        if (kind === 'note') element.dataset.noteId = annotation.id;
+        else element.style.backgroundColor = annotation.color || '#fde68a';
+        range.surroundContents(element);
+        if (kind === 'note') lastNoteSpan = element;
+      });
+      if (kind === 'note' && lastNoteSpan) {
+        const marker = document.createElement('button');
+        marker.className = 'reader-note-marker';
+        marker.dataset.openNote = annotation.id;
+        marker.setAttribute('aria-label', 'Open note');
+        marker.textContent = '•';
+        lastNoteSpan.after(marker);
+      }
+    }
+
+    (highlights || []).forEach(function(highlight) { wrapRange(highlight, 'highlight'); });
+    (notes || []).forEach(function(note) { wrapRange(note, 'note'); });
+  };
+
   function handleMessage(event) {
     try {
       const message = JSON.parse(event.data);
 
       if (message.type === 'appendBlocks') {
+        const revision = Number(message.revision);
+        if (
+          Number.isFinite(revision) &&
+          window.__processedReaderRevisions.has(revision)
+        ) return;
+        if (Number.isFinite(revision)) {
+          window.__processedReaderRevisions.add(revision);
+        }
         const container = document.getElementById('reader-pages');
         if (!container) return;
+        const anchorProbeY = Math.max(
+          12,
+          Math.min(
+            window.innerHeight - 12,
+            (Number(window.__readerTopBoundary) || 0) + 12
+          )
+        );
         const viewportAnchor = document
-          .elementFromPoint(Math.max(1, window.innerWidth / 2), 12)
+          .elementFromPoint(Math.max(1, window.innerWidth / 2), anchorProbeY)
           ?.closest?.('[data-source-page-section]');
         const anchorTop = viewportAnchor?.getBoundingClientRect().top;
         if (message.html) {
@@ -1334,6 +1420,10 @@ const textColor = isDark && !colorsCustomized
         ) {
           requestAnimationFrame(window.__refreshReaderPages);
         }
+        window.__renderReaderAnnotations(
+          message.highlights || [],
+          message.notes || []
+        );
         window.__tryPendingSourceDestination?.();
         return;
       }
@@ -1341,7 +1431,7 @@ const textColor = isDark && !colorsCustomized
       if (message.type === 'setSwitchHighlightVisible') {
         window.__showReaderSwitchHighlight = Boolean(message.visible);
         if (!window.__showReaderSwitchHighlight) {
-          window.__clearReaderSwitchHighlight?.();
+          window.__clearReaderSwitchHighlight?.(true);
         } else {
           window.__reportSwitchAnchor?.();
         }
@@ -1359,7 +1449,7 @@ const textColor = isDark && !colorsCustomized
             window.__refreshReaderGuideForTopBar?.();
           });
         } else {
-          window.__clearReaderSwitchHighlight?.();
+          window.__clearReaderSwitchHighlight?.(true);
           requestAnimationFrame(function() {
             window.__refreshReaderGuideForTopBar?.();
           });
@@ -1457,12 +1547,20 @@ const textColor = isDark && !colorsCustomized
             pending.switchHighlightWordProgress !== undefined ||
             Boolean(pending.switchHighlightQuery);
           if (hasSwitchTarget) {
-            window.__highlightSwitchWordAtIndex?.(
-              resolvedTarget,
-              pending.switchHighlightWordIndex,
-              pending.switchHighlightWordProgress,
-              pending.switchHighlightQuery
-            );
+            let highlightAttempt = 0;
+            const drawDestinationHighlight = function() {
+              highlightAttempt += 1;
+              const didDraw = window.__highlightSwitchWordAtIndex?.(
+                resolvedTarget,
+                pending.switchHighlightWordIndex,
+                pending.switchHighlightWordProgress,
+                pending.switchHighlightQuery
+              );
+              if (!didDraw && highlightAttempt < 12) {
+                requestAnimationFrame(drawDestinationHighlight);
+              }
+            };
+            drawDestinationHighlight();
           } else {
             window.__clearReaderSwitchHighlight?.();
           }
@@ -1629,6 +1727,28 @@ const textColor = isDark && !colorsCustomized
         document.documentElement.style.setProperty(
           '--paragraph-spacing',
           message.paragraphSpacing + 'em'
+        );
+
+        // Vertical scrolling keeps a stable top and bottom inset so content
+        // never shifts beneath the reader chrome. The adjustable vertical
+        // margin presets are reserved for horizontal, page-based reading.
+        const verticalMargin = 24;
+        const horizontalMargin = {
+          compact: 14,
+          comfortable: 28,
+          relaxed: 52
+        }[message.horizontalMarginPreset] || 28;
+        document.documentElement.style.setProperty(
+          '--reader-top-padding',
+          verticalMargin + 'px'
+        );
+        document.documentElement.style.setProperty(
+          '--reader-bottom-padding',
+          (verticalMargin + 136) + 'px'
+        );
+        document.documentElement.style.setProperty(
+          '--reader-side-padding',
+          horizontalMargin + 'px'
         );
 
         document.body.style.letterSpacing =
@@ -1829,61 +1949,6 @@ const textColor = isDark && !colorsCustomized
     });
     selection?.removeAllRanges();
     window.__readerSelectionRange = null;
-  };
-
-  window.__renderReaderAnnotations = function(highlights, notes) {
-    document.querySelectorAll('.reader-note-marker').forEach(function(marker) { marker.remove(); });
-    Array.from(document.querySelectorAll('.reader-note, .reader-user-highlight')).reverse().forEach(function(annotation) {
-      const parent = annotation.parentNode;
-      annotation.replaceWith(...Array.from(annotation.childNodes));
-      parent?.normalize();
-    });
-
-    function wrapRange(annotation, kind) {
-      const block = Array.from(document.querySelectorAll('[data-reader-block]')).find(function(candidate) {
-        return candidate.dataset.blockId === annotation.blockId;
-      });
-      if (!block || annotation.length <= 0) return;
-      const startOffset = annotation.offset;
-      const endOffset = annotation.offset + annotation.length;
-      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
-      const nodes = [];
-      let cursor = 0;
-      let textNode = walker.nextNode();
-      while (textNode) {
-        const length = (textNode.textContent || '').length;
-        nodes.push({ node: textNode, start: cursor, end: cursor + length });
-        cursor += length;
-        textNode = walker.nextNode();
-      }
-      let lastNoteSpan = null;
-      nodes.reverse().forEach(function(entry) {
-        if (endOffset <= entry.start || startOffset >= entry.end) return;
-        const start = Math.max(0, startOffset - entry.start);
-        const end = Math.min(entry.end - entry.start, endOffset - entry.start);
-        if (end <= start) return;
-        const range = document.createRange();
-        range.setStart(entry.node, start);
-        range.setEnd(entry.node, end);
-        const element = document.createElement(kind === 'note' ? 'span' : 'mark');
-        element.className = kind === 'note' ? 'reader-note' : 'reader-user-highlight';
-        if (kind === 'note') element.dataset.noteId = annotation.id;
-        else element.style.backgroundColor = annotation.color || '#fde68a';
-        range.surroundContents(element);
-        if (kind === 'note') lastNoteSpan = element;
-      });
-      if (kind === 'note' && lastNoteSpan) {
-        const marker = document.createElement('button');
-        marker.className = 'reader-note-marker';
-        marker.dataset.openNote = annotation.id;
-        marker.setAttribute('aria-label', 'Open note');
-        marker.textContent = '•';
-        lastNoteSpan.after(marker);
-      }
-    }
-
-    (highlights || []).forEach(function(highlight) { wrapRange(highlight, 'highlight'); });
-    (notes || []).forEach(function(note) { wrapRange(note, 'note'); });
   };
 
   document.addEventListener('click', function(event) {
@@ -2266,7 +2331,11 @@ const textColor = isDark && !colorsCustomized
         );
 
       case "settings":
-        return <MemoizedSettings />;
+        return (
+          <MemoizedSettings
+            onTransitionChange={closeSettingsForTransitionChange}
+          />
+        );
 
       default:
         return null;
@@ -2424,9 +2493,9 @@ const textColor = isDark && !colorsCustomized
           style={{
             flex: 1,
             backgroundColor,
-            // Horizontal pages keep one stable reading frame. Reserving the
-            // header space even while its controls are hidden prevents both
-            // text movement and the restored bar from covering the first line.
+            // Keep the paged reading frame stable whether controls are shown
+            // or hidden; changing its origin during a page turn is visibly
+            // jarring and can make text appear to blink.
             paddingTop: isPaged && !isLandscape ? headerOverlayHeight : 0,
           }}
         >
@@ -2480,6 +2549,8 @@ const textColor = isDark && !colorsCustomized
                 wordSpacing={wordSpacing}
                 bold={bold}
                 automaticHyphenation={automaticHyphenation}
+                verticalMarginPreset={verticalMarginPreset}
+                horizontalMarginPreset={horizontalMarginPreset}
                 backgroundColor={backgroundColor}
                 textColor={textColor}
                 onPageChange={handlePagerPageChange}
@@ -2538,7 +2609,7 @@ const textColor = isDark && !colorsCustomized
           /*
            * Native bounce behavior.
            */
-          bounces={!isPaged}
+          bounces={!isPaged && !useTranslatedTextDirection}
 
           /*
            * Smooth iOS scrolling.
@@ -2548,7 +2619,7 @@ const textColor = isDark && !colorsCustomized
           /*
            * Android overscroll.
            */
-          overScrollMode={isPaged ? "never" : "always"}
+          overScrollMode={isPaged || useTranslatedTextDirection ? "never" : "always"}
 
           showsVerticalScrollIndicator={!isPaged}
 
@@ -2628,20 +2699,23 @@ const textColor = isDark && !colorsCustomized
 
 
               let lastSwitchAnchorKey = null;
-              function clearReaderSwitchHighlight() {
-                document.getElementById('reader-switch-highlight')?.remove();
+              function clearReaderSwitchHighlight(preserveExplicit) {
+                const marker = document.getElementById('reader-switch-highlight');
+                if (preserveExplicit && marker?.dataset.explicit === 'true') return;
+                marker?.remove();
               }
               window.__clearReaderSwitchHighlight = clearReaderSwitchHighlight;
 
-              function drawReaderSwitchHighlight(range) {
-                clearReaderSwitchHighlight();
-                if (!range) return;
+              function drawReaderSwitchHighlight(range, explicit) {
+                clearReaderSwitchHighlight(false);
+                if (!range) return false;
                 const rect = Array.from(range.getClientRects()).find(function(item) {
                   return item.width > 0 && item.height > 0;
                 });
-                if (!rect) return;
+                if (!rect) return false;
                 const marker = document.createElement('div');
                 marker.id = 'reader-switch-highlight';
+                marker.dataset.explicit = explicit ? 'true' : 'false';
                 marker.style.left = (rect.left + window.scrollX) + 'px';
                 marker.style.top = (rect.top + window.scrollY) + 'px';
                 marker.style.width = rect.width + 'px';
@@ -2651,6 +2725,7 @@ const textColor = isDark && !colorsCustomized
                   window.__showReaderSwitchHighlight = false;
                 }, { once: true });
                 document.body.appendChild(marker);
+                return true;
               }
 
               window.__highlightSwitchWordAtIndex = function(
@@ -2659,7 +2734,7 @@ const textColor = isDark && !colorsCustomized
                 wordProgress,
                 translatedQuery
               ) {
-                if (!block) return;
+                if (!block) return false;
                 const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
                 const words = [];
                 let textNode = walker.nextNode();
@@ -2670,7 +2745,7 @@ const textColor = isDark && !colorsCustomized
                   });
                   textNode = walker.nextNode();
                 }
-                if (!words.length) return;
+                if (!words.length) return false;
 
                 function normalizeForMatch(value) {
                   return String(value || '')
@@ -2698,7 +2773,7 @@ const textColor = isDark && !colorsCustomized
                       );
                   selected = words[fallbackIndex];
                 }
-                if (!selected) return;
+                if (!selected) return false;
 
                 const range = document.createRange();
                 range.setStart(selected.node, selected.match.index);
@@ -2706,7 +2781,7 @@ const textColor = isDark && !colorsCustomized
                   selected.node,
                   selected.match.index + selected.match[0].length
                 );
-                drawReaderSwitchHighlight(range);
+                const didDraw = drawReaderSwitchHighlight(range, true);
                 if (window.__readerTransition === 'scroll') {
                   const rect = range.getBoundingClientRect();
                   window.scrollBy({
@@ -2715,6 +2790,7 @@ const textColor = isDark && !colorsCustomized
                     behavior: 'auto'
                   });
                 }
+                return didDraw;
               };
 
               function readerVisibleTopBoundary() {
@@ -3212,7 +3288,13 @@ const textColor = isDark && !colorsCustomized
               function drawLineGuide(line) {
                 if (!lineGuide || !line) return;
                 currentGuideDocumentTop = line.documentTop;
-                currentGuideLeft = line.left;
+                // A ragged RTL paragraph has a stable right edge, not a
+                // stable left edge. Keep the guide anchored to the reading
+                // edge so it continues to identify the same line after a
+                // small layout or toolbar change.
+                currentGuideLeft = document.documentElement.dir === 'rtl'
+                  ? line.right
+                  : line.left;
                 lineGuide.style.display = 'block';
                 lineGuide.style.left = Math.max(0, line.left - 3) + 'px';
                 lineGuide.style.top = Math.max(0, line.top - 2) + 'px';
@@ -3229,10 +3311,14 @@ const textColor = isDark && !colorsCustomized
                   if (!closest) return line;
                   const lineDistance =
                     Math.abs(line.documentTop - currentGuideDocumentTop) * 1000 +
-                    Math.abs(line.left - currentGuideLeft);
+                    Math.abs((document.documentElement.dir === 'rtl'
+                      ? line.right
+                      : line.left) - currentGuideLeft);
                   const closestDistance =
                     Math.abs(closest.documentTop - currentGuideDocumentTop) * 1000 +
-                    Math.abs(closest.left - currentGuideLeft);
+                    Math.abs((document.documentElement.dir === 'rtl'
+                      ? closest.right
+                      : closest.left) - currentGuideLeft);
                   return lineDistance < closestDistance
                       ? line
                       : closest;

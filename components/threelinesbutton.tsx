@@ -26,6 +26,8 @@ type OutlineRow = { chapter: ReaderChapter; depth: number };
 
 type Props = {
   chapters?: ReaderChapter[];
+  compact?: boolean;
+  compactWidth?: number;
   currentPage?: number;
   grouped?: boolean;
   totalPages?: number;
@@ -35,6 +37,8 @@ type Props = {
 
 export default function ThreeLinesButton({
   chapters = [],
+  compact = false,
+  compactWidth,
   currentPage = 1,
   grouped = false,
   totalPages = 0,
@@ -119,13 +123,15 @@ export default function ThreeLinesButton({
       {/* Menu Button */}
       <ReaderGlassIconButton
         accessibilityLabel="Open table of contents"
+        compact={compact}
+        compactWidth={compactWidth}
         grouped={grouped}
         onPress={() => {
           setPageInput(String(currentPage));
           setShowDrawer(true);
         }}
       >
-        <Icon as={MenuIcon} size="lg" className="text-[#242424] dark:text-[#F4F5F1]" />
+        <Icon as={MenuIcon} size={compact ? "md" : "lg"} className="text-[#242424] dark:text-[#F4F5F1]" />
       </ReaderGlassIconButton>
 
       {/* Drawer */}

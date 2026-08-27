@@ -4,11 +4,15 @@ import { Pressable, type PressableProps, StyleSheet, View } from "react-native";
 
 type ReaderGlassIconButtonProps = Omit<PressableProps, "children" | "style"> & {
   children: React.ReactNode;
+  compact?: boolean;
+  compactWidth?: number;
   grouped?: boolean;
 };
 
 export default function ReaderGlassIconButton({
   children,
+  compact = false,
+  compactWidth = 30,
   grouped = false,
   onPress,
   ...pressableProps
@@ -24,7 +28,11 @@ export default function ReaderGlassIconButton({
       }}
       style={({ pressed }) => [
         styles.pressable,
-        grouped ? styles.groupedPressable : styles.soloPressable,
+        grouped
+          ? compact
+            ? [styles.compactGroupedPressable, { width: compactWidth }]
+            : styles.groupedPressable
+          : styles.soloPressable,
         pressed && styles.pressablePressed,
       ]}
     >
@@ -57,6 +65,9 @@ const styles = StyleSheet.create({
   },
   groupedPressable: {
     width: 44,
+    height: 44,
+  },
+  compactGroupedPressable: {
     height: 44,
   },
   pressablePressed: {

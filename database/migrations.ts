@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
-const DATABASE_VERSION = 4;
+const DATABASE_VERSION = 5;
 
 export async function migrateDatabase(db: SQLiteDatabase) {
   await db.execAsync(`
@@ -97,6 +97,14 @@ export async function migrateDatabase(db: SQLiteDatabase) {
 
       CREATE INDEX IF NOT EXISTS idx_reader_annotations_document_scope
       ON reader_annotations(pdf_id, scope);
+    `);
+  }
+
+  if (currentVersion < 5) {
+    await db.execAsync(`
+      ALTER TABLE pdf_documents ADD COLUMN cloud_owner_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_pdf_documents_cloud_owner
+      ON pdf_documents(cloud_owner_id);
     `);
   }
 

@@ -46,7 +46,7 @@ import {
   type ExtractedPdfDocument,
 } from "@/modules/bic-pdf-reader";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Animated, StyleSheet, useColorScheme, View } from "react-native";
+import { ActivityIndicator, Animated, StyleSheet, useColorScheme, useWindowDimensions, View } from "react-native";
 import Reanimated, {
   Easing,
   ReduceMotion,
@@ -70,6 +70,17 @@ function isVisibleReaderBlock(block: ExtractedPdfBlock) {
     normalized.startsWith("aronson rdg_") ||
     (normalized.includes("_ch") && normalized.includes(" page "));
   return !isPrepressMarker;
+}
+
+function firstTranslatedContentBlock(
+  blocks: ExtractedPdfBlock[],
+  languageCode: string,
+) {
+  const prefix = `translated-${languageCode}-`;
+  return blocks.reduce<ExtractedPdfBlock | undefined>((first, block) => {
+    if (!block.id.startsWith(prefix) || !block.text.trim()) return first;
+    return !first || block.page < first.page ? block : first;
+  }, undefined);
 }
 
 function firstMissingPageIndex(
@@ -195,6 +206,12 @@ function BookPageSkeleton() {
 }
 
 export default function ReaderScreen() {
+  const { width: windowWidth } = useWindowDimensions();
+  const translatedActionWidth = Math.min(
+    36,
+    Math.max(28, (windowWidth / 2 - 108) / 3),
+  );
+  const translatedActionInset = (translatedActionWidth - 20) / 2;
   const { pdfId } = useLocalSearchParams<{ pdfId?: string }>();
   const db = useSQLiteContext();
   const initiallyCachedPdf = pdfId ? peekCachedPdfById(pdfId) : null;
@@ -226,6 +243,15 @@ export default function ReaderScreen() {
   const [translationRestartWaitingPage, setTranslationRestartWaitingPage] =
     useState<number | null>(null);
   const [translatedReaderActivated, setTranslatedReaderActivated] = useState(false);
+  const [pendingFirstTranslatedOpen, setPendingFirstTranslatedOpen] =
+    useState<string | null>(null);
+  const translatedMountedLanguage = React.useRef<string | null>(null);
+  const openedTranslatedViews = React.useRef(new Set<string>());
+  const latestTranslatedAnchor = React.useRef<{
+    languageCode: string;
+    blockId: string;
+    offset: number;
+  } | null>(null);
   const [translatedChapterRequest, setTranslatedChapterRequest] = useState<{
     sourcePage: number;
     resolvedPage?: number;
@@ -283,6 +309,11 @@ export default function ReaderScreen() {
     switchHighlightWordIndex?: number;
     switchHighlightWordProgress?: number;
     switchHighlightQuery?: string;
+    nonce: number;
+  } | null>(null);
+  const [translatedSwitchHighlight, setTranslatedSwitchHighlight] = useState<{
+    blockId: string;
+    offset: number;
     nonce: number;
   } | null>(null);
   const readerExtractionStarted = React.useRef(false);
@@ -704,29 +735,19 @@ export default function ReaderScreen() {
     translatedWordIndex: number,
   ) => {
     if (!translationLanguage) return;
-    const prefix = `translated-${translationLanguage.code}-`;
-    const sourceBlockId = translatedBlockId.startsWith(prefix)
-      ? translatedBlockId.slice(prefix.length)
-      : translatedBlockId;
-    const sourceBlock = readerBlocks.find((block) => block.id === sourceBlockId);
     const translatedBlock = translatedBlocks.find((block) => block.id === translatedBlockId);
-    if (!sourceBlock || !translatedBlock) return;
-    const sourceWords = Array.from(sourceBlock.text.matchAll(/\S+/g));
-    const translatedWordCount = Array.from(translatedBlock.text.matchAll(/\S+/g)).length;
-    if (!sourceWords.length) return;
-    const progress = translatedWordCount > 1
-      ? Math.max(0, translatedWordIndex) / (translatedWordCount - 1)
-      : 0;
-    const sourceWordIndex = Math.max(
+    if (!translatedBlock) return;
+    const translatedWords = Array.from(translatedBlock.text.matchAll(/\S+/g));
+    const exactWordIndex = Math.max(
       0,
-      Math.min(sourceWords.length - 1, Math.round(progress * (sourceWords.length - 1))),
+      Math.min(translatedWords.length - 1, translatedWordIndex),
     );
-    reportVisibleBlock(
-      sourceBlockId,
-      sourceWords[sourceWordIndex]?.[0] ?? "",
-      sourceWordIndex,
-    );
-  }, [readerBlocks, reportVisibleBlock, translatedBlocks, translationLanguage]);
+    latestTranslatedAnchor.current = {
+      languageCode: translationLanguage.code,
+      blockId: translatedBlockId,
+      offset: translatedWords[exactWordIndex]?.index ?? 0,
+    };
+  }, [translatedBlocks, translationLanguage]);
 
   useEffect(() => {
     readerSkeletonOpacity.value = withTiming(readerContentReady ? 0 : 1, {
@@ -929,22 +950,45 @@ export default function ReaderScreen() {
     const currentSwitchTarget =
       getLatestSwitchHighlightTarget() ?? switchHighlightTarget;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (value !== "translated") setPendingFirstTranslatedOpen(null);
     if (value !== "reader") setReaderChromeHidden(false);
     if (currentSwitchTarget && value === "reader") {
       const nonce = Date.now();
-      setReaderDestination({
-        page: currentSwitchTarget.page,
-        blockId: currentSwitchTarget.blockId,
-        searchMatchIndex: currentSwitchTarget.blockOffset,
-        switchHighlightOffset: currentSwitchTarget.blockOffset,
-        switchHighlightWordIndex: currentSwitchTarget.wordIndex,
-        nonce,
-      });
+      // Reader stays mounted while Original is visible, so its existing
+      // position is already correct. Re-navigating it here causes a visible
+      // jump before the switch highlight appears.
+      setReaderDestination(null);
       setReaderSwitchHighlight({
         blockId: currentSwitchTarget.blockId,
         offset: currentSwitchTarget.blockOffset,
         nonce,
       });
+    } else if (value === "reader") {
+      setReaderDestination(null);
+    }
+    if (value === "translated" && translationLanguage) {
+      const openedKey = `${pdfId ?? "unknown"}:${translationLanguage.code}`;
+      if (!openedTranslatedViews.current.has(openedKey)) {
+        const firstTranslatedBlock = firstTranslatedContentBlock(
+          translatedBlocks,
+          translationLanguage.code,
+        );
+        if (!firstTranslatedBlock) {
+          setTranslatedReaderActivated(true);
+          setPendingFirstTranslatedOpen(openedKey);
+          return;
+        }
+        openedTranslatedViews.current.add(openedKey);
+        setTranslatedDestination({
+          page: firstTranslatedBlock.page,
+          blockId: firstTranslatedBlock.id,
+          switchHighlightWordIndex: 0,
+          nonce: Date.now(),
+        });
+        setTranslatedSwitchHighlight(null);
+        setActiveTab(value);
+        return;
+      }
     }
     if (currentSwitchTarget && value === "translated" && translationLanguage) {
       const targetBlockId =
@@ -960,11 +1004,29 @@ export default function ReaderScreen() {
         switchHighlightWordProgress: targetWordProgress,
         nonce: Date.now(),
       };
-      setTranslatedDestination(destinationBase);
-
-      const targetIsReady = translatedBlocks.some(
+      const translatedTargetBlock = translatedBlocks.find(
         (block) => block.id === targetBlockId,
       );
+      const targetIsReady = Boolean(translatedTargetBlock);
+      const exactTranslatedAnchor = latestTranslatedAnchor.current;
+      const preserveTranslatedPosition =
+        activeTab !== "reader" &&
+        translatedReaderActivated &&
+        translatedMountedLanguage.current === translationLanguage.code &&
+        exactTranslatedAnchor?.languageCode === translationLanguage.code;
+
+      if (preserveTranslatedPosition && exactTranslatedAnchor) {
+        setTranslatedDestination(null);
+        setTranslatedSwitchHighlight({
+          blockId: exactTranslatedAnchor.blockId,
+          offset: exactTranslatedAnchor.offset,
+          nonce: Date.now(),
+        });
+      } else {
+        setTranslatedDestination(destinationBase);
+        setTranslatedSwitchHighlight(null);
+      }
+
       if (!targetIsReady) {
         const requestNonce = Date.now();
         const page = currentSwitchTarget.page;
@@ -995,7 +1057,12 @@ export default function ReaderScreen() {
       }
 
       const sourceLanguage = translationSourceLanguage.current;
-      if (!translationLoading && sourceLanguage && currentSwitchTarget.word) {
+      if (
+        !preserveTranslatedPosition &&
+        !translationLoading &&
+        sourceLanguage &&
+        currentSwitchTarget.word
+      ) {
         const sourceWord = currentSwitchTarget.word.replace(
           /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,
           "",
@@ -1033,8 +1100,34 @@ export default function ReaderScreen() {
   ]);
 
   useEffect(() => {
-    if (activeTab === "translated") setTranslatedReaderActivated(true);
-  }, [activeTab]);
+    if (translationLanguage) {
+      setTranslatedReaderActivated(true);
+    }
+  }, [translationLanguage]);
+
+  useEffect(() => {
+    if (!translationLanguage) return;
+    const firstTranslatedBlock = firstTranslatedContentBlock(
+      translatedBlocks,
+      translationLanguage.code,
+    );
+    if (!firstTranslatedBlock) return;
+
+    translatedMountedLanguage.current = translationLanguage.code;
+    const openedKey = `${pdfId ?? "unknown"}:${translationLanguage.code}`;
+    if (pendingFirstTranslatedOpen !== openedKey) return;
+
+    openedTranslatedViews.current.add(openedKey);
+    setTranslatedDestination({
+      page: firstTranslatedBlock.page,
+      blockId: firstTranslatedBlock.id,
+      switchHighlightWordIndex: 0,
+      nonce: Date.now(),
+    });
+    setTranslatedSwitchHighlight(null);
+    setPendingFirstTranslatedOpen(null);
+    setActiveTab("translated");
+  }, [pdfId, pendingFirstTranslatedOpen, translatedBlocks, translationLanguage]);
 
   const handleReaderToolbarVisibilityChange = useCallback(
     (visible: boolean) => {
@@ -1058,6 +1151,7 @@ export default function ReaderScreen() {
   );
 
   const handleTranslationLanguageChange = (language?: TranslationLanguage) => {
+    setPendingFirstTranslatedOpen(null);
     setTranslationLanguage(language);
     if (pdfId) {
       void savePdfTranslationPreference(db, pdfId, language?.code);
@@ -1334,9 +1428,14 @@ export default function ReaderScreen() {
               <BackButton />
             </View>
 
-            <View className="absolute right-4 top-1/2 -translate-y-1/2 flex-row">
+            <View
+              className="absolute top-1/2 -translate-y-1/2 flex-row"
+              style={{ right: translationLanguage ? translatedActionInset : 16 }}
+            >
                 <ReaderSearchButton
                   blocks={readerBlocks}
+                  compact={Boolean(translationLanguage)}
+                  compactWidth={translatedActionWidth}
                   grouped
                   onSelectResult={(page, blockId, query, matchIndex) =>
                     goToReaderPage(page, blockId, query, matchIndex)
@@ -1344,6 +1443,8 @@ export default function ReaderScreen() {
                 />
                 <ThreeLinesButton
                   chapters={readerChapters}
+                  compact={Boolean(translationLanguage)}
+                  compactWidth={translatedActionWidth}
                   currentPage={navigationCurrentPage}
                   grouped
                   totalPages={visiblePageCount}
@@ -1357,13 +1458,7 @@ export default function ReaderScreen() {
                 />
             </View>
 
-            <View
-              style={
-                translationLanguage
-                  ? { transform: [{ translateX: -12 }] }
-                  : undefined
-              }
-            >
+            <View>
               <ReaderModeTabs
                 value={activeTab}
                 onValueChange={handleTabChange}
@@ -1444,6 +1539,7 @@ export default function ReaderScreen() {
               pageCount={readerPageCount}
               sourcePageCount={readerPageCount}
               destination={translatedDestination}
+              stationarySwitchHighlight={translatedSwitchHighlight}
               onPageChange={handleTranslatedPageChange}
               onPaginationChange={handleReaderPagination}
               onPageMapChange={handleTranslatedChapterPageMapChange}

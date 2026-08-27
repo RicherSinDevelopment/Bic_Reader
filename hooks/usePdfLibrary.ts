@@ -11,10 +11,12 @@ import {
 } from "@/services/pdfImportService";
 import { useFocusEffect } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import { useCallback, useState } from "react";
+import { useCloudSync } from "@/providers/CloudSyncProvider";
+import { useCallback, useEffect, useState } from "react";
 
 export function usePdfLibrary() {
   const db = useSQLiteContext();
+  const { revision: cloudRevision, syncNow } = useCloudSync();
   const [pdfs, setPdfs] = useState<PdfDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -45,17 +47,22 @@ export function usePdfLibrary() {
     }, [refreshPdfs]),
   );
 
+  useEffect(() => {
+    if (cloudRevision > 0) void refreshPdfs();
+  }, [cloudRevision, refreshPdfs]);
+
   const importPdf = useCallback(
     async (pickedPdf: PickedPdf) => {
       const result = await importPickedPdf(db, pickedPdf);
 
       if (result.status === "imported") {
         await refreshPdfs();
+        void syncNow();
       }
 
       return result;
     },
-    [db, refreshPdfs],
+    [db, refreshPdfs, syncNow],
   );
 
   const deletePdf = useCallback(
@@ -72,9 +79,10 @@ export function usePdfLibrary() {
         await deleteStoredPdf(pdf.uri);
       } finally {
         await refreshPdfs();
+        void syncNow();
       }
     },
-    [db, pdfs, refreshPdfs],
+    [db, pdfs, refreshPdfs, syncNow],
   );
 
   const renamePdf = useCallback(
@@ -87,8 +95,9 @@ export function usePdfLibrary() {
 
       await renamePdfRecord(db, id, trimmedName);
       await refreshPdfs();
+      void syncNow();
     },
-    [db, refreshPdfs],
+    [db, refreshPdfs, syncNow],
   );
 
   return {

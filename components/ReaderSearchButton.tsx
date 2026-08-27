@@ -23,6 +23,8 @@ type SearchResult = {
 
 type Props = {
   blocks: ExtractedPdfBlock[];
+  compact?: boolean;
+  compactWidth?: number;
   grouped?: boolean;
   onSelectResult: (
     page: number,
@@ -41,6 +43,8 @@ function resultSnippet(text: string, query: string) {
 
 export default function ReaderSearchButton({
   blocks,
+  compact = false,
+  compactWidth,
   grouped = false,
   onSelectResult,
 }: Props) {
@@ -79,10 +83,12 @@ export default function ReaderSearchButton({
     <>
       <ReaderGlassIconButton
         accessibilityLabel="Search in book"
+        compact={compact}
+        compactWidth={compactWidth}
         grouped={grouped}
         onPress={() => setIsOpen(true)}
       >
-        <Icon as={SearchIcon} size="lg" className="text-[#242424] dark:text-[#F4F5F1]" />
+        <Icon as={SearchIcon} size={compact ? "md" : "lg"} className="text-[#242424] dark:text-[#F4F5F1]" />
       </ReaderGlassIconButton>
 
       <Drawer

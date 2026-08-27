@@ -2,6 +2,7 @@ import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { migrateDatabase } from "@/database/migrations";
 import { AuthProvider, useAuth } from '@/providers/AuthProvider';
 import { RevenueCatProvider } from '@/providers/RevenueCatProvider';
+import { CloudSyncProvider } from '@/providers/CloudSyncProvider';
 import { Lato_400Regular, Lato_700Bold, useFonts } from "@expo-google-fonts/lato";
 import { SourceSans3_400Regular } from "@expo-google-fonts/source-sans-3/400Regular";
 import { Stack } from "expo-router";
@@ -49,7 +50,9 @@ export default function RootLayout() {
                   onInit={migrateDatabase}
                   useSuspense
                 >
-                  <RootNavigator />
+                  <CloudSyncProvider>
+                    <RootNavigator />
+                  </CloudSyncProvider>
                 </SQLiteProvider>
               </Suspense>
             </RevenueCatProvider>

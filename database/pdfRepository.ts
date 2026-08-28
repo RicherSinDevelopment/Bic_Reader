@@ -1,6 +1,7 @@
 import type { NewPdfDocument, PdfDocument } from "@/database/types";
 import { resolveStoredFileUri } from "@/storage/filePaths";
 import type { SQLiteDatabase } from "expo-sqlite";
+import { withSerializedWrite } from "./serializedWriteTransaction";
 
 type PdfDocumentRow = {
   id: string;
@@ -74,10 +75,12 @@ export async function getPdfById(db: SQLiteDatabase, id: string) {
 
 export async function markPdfOpened(db: SQLiteDatabase, id: string) {
   const openedAt = new Date().toISOString();
-  await db.runAsync(
-    "UPDATE pdf_documents SET last_opened_at = ? WHERE id = ?",
-    openedAt,
-    id,
+  await withSerializedWrite(db, (database) =>
+    database.runAsync(
+      "UPDATE pdf_documents SET last_opened_at = ? WHERE id = ?",
+      openedAt,
+      id,
+    ),
   );
   const cached = pdfMemoryCache.get(id);
   if (cached) pdfMemoryCache.set(id, { ...cached, dateOpened: openedAt });
@@ -92,14 +95,16 @@ export async function updatePdfProgress(
   const completionPercentage =
     totalPages > 0 ? Math.round((currentPage / totalPages) * 100) : 0;
 
-  await db.runAsync(
-    `UPDATE pdf_documents
+  await withSerializedWrite(db, (database) =>
+    database.runAsync(
+      `UPDATE pdf_documents
      SET current_page = ?, total_pages = ?, completion_percentage = ?
      WHERE id = ?`,
-    currentPage,
-    totalPages,
-    completionPercentage,
-    id,
+      currentPage,
+      totalPages,
+      completionPercentage,
+      id,
+    ),
   );
   const cached = pdfMemoryCache.get(id);
   if (cached) {
@@ -122,43 +127,45 @@ export async function findPdfByNormalizedName(
 }
 
 export async function insertPdf(db: SQLiteDatabase, pdf: NewPdfDocument) {
-  await db.runAsync(
-    `INSERT INTO pdf_documents (
+  await withSerializedWrite(db, (database) =>
+    database.runAsync(
+      `INSERT INTO pdf_documents (
       id, display_name, normalized_name, original_name, file_uri, file_size,
       mime_type, added_at, last_opened_at, current_page, total_pages,
       completion_percentage
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    pdf.id,
-    pdf.name,
-    pdf.normalizedName,
-    pdf.originalName,
-    pdf.uri,
-    pdf.size ?? null,
-    pdf.mimeType ?? null,
-    pdf.addedAt,
-    pdf.dateOpened,
-    pdf.currentPage,
-    pdf.totalPages ?? null,
-    pdf.completionPercentage,
+      pdf.id,
+      pdf.name,
+      pdf.normalizedName,
+      pdf.originalName,
+      pdf.uri,
+      pdf.size ?? null,
+      pdf.mimeType ?? null,
+      pdf.addedAt,
+      pdf.dateOpened,
+      pdf.currentPage,
+      pdf.totalPages ?? null,
+      pdf.completionPercentage,
+    ),
   );
   pdfMemoryCache.set(pdf.id, pdf);
 }
 
-export async function renamePdf(
-  db: SQLiteDatabase,
-  id: string,
-  name: string,
-) {
-  await db.runAsync(
-    "UPDATE pdf_documents SET display_name = ? WHERE id = ?",
-    name,
-    id,
+export async function renamePdf(db: SQLiteDatabase, id: string, name: string) {
+  await withSerializedWrite(db, (database) =>
+    database.runAsync(
+      "UPDATE pdf_documents SET display_name = ? WHERE id = ?",
+      name,
+      id,
+    ),
   );
   const cached = pdfMemoryCache.get(id);
   if (cached) pdfMemoryCache.set(id, { ...cached, name });
 }
 
 export async function deletePdfRecord(db: SQLiteDatabase, id: string) {
-  await db.runAsync("DELETE FROM pdf_documents WHERE id = ?", id);
+  await withSerializedWrite(db, (database) =>
+    database.runAsync("DELETE FROM pdf_documents WHERE id = ?", id),
+  );
   pdfMemoryCache.delete(id);
 }

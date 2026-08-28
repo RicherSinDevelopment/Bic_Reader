@@ -1,11 +1,12 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
-const DATABASE_VERSION = 5;
+const DATABASE_VERSION = 7;
 
 export async function migrateDatabase(db: SQLiteDatabase) {
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
+    PRAGMA busy_timeout = 5000;
   `);
 
   const versionRow = await db.getFirstAsync<{ user_version: number }>(
@@ -105,6 +106,25 @@ export async function migrateDatabase(db: SQLiteDatabase) {
       ALTER TABLE pdf_documents ADD COLUMN cloud_owner_id TEXT;
       CREATE INDEX IF NOT EXISTS idx_pdf_documents_cloud_owner
       ON pdf_documents(cloud_owner_id);
+    `);
+  }
+
+  if (currentVersion < 6) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS pdf_ai_conversations (
+        pdf_id TEXT PRIMARY KEY NOT NULL,
+        messages_json TEXT NOT NULL,
+        feedback_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (pdf_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
+      );
+    `);
+  }
+
+  if (currentVersion < 7) {
+    await db.execAsync(`
+      ALTER TABLE pdf_ai_conversations
+      ADD COLUMN conversations_json TEXT NOT NULL DEFAULT '[]';
     `);
   }
 

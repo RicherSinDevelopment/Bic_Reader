@@ -4,6 +4,7 @@ import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
 import * as FileSystem from "expo-file-system/legacy";
 import type { Session } from "@supabase/supabase-js";
 import type { SQLiteDatabase } from "expo-sqlite";
+import { withSerializedWrite } from "@/database/serializedWriteTransaction";
 
 const PDF_BUCKET = "premium-pdfs";
 
@@ -44,7 +45,8 @@ type AnnotationRow = {
 };
 
 function pdfDirectory() {
-  if (!FileSystem.documentDirectory) throw new Error("Document storage is unavailable.");
+  if (!FileSystem.documentDirectory)
+    throw new Error("Document storage is unavailable.");
   return `${FileSystem.documentDirectory}pdfs/`;
 }
 
@@ -80,7 +82,11 @@ function settingsSnapshot() {
   };
 }
 
-async function uploadPdf(session: Session, row: LocalPdfRow, storagePath: string) {
+async function uploadPdf(
+  session: Session,
+  row: LocalPdfRow,
+  storagePath: string,
+) {
   const info = await FileSystem.getInfoAsync(row.file_uri);
   if (!info.exists) return;
   const endpoint = `${supabaseUrl}/storage/v1/object/${PDF_BUCKET}/${storagePath
@@ -123,9 +129,11 @@ export async function syncPremiumLibrary(
   restoreFirst: boolean,
 ) {
   const userId = session.user.id;
-  await db.runAsync(
-    "UPDATE pdf_documents SET cloud_owner_id = ? WHERE cloud_owner_id IS NULL",
-    userId,
+  await withSerializedWrite(db, (database) =>
+    database.runAsync(
+      "UPDATE pdf_documents SET cloud_owner_id = ? WHERE cloud_owner_id IS NULL",
+      userId,
+    ),
   );
   const localBefore = await db.getAllAsync<LocalPdfRow>(
     "SELECT * FROM pdf_documents WHERE cloud_owner_id = ?",
@@ -143,47 +151,80 @@ export async function syncPremiumLibrary(
       const local = localById.get(cloud.id);
       if (!local) {
         const uri = await downloadPdf(cloud.storage_path, cloud.id);
-        await db.runAsync(
-          `INSERT OR IGNORE INTO pdf_documents
+        await withSerializedWrite(db, (database) =>
+          database.runAsync(
+            `INSERT OR IGNORE INTO pdf_documents
            (id, display_name, normalized_name, original_name, file_uri, file_size,
             mime_type, added_at, last_opened_at, current_page, total_pages,
             completion_percentage, cloud_owner_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          cloud.id, cloud.display_name, cloud.normalized_name, cloud.original_name,
-          uri, cloud.file_size, cloud.mime_type, cloud.added_at,
-          cloud.last_opened_at, cloud.current_page, cloud.total_pages,
-          cloud.completion_percentage, userId,
+            cloud.id,
+            cloud.display_name,
+            cloud.normalized_name,
+            cloud.original_name,
+            uri,
+            cloud.file_size,
+            cloud.mime_type,
+            cloud.added_at,
+            cloud.last_opened_at,
+            cloud.current_page,
+            cloud.total_pages,
+            cloud.completion_percentage,
+            userId,
+          ),
         );
-      } else if (Date.parse(cloud.last_opened_at) > Date.parse(local.last_opened_at)) {
-        await db.runAsync(
-          `UPDATE pdf_documents SET display_name = ?, last_opened_at = ?,
+      } else if (
+        Date.parse(cloud.last_opened_at) > Date.parse(local.last_opened_at)
+      ) {
+        await withSerializedWrite(db, (database) =>
+          database.runAsync(
+            `UPDATE pdf_documents SET display_name = ?, last_opened_at = ?,
            current_page = ?, total_pages = ?, completion_percentage = ? WHERE id = ?`,
-          cloud.display_name, cloud.last_opened_at, cloud.current_page,
-          cloud.total_pages, cloud.completion_percentage, cloud.id,
+            cloud.display_name,
+            cloud.last_opened_at,
+            cloud.current_page,
+            cloud.total_pages,
+            cloud.completion_percentage,
+            cloud.id,
+          ),
         );
       }
     }
 
     const { data: annotations, error: annotationError } = await supabase
       .from("cloud_reader_annotations")
-      .select("id, annotation_id, pdf_id, scope, kind, block_id, start_offset, text_length, color, note_text, created_at");
+      .select(
+        "id, annotation_id, pdf_id, scope, kind, block_id, start_offset, text_length, color, note_text, created_at",
+      );
     throwIfError(annotationError);
     const restoredIds = new Set(
-      (await db.getAllAsync<{ id: string }>(
-        "SELECT id FROM pdf_documents WHERE cloud_owner_id = ?",
-        userId,
-      ))
-        .map((row) => row.id),
+      (
+        await db.getAllAsync<{ id: string }>(
+          "SELECT id FROM pdf_documents WHERE cloud_owner_id = ?",
+          userId,
+        )
+      ).map((row) => row.id),
     );
     for (const row of (annotations ?? []) as AnnotationRow[]) {
       if (!restoredIds.has(row.pdf_id)) continue;
-      await db.runAsync(
-        `INSERT OR REPLACE INTO reader_annotations
+      await withSerializedWrite(db, (database) =>
+        database.runAsync(
+          `INSERT OR REPLACE INTO reader_annotations
          (id, annotation_id, pdf_id, scope, kind, block_id, start_offset,
           text_length, color, note_text, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        row.id, row.annotation_id, row.pdf_id, row.scope, row.kind, row.block_id,
-        row.start_offset, row.text_length, row.color, row.note_text, row.created_at,
+          row.id,
+          row.annotation_id,
+          row.pdf_id,
+          row.scope,
+          row.kind,
+          row.block_id,
+          row.start_offset,
+          row.text_length,
+          row.color,
+          row.note_text,
+          row.created_at,
+        ),
       );
     }
 
@@ -196,7 +237,9 @@ export async function syncPremiumLibrary(
       useReaderSettingsStore.setState(cloudSettings.reader_settings);
     }
     if (cloudSettings?.appearance_preference) {
-      useAppearanceStore.getState().setPreference(cloudSettings.appearance_preference);
+      useAppearanceStore
+        .getState()
+        .setPreference(cloudSettings.appearance_preference);
     }
   }
 
@@ -216,30 +259,37 @@ export async function syncPremiumLibrary(
         .from("cloud_pdf_documents")
         .delete()
         .eq("user_id", userId)
-        .in("id", removedCloudRows.map((row) => row.id));
+        .in(
+          "id",
+          removedCloudRows.map((row) => row.id),
+        );
       throwIfError(metadataDeleteError);
     }
   }
   const existingCloudIds = new Set(cloudRows.map((row) => row.id));
   for (const row of localDocuments) {
     const storagePath = `${userId}/${row.id}.pdf`;
-    if (!existingCloudIds.has(row.id)) await uploadPdf(session, row, storagePath);
-    const { error } = await supabase.from("cloud_pdf_documents").upsert({
-      user_id: userId,
-      id: row.id,
-      display_name: row.display_name,
-      normalized_name: row.normalized_name,
-      original_name: row.original_name,
-      storage_path: storagePath,
-      file_size: row.file_size,
-      mime_type: row.mime_type,
-      added_at: row.added_at,
-      last_opened_at: row.last_opened_at,
-      current_page: row.current_page,
-      total_pages: row.total_pages,
-      completion_percentage: row.completion_percentage,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "user_id,id" });
+    if (!existingCloudIds.has(row.id))
+      await uploadPdf(session, row, storagePath);
+    const { error } = await supabase.from("cloud_pdf_documents").upsert(
+      {
+        user_id: userId,
+        id: row.id,
+        display_name: row.display_name,
+        normalized_name: row.normalized_name,
+        original_name: row.original_name,
+        storage_path: storagePath,
+        file_size: row.file_size,
+        mime_type: row.mime_type,
+        added_at: row.added_at,
+        last_opened_at: row.last_opened_at,
+        current_page: row.current_page,
+        total_pages: row.total_pages,
+        completion_percentage: row.completion_percentage,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,id" },
+    );
     throwIfError(error);
   }
 
@@ -259,9 +309,9 @@ export async function syncPremiumLibrary(
     .eq("user_id", userId);
   throwIfError(deleteAnnotationsError);
   if (localAnnotations.length) {
-    const { error } = await supabase.from("cloud_reader_annotations").insert(
-      localAnnotations.map((row) => ({ ...row, user_id: userId })),
-    );
+    const { error } = await supabase
+      .from("cloud_reader_annotations")
+      .insert(localAnnotations.map((row) => ({ ...row, user_id: userId })));
     throwIfError(error);
   }
 
@@ -278,7 +328,9 @@ export async function syncPremiumLibrary(
 
 export async function deletePremiumCloudPdf(userId: string, pdfId: string) {
   const storagePath = `${userId}/${pdfId}.pdf`;
-  const { error: storageError } = await supabase.storage.from(PDF_BUCKET).remove([storagePath]);
+  const { error: storageError } = await supabase.storage
+    .from(PDF_BUCKET)
+    .remove([storagePath]);
   if (storageError) throw storageError;
   const { error } = await supabase
     .from("cloud_pdf_documents")

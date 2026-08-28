@@ -1,4 +1,8 @@
 import { BottomSheetTextInput } from "@/components/ui/bottomsheet";
+import type {
+  AIConversation,
+  AIMessageFeedback,
+} from "@/database/aiConversationRepository";
 import {
   BottomSheetFooter,
   BottomSheetScrollView,
@@ -14,12 +18,14 @@ import {
   ChevronDown,
   CircleHelp,
   FileText,
+  History as HistoryIcon,
   Lightbulb,
   Send,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react-native";
+import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
 import { useDerivedValue } from "react-native-reanimated";
@@ -30,18 +36,13 @@ type AIProps = {
   pageCount: number;
   blocks: ExtractedPdfBlock[];
   isExpanded: boolean;
+  conversations: AIConversation[];
+  setConversations: Dispatch<SetStateAction<AIConversation[]>>;
   onComposerActive: (reason: "submit" | "suggestion") => void;
+  onContextLayoutChange: (state: "compact" | "range" | "menu") => void;
 };
 
 type ContextMode = "current" | "range" | "whole";
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  status?: "loading" | "error";
-};
-type MessageFeedback = "helpful" | "not-helpful";
-
 const quickActions = [
   { label: "Summarize this page", icon: FileText },
   { label: "Explain the key ideas", icon: Lightbulb },
@@ -56,7 +57,10 @@ export default function AI({
   pageCount,
   blocks,
   isExpanded,
+  conversations,
+  setConversations,
   onComposerActive,
+  onContextLayoutChange,
 }: AIProps) {
   const isDark = useColorScheme() === "dark";
   const styles = useMemo(() => createStyles(isDark), [isDark]);
@@ -64,36 +68,53 @@ export default function AI({
   const [contextMode, setContextMode] = useState<ContextMode>("current");
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [viewingConversation, setViewingConversation] = useState(false);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const activeConversationIdRef = useRef<string | null>(null);
   const [rangeStart, setRangeStart] = useState(String(safeCurrentPage));
   const [rangeEnd, setRangeEnd] = useState(String(Math.min(safeCurrentPage + 4, pageCount || 1)));
   const [message, setMessage] = useState(selectedText ? `Explain this: ${selectedText}` : "");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [messageFeedback, setMessageFeedback] = useState<
-    Record<string, MessageFeedback>
-  >({});
   const [isSending, setIsSending] = useState(false);
   const isSendingRef = useRef(false);
   const conversationRef = useRef<BottomSheetScrollViewMethods>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   const { animatedKeyboardState, animatedLayoutState, animatedPosition } =
     useBottomSheetInternal();
-  const showSetup = messages.length === 0;
-  const chatActive = composerFocused || isExpanded || messages.length > 0;
-  const firstQuestion = messages.find((chatMessage) =>
-    chatMessage.role === "user"
-  )?.text;
+  const activeConversation = conversations.find(
+    (conversation) => conversation.id === activeConversationId,
+  );
+  const messages = activeConversation?.messages ?? [];
+  const messageFeedback = activeConversation?.feedback ?? {};
+  const showSetup = !viewingConversation;
+  const chatActive = composerFocused || isExpanded || viewingConversation;
+
+  const updateConversation = (
+    conversationId: string,
+    update: (conversation: AIConversation) => AIConversation,
+  ) => {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId ? update(conversation) : conversation,
+      ),
+    );
+  };
 
   const toggleMessageFeedback = (
     messageId: string,
-    feedback: MessageFeedback,
+    feedback: AIMessageFeedback,
   ) => {
-    setMessageFeedback((current) => {
+    if (!activeConversationId) return;
+    updateConversation(activeConversationId, (conversation) => {
+      const current = conversation.feedback;
       if (current[messageId] === feedback) {
-        const next = { ...current };
-        delete next[messageId];
-        return next;
+        const nextFeedback = { ...current };
+        delete nextFeedback[messageId];
+        return { ...conversation, feedback: nextFeedback };
       }
-      return { ...current, [messageId]: feedback };
+      return {
+        ...conversation,
+        feedback: { ...current, [messageId]: feedback },
+      };
     });
   };
 
@@ -134,6 +155,7 @@ export default function AI({
   const chooseContext = (mode: ContextMode) => {
     setContextMode(mode);
     setContextMenuOpen(false);
+    onContextLayoutChange(mode === "range" ? "range" : "compact");
   };
 
   const normalizePage = (value: string) => {
@@ -178,25 +200,52 @@ export default function AI({
     if (!question || isSendingRef.current) return;
 
     isSendingRef.current = true;
+    setViewingConversation(true);
     if (!isExpanded) onComposerActive("submit");
     const turnId = `${Date.now()}`;
+    const conversationId = activeConversationIdRef.current ?? `conversation-${turnId}`;
     const assistantMessageId = `assistant-${turnId}`;
     setIsSending(true);
     setMessage("");
-    setMessages((currentMessages) => [
-      ...currentMessages,
-      { id: `user-${turnId}`, role: "user", text: question },
-      { id: assistantMessageId, role: "assistant", status: "loading", text: "" },
-    ]);
+    const timestamp = new Date().toISOString();
+    if (!activeConversationIdRef.current) {
+      activeConversationIdRef.current = conversationId;
+      setActiveConversationId(conversationId);
+      setConversations((current) => [
+        ...current,
+        {
+          id: conversationId,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          messages: [
+            { id: `user-${turnId}`, role: "user", text: question },
+            { id: assistantMessageId, role: "assistant", status: "loading", text: "" },
+          ],
+          feedback: {},
+        },
+      ]);
+    } else {
+      updateConversation(conversationId, (conversation) => ({
+        ...conversation,
+        updatedAt: timestamp,
+        messages: [
+          ...conversation.messages,
+          { id: `user-${turnId}`, role: "user", text: question },
+          { id: assistantMessageId, role: "assistant", status: "loading", text: "" },
+        ],
+      }));
+    }
 
     const finishAssistantMessage = (text: string, status?: "error") => {
-      setMessages((currentMessages) =>
-        currentMessages.map((currentMessage) =>
+      updateConversation(conversationId, (conversation) => ({
+        ...conversation,
+        updatedAt: new Date().toISOString(),
+        messages: conversation.messages.map((currentMessage) =>
           currentMessage.id === assistantMessageId
             ? { ...currentMessage, status, text }
-            : currentMessage
-        )
-      );
+            : currentMessage,
+        ),
+      }));
     };
 
     const context = buildContext();
@@ -243,18 +292,18 @@ export default function AI({
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => {
-          if (messages.length > 0) {
+          if (viewingConversation && messages.length > 0) {
             conversationRef.current?.scrollToEnd({ animated: true });
           }
         }}
         showsVerticalScrollIndicator={false}
-        stickyHeaderIndices={[0]}
       >
         <View style={styles.header}>
           <Text style={styles.title}>AI</Text>
           <Pressable
             accessibilityLabel="Show chat history"
             accessibilityRole="button"
+            hitSlop={6}
             onPress={() => setHistoryOpen((value) => !value)}
             style={({ pressed }) => [
               styles.historyButton,
@@ -262,40 +311,54 @@ export default function AI({
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.historyText}>History</Text>
+            <HistoryIcon size={19} color={AI_ACCENT} />
           </Pressable>
         </View>
 
         <View style={styles.body}>
         {historyOpen ? (
-          messages.length === 0 ? (
+          conversations.length === 0 ? (
           <View style={styles.noticeCard}>
             <Text style={styles.cardTitle}>No conversations yet</Text>
             <Text style={styles.noticeText}>Your conversations with this PDF will appear here.</Text>
           </View>
           ) : (
-            <Pressable
-              accessibilityLabel="Open current conversation"
-              accessibilityRole="button"
-              onPress={() => {
-                setHistoryOpen(false);
-                requestAnimationFrame(() => {
-                  conversationRef.current?.scrollToEnd({ animated: false });
-                });
-              }}
-              style={({ pressed }) => [
-                styles.historyConversation,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={styles.cardTitle}>Current conversation</Text>
-              <Text numberOfLines={2} style={styles.noticeText}>
-                {firstQuestion ?? "Conversation about this PDF"}
-              </Text>
-              <Text style={styles.historyMessageCount}>
-                {messages.length} {messages.length === 1 ? "message" : "messages"}
-              </Text>
-            </Pressable>
+            [...conversations]
+              .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))
+              .map((conversation) => {
+                const firstQuestion = conversation.messages.find(
+                  (chatMessage) => chatMessage.role === "user",
+                )?.text;
+                return (
+                  <Pressable
+                    key={conversation.id}
+                    accessibilityLabel="Open saved conversation"
+                    accessibilityRole="button"
+                    onPress={() => {
+                      activeConversationIdRef.current = conversation.id;
+                      setActiveConversationId(conversation.id);
+                      setHistoryOpen(false);
+                      setViewingConversation(true);
+                      onComposerActive("submit");
+                      requestAnimationFrame(() => {
+                        conversationRef.current?.scrollToEnd({ animated: false });
+                      });
+                    }}
+                    style={({ pressed }) => [
+                      styles.historyConversation,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.cardTitle} numberOfLines={1}>
+                      {firstQuestion ?? "Conversation about this PDF"}
+                    </Text>
+                    <Text style={styles.historyMessageCount}>
+                      {conversation.messages.length}{" "}
+                      {conversation.messages.length === 1 ? "message" : "messages"}
+                    </Text>
+                  </Pressable>
+                );
+              })
           )
         ) : null}
 
@@ -312,7 +375,13 @@ export default function AI({
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: contextMenuOpen }}
-          onPress={() => setContextMenuOpen((value) => !value)}
+          onPress={() => {
+            const nextOpen = !contextMenuOpen;
+            setContextMenuOpen(nextOpen);
+            onContextLayoutChange(
+              nextOpen ? "menu" : contextMode === "range" ? "range" : "compact",
+            );
+          }}
           style={({ pressed }) => [styles.contextButton, pressed && styles.pressed]}
         >
           <FileText size={17} color={AI_ACCENT} />
@@ -361,8 +430,11 @@ export default function AI({
                 <Pressable
                   key={label}
                   onPress={() => {
-                    setMessage(label);
+                    // Run the action immediately instead of staging the label
+                    // in the composer for the user to press send. Expanding the
+                    // sheet first keeps the conversation in view as it loads.
                     onComposerActive("suggestion");
+                    void handleSend(label);
                   }}
                   style={({ pressed }) => [styles.suggestionButton, pressed && styles.pressed]}
                 >
@@ -375,7 +447,7 @@ export default function AI({
         ) : null}
         </> : null}
 
-        {!historyOpen && messages.map((chatMessage) =>
+        {!historyOpen && viewingConversation && messages.map((chatMessage) =>
           chatMessage.role === "user" ? (
             <View key={chatMessage.id} style={styles.questionBubble}>
               <Text style={styles.questionText}>{chatMessage.text}</Text>
@@ -488,15 +560,18 @@ export default function AI({
 
 const createStyles = (isDark: boolean) => StyleSheet.create({
   scrollView: { backgroundColor: isDark ? "#151814" : "#FFFEFC", flex: 1 },
-  content: { flexGrow: 1, paddingBottom: 16 },
-  header: { alignItems: "center", backgroundColor: isDark ? "#151814" : "#FFFEFC", flexDirection: "row", height: 42, paddingHorizontal: 16, position: "relative" },
-  body: { flexGrow: 1, paddingHorizontal: 16 },
-  title: { color: isDark ? "#F4F5F1" : "#0F172A", fontSize: 21, fontWeight: "600" },
-  historyButton: { alignItems: "center", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 10, borderWidth: 1, flexDirection: "row", height: 34, justifyContent: "center", position: "absolute", right: 16, top: 4, width: 72 },
+  // Footer margin adjustment already reserves the composer's height. Keep only
+  // a small visual gap so the last suggestion sits directly above it.
+  content: { paddingBottom: 8 },
+  // The shared drag handle owns the top breathing room. Pull the toolbar up
+  // slightly so its title sits close to the handle like the settings sheets.
+  header: { alignItems: "center", alignSelf: "stretch", backgroundColor: isDark ? "#151814" : "#FFFEFC", flexDirection: "row", marginTop: -6, minHeight: 48, paddingHorizontal: 16, paddingVertical: 6, position: "relative", width: "100%" },
+  body: { paddingHorizontal: 16 },
+  title: { color: isDark ? "#F4F5F1" : "#0F172A", fontSize: 18, fontWeight: "600" },
+  historyButton: { alignItems: "center", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 10, borderWidth: 1, height: 36, justifyContent: "center", marginLeft: "auto", width: 36 },
   historyButtonActive: { backgroundColor: isDark ? "#28321E" : "#F0F5E9", borderColor: AI_ACCENT },
-  historyText: { color: AI_ACCENT, fontSize: 13, fontWeight: "600" },
   pressed: { opacity: 0.68 },
-  sectionLabel: { color: isDark ? "#E5E8E1" : "#16202C", fontSize: 14, fontWeight: "600", marginBottom: 6, marginTop: 10 },
+  sectionLabel: { color: isDark ? "#E5E8E1" : "#16202C", fontSize: 14, fontWeight: "600", marginBottom: 6, marginTop: 9 },
   contextButton: { alignItems: "center", backgroundColor: isDark ? "#222720" : "#FFFFFF", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 10, borderWidth: 1, flexDirection: "row", height: 43, paddingHorizontal: 13 },
   contextText: { color: isDark ? "#E5E8E1" : "#334155", flex: 1, fontSize: 14, fontWeight: "600", marginLeft: 10 },
   contextMenu: { backgroundColor: isDark ? "#222720" : "#FFFFFF", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 10, borderWidth: 1, marginTop: 6, overflow: "hidden" },
@@ -506,7 +581,7 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
   radio: { borderColor: "#CBD5E1", borderRadius: 8, borderWidth: 1, height: 16, marginRight: 10, width: 16 },
   radioSelected: { borderColor: AI_ACCENT, borderWidth: 5 },
   suggestions: { gap: 5 },
-  suggestionButton: { alignItems: "center", backgroundColor: isDark ? "#28321E" : "#F0F5E9", borderRadius: 9, flexDirection: "row", height: 38, paddingHorizontal: 13 },
+  suggestionButton: { alignItems: "center", backgroundColor: isDark ? "#28321E" : "#F0F5E9", borderRadius: 9, flexDirection: "row", height: 39, paddingHorizontal: 13 },
   suggestionText: { color: AI_ACCENT, fontSize: 13.5, fontWeight: "600", marginLeft: 10 },
   noticeCard: { backgroundColor: isDark ? "#222720" : "#F8FAFC", borderRadius: 10, marginTop: 10, padding: 13 },
   historyConversation: { backgroundColor: isDark ? "#222720" : "#FFFFFF", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 12, borderWidth: 1, marginTop: 10, padding: 14 },
@@ -534,7 +609,7 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
   feedbackButton: { alignItems: "center", borderColor: isDark ? "#42483F" : "#DDE2E8", borderRadius: 16, borderWidth: 1, height: 32, justifyContent: "center", width: 32 },
   feedbackButtonSelected: { backgroundColor: AI_ACCENT, borderColor: AI_ACCENT },
   composerFooter: { zIndex: 1000 },
-  composerArea: { backgroundColor: isDark ? "#151814" : "#FFFEFC", paddingBottom: 9, paddingHorizontal: 15, paddingTop: 8 },
+  composerArea: { backgroundColor: isDark ? "#151814" : "#FFFEFC", borderTopColor: isDark ? "#2D332B" : "#EEF0EB", borderTopWidth: StyleSheet.hairlineWidth, paddingBottom: 8, paddingHorizontal: 16, paddingTop: 6 },
   composer: { alignItems: "center", backgroundColor: isDark ? "#222720" : "#FFFFFF", borderColor: isDark ? "#42483F" : "#D9D9D6", borderRadius: 26, borderWidth: StyleSheet.hairlineWidth, elevation: 2, flexDirection: "row", minHeight: 52, paddingLeft: 17, paddingRight: 6, shadowColor: "#0F172A", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8 },
   composerExpanded: { alignItems: "flex-end", borderRadius: 24, minHeight: 68, paddingBottom: 7, paddingTop: 6 },
   composerInput: { backgroundColor: "transparent", borderWidth: 0, color: isDark ? "#F4F5F1" : "#1F2937", flex: 1, fontSize: 15, height: 50, lineHeight: 20, margin: 0, paddingBottom: 0, paddingHorizontal: 0, paddingLeft: 0, paddingRight: 10, paddingTop: 14 },

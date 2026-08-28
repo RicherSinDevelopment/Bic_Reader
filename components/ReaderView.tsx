@@ -1,17 +1,14 @@
-import ReaderToolbar, {
-  ReaderBottomNavItem,
-} from "@/components/Readertoolbar";
-import HorizontalReaderPager, { type ReaderNote } from "@/components/HorizontalReaderPager";
+import HorizontalReaderPager, {
+  type ReaderNote,
+} from "@/components/HorizontalReaderPager";
 import PremiumFeatureModal from "@/components/PremiumFeatureModal";
+import ReaderToolbar, { ReaderBottomNavItem } from "@/components/Readertoolbar";
 
 import AI from "@/components/readernavbar/AI";
 import BackgroundSettings from "@/components/readernavbar/BackgroundSettings";
 import FontSettings from "@/components/readernavbar/FontSettings";
 import Settings from "@/components/readernavbar/Settings";
-import TTS, {
-  type TranslationLanguage,
-} from "@/components/readernavbar/TTS";
-import { usePageTransition } from "@/hooks/pagetransition";
+import TTS, { type TranslationLanguage } from "@/components/readernavbar/TTS";
 import {
   BottomSheet,
   BottomSheetBackdrop,
@@ -20,7 +17,7 @@ import {
   BottomSheetPortal,
   type BottomSheetRef,
 } from "@/components/ui/bottomsheet";
-import { BottomSheetHandle as NativeBottomSheetHandle } from "@gorhom/bottom-sheet";
+import { usePageTransition } from "@/hooks/pagetransition";
 
 import React, {
   useCallback,
@@ -45,26 +42,34 @@ import {
   View,
 } from "react-native";
 
-import { useReaderSettingsStore } from '@/stores/readerSettingsStore';
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { WebView } from "react-native-webview";
+import {
+  loadReaderAnnotations,
+  saveReaderAnnotations,
+} from "@/database/readerAnnotationRepository";
+import {
+  loadAIConversation,
+  saveAIConversation,
+  type AIConversation,
+} from "@/database/aiConversationRepository";
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
+import { useRevenueCat } from "@/providers/RevenueCatProvider";
 import {
   appleSpeech,
   clearAppleSpeechSleepTimer,
   isAppleSpeechAvailable,
 } from "@/services/appleSpeechService";
+import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
 import { Lato_700Bold } from "@expo-google-fonts/lato";
 import { SourceSans3_400Regular } from "@expo-google-fonts/source-sans-3/400Regular";
 import { useAssets } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
-import { useRevenueCat } from "@/providers/RevenueCatProvider";
 import { useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import {
-  loadReaderAnnotations,
-  saveReaderAnnotations,
-} from "@/database/readerAnnotationRepository";
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import { WebView } from "react-native-webview";
 
 type ReaderDestination = {
   page: number;
@@ -98,7 +103,11 @@ type ReaderViewProps = {
   onPageChange?: (page: number) => void;
   onPaginationChange?: (currentPage: number, totalPages: number) => void;
   onPageMapChange?: (pageMap: Record<number, number>) => void;
-  onSwitchAnchorChange?: (blockId: string, word: string, wordIndex: number) => void;
+  onSwitchAnchorChange?: (
+    blockId: string,
+    word: string,
+    wordIndex: number,
+  ) => void;
   showSwitchHighlight?: boolean;
   onReady?: () => void;
   onToolbarVisibilityChange?: (visible: boolean) => void;
@@ -121,20 +130,6 @@ const MemoizedFontSettings = React.memo(FontSettings);
 const MemoizedBackgroundSettings = React.memo(BackgroundSettings);
 const MemoizedSettings = React.memo(Settings);
 const HiddenBottomSheetHandle = () => null;
-const aiBottomSheetHandleStyle = {
-  borderTopLeftRadius: 12,
-  borderTopRightRadius: 12,
-  paddingVertical: 12,
-} as const;
-const ReaderAiBottomSheetHandle = (
-  props: React.ComponentProps<typeof NativeBottomSheetHandle>,
-) => (
-  <NativeBottomSheetHandle
-    {...props}
-    accessibilityLabel="Resize AI panel"
-    style={aiBottomSheetHandleStyle}
-  />
-);
 
 const highlightColors = [
   "#fde68a",
@@ -148,8 +143,12 @@ const highlightColors = [
 const rightToLeftLanguageCodes = new Set(["ar", "fa", "he", "ur"]);
 
 function containsRightToLeftText(blocks: ExtractedPdfBlock[]) {
-  const sample = blocks.slice(0, 80).map((block) => block.text).join(" ");
-  const rtlCharacters = sample.match(/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g)?.length ?? 0;
+  const sample = blocks
+    .slice(0, 80)
+    .map((block) => block.text)
+    .join(" ");
+  const rtlCharacters =
+    sample.match(/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g)?.length ?? 0;
   const letterCharacters = sample.match(/\p{L}/gu)?.length ?? 0;
   return letterCharacters > 0 && rtlCharacters / letterCharacters >= 0.3;
 }
@@ -163,8 +162,12 @@ function ttsPositionForBlock(
   for (const block of blocks) {
     const text = block.text.trim();
     if (block.id === blockId) {
-      const leadingWhitespace = block.text.length - block.text.trimStart().length;
-      return globalOffset + Math.max(0, Math.min(text.length, blockOffset - leadingWhitespace));
+      const leadingWhitespace =
+        block.text.length - block.text.trimStart().length;
+      return (
+        globalOffset +
+        Math.max(0, Math.min(text.length, blockOffset - leadingWhitespace))
+      );
     }
     globalOffset += text.length + 2;
   }
@@ -181,11 +184,13 @@ function spokenWordForTtsOffset(
     const text = block.text.trim();
     const blockEnd = globalOffset + text.length;
     if (charIndex >= globalOffset && charIndex < blockEnd) {
-      const leadingWhitespace = block.text.length - block.text.trimStart().length;
+      const leadingWhitespace =
+        block.text.length - block.text.trimStart().length;
       const localOffset = charIndex - globalOffset;
-      const word = Array.from(text.matchAll(/\S+/g)).find((match) =>
-        localOffset >= (match.index ?? 0) &&
-        localOffset < (match.index ?? 0) + match[0].length
+      const word = Array.from(text.matchAll(/\S+/g)).find(
+        (match) =>
+          localOffset >= (match.index ?? 0) &&
+          localOffset < (match.index ?? 0) + match[0].length,
       );
       return {
         blockId: block.id,
@@ -209,25 +214,38 @@ function escapeHtml(value: string) {
 
 function blockTag(block: ExtractedPdfBlock) {
   switch (block.kind) {
-    case "title": return "h1";
-    case "heading": return "h2";
-    case "listItem": return "li";
-    case "footnote": return "aside";
-    default: return "p";
+    case "title":
+      return "h1";
+    case "heading":
+      return "h2";
+    case "listItem":
+      return "li";
+    case "footnote":
+      return "aside";
+    default:
+      return "p";
   }
 }
 
 function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
   const pages = new Map<number, ExtractedPdfBlock[]>();
-  blocks.forEach((block) => pages.set(block.page, [...(pages.get(block.page) ?? []), block]));
-  return Array.from(pages.entries()).map(([page, pageBlocks]) => `
+  blocks.forEach((block) =>
+    pages.set(block.page, [...(pages.get(block.page) ?? []), block]),
+  );
+  return Array.from(pages.entries())
+    .map(
+      ([page, pageBlocks]) => `
     <section class="source-page" data-source-page-section="${page}" aria-label="Page ${page}">
-      ${pageBlocks.map((block) => {
-        const tag = blockTag(block);
-        return `<${tag} data-reader-block data-block-id="${escapeHtml(block.id)}" data-source-page="${block.page}">${escapeHtml(block.text)}</${tag}>`;
-      }).join("\n")}
+      ${pageBlocks
+        .map((block) => {
+          const tag = blockTag(block);
+          return `<${tag} data-reader-block data-block-id="${escapeHtml(block.id)}" data-source-page="${block.page}">${escapeHtml(block.text)}</${tag}>`;
+        })
+        .join("\n")}
       <div class="page-divider"><span>Page ${page}</span></div>
-    </section>`).join("\n");
+    </section>`,
+    )
+    .join("\n");
 }
 
 // The reader WebView keeps only a sliding window of the book in its DOM. A
@@ -274,9 +292,11 @@ const ReaderView = ({
 
   const [latoBoldBase64, setLatoBoldBase64] = useState<string | null>(null);
   const [sourceSansBase64, setSourceSansBase64] = useState<string | null>(null);
-  const [activeItem, setActiveItem] =
-    useState<ReaderBottomNavItem>("font");
+  const [activeItem, setActiveItem] = useState<ReaderBottomNavItem>("font");
   const [aiExpanded, setAiExpanded] = useState(false);
+  const [aiSheetSnapPoint, setAiSheetSnapPoint] = useState("42%");
+  const [aiConversations, setAiConversations] = useState<AIConversation[]>([]);
+  const aiConversationLoadedIdRef = useRef<string | null>(null);
   const [showAiPremiumPrompt, setShowAiPremiumPrompt] = useState(false);
   const [backgroundSettingsTab, setBackgroundSettingsTab] = useState<
     "presets" | "font" | "background"
@@ -290,14 +310,18 @@ const ReaderView = ({
   } | null>(null);
   const speechStartOffsetRef = useRef(0);
   const readerLanguageCode = useTranslatedTextDirection
-    ? translationLanguage?.code ?? "en"
+    ? (translationLanguage?.code ?? "en")
     : "en";
-  const originalTextIsRtl = useMemo(() => containsRightToLeftText(blocks), [blocks]);
-  const readerDirection = (useTranslatedTextDirection &&
-    rightToLeftLanguageCodes.has(readerLanguageCode)) ||
+  const originalTextIsRtl = useMemo(
+    () => containsRightToLeftText(blocks),
+    [blocks],
+  );
+  const readerDirection =
+    (useTranslatedTextDirection &&
+      rightToLeftLanguageCodes.has(readerLanguageCode)) ||
     (!useTranslatedTextDirection && originalTextIsRtl)
-    ? "rtl"
-    : "ltr";
+      ? "rtl"
+      : "ltr";
   const ttsText = useMemo(
     () => blocks.map((block) => block.text.trim()).join("\n\n"),
     [blocks],
@@ -306,7 +330,10 @@ const ReaderView = ({
     const firstPage = blocks[0]?.page ?? 1;
     return blocks.filter((block) => block.page < firstPage + 5);
   });
-  const readerMarkup = useMemo(() => blocksToMarkup(initialBlocks), [initialBlocks]);
+  const readerMarkup = useMemo(
+    () => blocksToMarkup(initialBlocks),
+    [initialBlocks],
+  );
   const appendedBlockCount = useRef(initialBlocks.length);
   const sentBlockIds = useRef(new Set(initialBlocks.map((block) => block.id)));
   const annotationDeliveryRevisionRef = useRef(0);
@@ -321,45 +348,87 @@ const ReaderView = ({
   const [webViewReady, setWebViewReady] = useState(false);
   const [appendPass, setAppendPass] = useState(0);
   const [highlightPickerVisible, setHighlightPickerVisible] = useState(false);
-  const [pagerHighlights, setPagerHighlights] = useState<Array<{
-    blockId: string;
-    offset: number;
-    length: number;
-    color: string;
-  }>>([]);
-  const pendingPagerHighlightRef = useRef<Array<{
-    blockId: string;
-    offset: number;
-    length: number;
-  }> | null>(null);
+  const [pagerHighlights, setPagerHighlights] = useState<
+    {
+      blockId: string;
+      offset: number;
+      length: number;
+      color: string;
+    }[]
+  >([]);
+  const pendingPagerHighlightRef = useRef<
+    | {
+        blockId: string;
+        offset: number;
+        length: number;
+      }[]
+    | null
+  >(null);
   const [selectedAIText, setSelectedAIText] = useState("");
   const [selectionHasHighlight, setSelectionHasHighlight] = useState(false);
   const [readerNotes, setReaderNotes] = useState<ReaderNote[]>([]);
   const annotationsLoadedKeyRef = useRef<string | null>(null);
-  const scrollSelectionRangesRef = useRef<Array<{
-    blockId: string;
-    offset: number;
-    length: number;
-  }>>([]);
+  const scrollSelectionRangesRef = useRef<
+    {
+      blockId: string;
+      offset: number;
+      length: number;
+    }[]
+  >([]);
   const [noteEditor, setNoteEditor] = useState<{
     id?: string;
-    ranges: Array<{ blockId: string; offset: number; length: number }>;
+    ranges: { blockId: string; offset: number; length: number }[];
     selectedText: string;
     source: "paged" | "scroll";
   } | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+    aiConversationLoadedIdRef.current = null;
+    setAiConversations([]);
+    void loadAIConversation(db, documentId)
+      .then((conversation) => {
+        if (cancelled) return;
+        aiConversationLoadedIdRef.current = documentId;
+        setAiConversations(conversation.conversations);
+      })
+      .catch((error) =>
+        console.error("Failed to load AI conversation:", error),
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [db, documentId]);
+
+  useEffect(() => {
+    if (aiConversationLoadedIdRef.current !== documentId) return;
+    void saveAIConversation(
+      db,
+      documentId,
+      aiConversations,
+    ).catch((error) =>
+      console.error("Failed to save AI conversation:", error),
+    );
+  }, [aiConversations, db, documentId]);
+
+  useEffect(() => {
     const key = `${documentId}:${annotationScope}`;
     let cancelled = false;
     annotationsLoadedKeyRef.current = null;
-    void loadReaderAnnotations(db, documentId, annotationScope).then((annotations) => {
-      if (cancelled) return;
-      setPagerHighlights(annotations.highlights);
-      setReaderNotes(annotations.notes);
-      annotationsLoadedKeyRef.current = key;
-    }).catch((error) => console.error("Failed to load reader annotations:", error));
-    return () => { cancelled = true; };
+    void loadReaderAnnotations(db, documentId, annotationScope)
+      .then((annotations) => {
+        if (cancelled) return;
+        setPagerHighlights(annotations.highlights);
+        setReaderNotes(annotations.notes);
+        annotationsLoadedKeyRef.current = key;
+      })
+      .catch((error) =>
+        console.error("Failed to load reader annotations:", error),
+      );
+    return () => {
+      cancelled = true;
+    };
   }, [annotationScope, db, documentId]);
 
   useEffect(() => {
@@ -372,7 +441,9 @@ const ReaderView = ({
         annotationScope,
         pagerHighlights,
         readerNotes,
-      ).catch((error) => console.error("Failed to save reader annotations:", error));
+      ).catch((error) =>
+        console.error("Failed to save reader annotations:", error),
+      );
     }, 180);
     return () => clearTimeout(timer);
   }, [annotationScope, db, documentId, pagerHighlights, readerNotes]);
@@ -400,8 +471,7 @@ const ReaderView = ({
   }, [fontAssets]);
 
   // Bottom Sheet reference
-  const bottomSheetRef =
-    useRef<BottomSheetRef>(null);
+  const bottomSheetRef = useRef<BottomSheetRef>(null);
   const bottomSheetViewportWidthRef = useRef(windowWidth);
   const closeSettingsForTransitionChange = useCallback(() => {
     bottomSheetRef.current?.close();
@@ -417,21 +487,24 @@ const ReaderView = ({
     bottomSheetRef.current?.close();
   }, [windowWidth]);
 
-  const openBottomSheet = useCallback((item: ReaderBottomNavItem) => {
-    // The landscape reader hides all chrome. Ignore stale taps while the
-    // orientation transition is in progress so a sheet cannot open behind it.
-    if (isLandscape) return;
+  const openBottomSheet = useCallback(
+    (item: ReaderBottomNavItem) => {
+      // The landscape reader hides all chrome. Ignore stale taps while the
+      // orientation transition is in progress so a sheet cannot open behind it.
+      if (isLandscape) return;
 
-    if (activeItemRef.current === item) {
-      bottomSheetRef.current?.open(0);
-      return;
-    }
+      if (activeItemRef.current === item) {
+        bottomSheetRef.current?.open(0);
+        return;
+      }
 
-    // Commit and measure the requested content before the native opening
-    // animation begins. This avoids animating while swapping the old panel.
-    pendingBottomSheetItemRef.current = item;
-    setActiveItem(item);
-  }, [isLandscape]);
+      // Commit and measure the requested content before the native opening
+      // animation begins. This avoids animating while swapping the old panel.
+      pendingBottomSheetItemRef.current = item;
+      setActiveItem(item);
+    },
+    [isLandscape],
+  );
 
   useLayoutEffect(() => {
     if (isLandscape) {
@@ -527,14 +600,13 @@ const ReaderView = ({
   // (search, contents, or page picker) and must supersede the handoff. An old
   // destination that was already consumed must not pull the new view backward.
   const destinationChangedAfterHandoff = Boolean(
-    destination &&
-      destination.nonce !== modeHandoff.previousDestinationNonce,
+    destination && destination.nonce !== modeHandoff.previousDestinationNonce,
   );
   const activeModeDestination = !modeHandoffReady
     ? null
     : destinationChangedAfterHandoff
       ? destination
-      : modeHandoff.destination ?? destination;
+      : (modeHandoff.destination ?? destination);
 
   useEffect(() => {
     if (!webViewReady) return;
@@ -548,15 +620,18 @@ const ReaderView = ({
     const highAnchor = Math.max(anchorPage, destinationPage ?? anchorPage);
     const windowStart = Math.max(1, lowAnchor - APPEND_BEHIND_PAGES);
     const windowEnd = highAnchor + APPEND_AHEAD_PAGES;
-    const remaining = blocks.filter((block) =>
-      block.page >= windowStart &&
-      block.page <= windowEnd &&
-      !sentBlockIds.current.has(block.id)
+    const remaining = blocks.filter(
+      (block) =>
+        block.page >= windowStart &&
+        block.page <= windowEnd &&
+        !sentBlockIds.current.has(block.id),
     );
     const destinationBlocks = activeModeDestination
-      ? remaining.filter((block) => activeModeDestination.blockId
-          ? block.id === activeModeDestination.blockId
-          : block.page === activeModeDestination.page)
+      ? remaining.filter((block) =>
+          activeModeDestination.blockId
+            ? block.id === activeModeDestination.blockId
+            : block.page === activeModeDestination.page,
+        )
       : [];
     const appended = destinationBlocks.length
       ? destinationBlocks.slice(0, 220)
@@ -574,24 +649,28 @@ const ReaderView = ({
       highestAvailablePage < (sourcePageCount ?? pageCount) ||
       remaining.length > appended.length;
     if (!appended.length) {
-      webViewRef.current?.postMessage(JSON.stringify({
+      webViewRef.current?.postMessage(
+        JSON.stringify({
+          type: "appendBlocks",
+          revision,
+          html: "",
+          hasMore,
+          highlights: pagerHighlights,
+          notes: readerNotes,
+        }),
+      );
+      return;
+    }
+    webViewRef.current?.postMessage(
+      JSON.stringify({
         type: "appendBlocks",
         revision,
-        html: "",
+        html: blocksToMarkup(appended),
         hasMore,
         highlights: pagerHighlights,
         notes: readerNotes,
-      }));
-      return;
-    }
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "appendBlocks",
-      revision,
-      html: blocksToMarkup(appended),
-      hasMore,
-      highlights: pagerHighlights,
-      notes: readerNotes,
-    }));
+      }),
+    );
     appended.forEach((block) => sentBlockIds.current.add(block.id));
     appendedBlockCount.current = blocks.length;
     if (remaining.length > appended.length) {
@@ -634,16 +713,18 @@ const ReaderView = ({
 
   const highlightSpokenWord = useCallback(
     (charIndex: number, charLength: number) => {
-      setSpokenWordHighlight(spokenWordForTtsOffset(blocks, charIndex, charLength));
+      setSpokenWordHighlight(
+        spokenWordForTtsOffset(blocks, charIndex, charLength),
+      );
       webViewRef.current?.postMessage(
         JSON.stringify({
           type: "ttsHighlight",
           charIndex,
           charLength,
-        })
+        }),
       );
     },
-    [blocks]
+    [blocks],
   );
 
   const clearSpokenWordHighlight = useCallback(() => {
@@ -651,7 +732,7 @@ const ReaderView = ({
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: "ttsClearHighlight",
-      })
+      }),
     );
   }, []);
 
@@ -689,13 +770,17 @@ const ReaderView = ({
       }
       if (event.nativeEvent.key === "removeHighlight") {
         const selectedRanges = scrollSelectionRangesRef.current;
-        setPagerHighlights((current) => current.filter((highlight) =>
-          !selectedRanges.some((range) =>
-            highlight.blockId === range.blockId &&
-            highlight.offset < range.offset + range.length &&
-            highlight.offset + highlight.length > range.offset
-          )
-        ));
+        setPagerHighlights((current) =>
+          current.filter(
+            (highlight) =>
+              !selectedRanges.some(
+                (range) =>
+                  highlight.blockId === range.blockId &&
+                  highlight.offset < range.offset + range.length &&
+                  highlight.offset + highlight.length > range.offset,
+              ),
+          ),
+        );
         webViewRef.current?.injectJavaScript(`
           window.__removeReaderHighlightSelection?.();
           true;
@@ -720,22 +805,25 @@ const ReaderView = ({
         openBottomSheet("ai");
       }
     },
-    [isPremium, openBottomSheet]
+    [isPremium, openBottomSheet],
   );
 
-  const openReaderNote = useCallback((noteId: string) => {
-    const note = readerNotes.find((item) => item.id === noteId);
-    if (!note) return;
-    setNoteDraft(note.text);
-    setNoteEditor({
-      id: note.id,
-      ranges: readerNotes
-        .filter((item) => item.id === note.id)
-        .map(({ blockId, offset, length }) => ({ blockId, offset, length })),
-      selectedText: "",
-      source: note.blockId ? "paged" : "scroll",
-    });
-  }, [readerNotes]);
+  const openReaderNote = useCallback(
+    (noteId: string) => {
+      const note = readerNotes.find((item) => item.id === noteId);
+      if (!note) return;
+      setNoteDraft(note.text);
+      setNoteEditor({
+        id: note.id,
+        ranges: readerNotes
+          .filter((item) => item.id === note.id)
+          .map(({ blockId, offset, length }) => ({ blockId, offset, length })),
+        selectedText: "",
+        source: note.blockId ? "paged" : "scroll",
+      });
+    },
+    [readerNotes],
+  );
 
   const saveReaderNote = useCallback(() => {
     if (!noteEditor || !noteDraft.trim()) return;
@@ -745,7 +833,11 @@ const ReaderView = ({
       : [{ blockId: "", offset: 0, length: 0 }];
     setReaderNotes((current) => [
       ...current.filter((item) => item.id !== noteId),
-      ...savedRanges.map((range) => ({ ...range, id: noteId, text: noteDraft.trim() })),
+      ...savedRanges.map((range) => ({
+        ...range,
+        id: noteId,
+        text: noteDraft.trim(),
+      })),
     ]);
     if (noteEditor.source === "scroll" && !noteEditor.id) {
       webViewRef.current?.injectJavaScript(`
@@ -775,11 +867,15 @@ const ReaderView = ({
     if (pendingPagerHighlights?.length) {
       pendingPagerHighlightRef.current = null;
       setPagerHighlights((current) => [
-        ...current.filter((highlight) => !pendingPagerHighlights.some((pending) =>
-          highlight.blockId === pending.blockId &&
-          highlight.offset === pending.offset &&
-          highlight.length === pending.length
-        )),
+        ...current.filter(
+          (highlight) =>
+            !pendingPagerHighlights.some(
+              (pending) =>
+                highlight.blockId === pending.blockId &&
+                highlight.offset === pending.offset &&
+                highlight.length === pending.length,
+            ),
+        ),
         ...pendingPagerHighlights.map((highlight) => ({ ...highlight, color })),
       ]);
       return;
@@ -787,11 +883,15 @@ const ReaderView = ({
     const scrollRanges = scrollSelectionRangesRef.current;
     if (scrollRanges.length) {
       setPagerHighlights((current) => [
-        ...current.filter((highlight) => !scrollRanges.some((range) =>
-          highlight.blockId === range.blockId &&
-          highlight.offset === range.offset &&
-          highlight.length === range.length
-        )),
+        ...current.filter(
+          (highlight) =>
+            !scrollRanges.some(
+              (range) =>
+                highlight.blockId === range.blockId &&
+                highlight.offset === range.offset &&
+                highlight.length === range.length,
+            ),
+        ),
         ...scrollRanges.map((range) => ({ ...range, color })),
       ]);
     }
@@ -806,76 +906,61 @@ const ReaderView = ({
     setHighlightPickerVisible(false);
   }, []);
 
-  const fontSize = useReaderSettingsStore(
-  (state) => state.fontSize
-  );
-  const fontFamily = useReaderSettingsStore(
-    (state) => state.fontFamily
-  );
-  const lineHeight = useReaderSettingsStore(
-  (state) => state.lineHeight
-  );
+  const fontSize = useReaderSettingsStore((state) => state.fontSize);
+  const fontFamily = useReaderSettingsStore((state) => state.fontFamily);
+  const lineHeight = useReaderSettingsStore((state) => state.lineHeight);
   const paragraphSpacing = useReaderSettingsStore(
-    (state) => state.paragraphSpacing
+    (state) => state.paragraphSpacing,
   );
   const verticalMarginPreset = useReaderSettingsStore(
-    (state) => state.verticalMarginPreset
+    (state) => state.verticalMarginPreset,
   );
   const horizontalMarginPreset = useReaderSettingsStore(
-    (state) => state.horizontalMarginPreset
+    (state) => state.horizontalMarginPreset,
   );
-  const letterSpacing = useReaderSettingsStore(
-  (state) => state.letterSpacing
-);
+  const letterSpacing = useReaderSettingsStore((state) => state.letterSpacing);
 
-const wordSpacing = useReaderSettingsStore(
-  (state) => state.wordSpacing
-);
+  const wordSpacing = useReaderSettingsStore((state) => state.wordSpacing);
 
-const bold = useReaderSettingsStore(
-  (state) => state.bold
-);
+  const bold = useReaderSettingsStore((state) => state.bold);
 
-const automaticHyphenation = useReaderSettingsStore(
-  (state) => state.automaticHyphenation
-);
-
-const configuredBackgroundColor = useReaderSettingsStore(
-  (state) => state.backgroundColor
-);
-
-const configuredTextColor =
-  useReaderSettingsStore(
-    (state) => state.textColor
+  const automaticHyphenation = useReaderSettingsStore(
+    (state) => state.automaticHyphenation,
   );
-const colorsCustomized = useReaderSettingsStore(
-  (state) => state.colorsCustomized
-);
-const backgroundColor = isDark && !colorsCustomized
-  ? "#151814"
-  : configuredBackgroundColor;
-const textColor = isDark && !colorsCustomized
-  ? "#E5E8E1"
-  : configuredTextColor;
+
+  const configuredBackgroundColor = useReaderSettingsStore(
+    (state) => state.backgroundColor,
+  );
+
+  const configuredTextColor = useReaderSettingsStore(
+    (state) => state.textColor,
+  );
+  const colorsCustomized = useReaderSettingsStore(
+    (state) => state.colorsCustomized,
+  );
+  const backgroundColor =
+    isDark && !colorsCustomized ? "#151814" : configuredBackgroundColor;
+  const textColor =
+    isDark && !colorsCustomized ? "#E5E8E1" : configuredTextColor;
 
   const lineGuideEnabled = useReaderSettingsStore(
-    (state) => state.lineGuideEnabled
+    (state) => state.lineGuideEnabled,
   );
   const setLineGuideEnabled = useReaderSettingsStore(
-    (state) => state.setLineGuideEnabled
+    (state) => state.setLineGuideEnabled,
   );
   const wordGuideEnabled = useReaderSettingsStore(
-    (state) => state.wordGuideEnabled
+    (state) => state.wordGuideEnabled,
   );
   const setWordGuideEnabled = useReaderSettingsStore(
-    (state) => state.setWordGuideEnabled
+    (state) => state.setWordGuideEnabled,
   );
   const guideBackgroundDimming = useReaderSettingsStore(
-    (state) => state.guideBackgroundDimming
+    (state) => state.guideBackgroundDimming,
   );
   const guideColor = useReaderSettingsStore((state) => state.guideColor);
   const switchHighlightColor = useReaderSettingsStore(
-    (state) => state.switchHighlightColor
+    (state) => state.switchHighlightColor,
   );
   const readerGuideMode = lineGuideEnabled
     ? "line"
@@ -890,42 +975,52 @@ const textColor = isDark && !colorsCustomized
 
   const moveLineGuide = useCallback((direction: 1 | -1) => {
     webViewRef.current?.injectJavaScript(
-      `window.__moveReaderGuide?.(${direction}); true;`
+      `window.__moveReaderGuide?.(${direction}); true;`,
     );
   }, []);
 
   const closeReaderGuide = useCallback(() => {
     webViewRef.current?.injectJavaScript(
-      `window.__setReaderGuideMode?.(null); true;`
+      `window.__setReaderGuideMode?.(null); true;`,
     );
     setLineGuideEnabled(false);
     setWordGuideEnabled(false);
   }, [setLineGuideEnabled, setWordGuideEnabled]);
 
-  const handlePagerPageChange = useCallback((
-    current: number,
-    total: number,
-    sourcePage: number,
-    anchor?: { blockId: string; blockOffset: number; wordIndex: number },
-  ) => {
-    lastSourcePageRef.current = sourcePage;
-    setCurrentSourcePage(sourcePage);
-    if (anchor) {
-      modeTextAnchorRef.current = anchor;
-      const nextTtsOffset = ttsPositionForBlock(blocks, anchor.blockId, anchor.blockOffset);
-      ttsStartOffsetRef.current = nextTtsOffset;
-      setTtsStartOffset(nextTtsOffset);
-      const block = blocks.find((candidate) => candidate.id === anchor.blockId);
-      const word = block
-        ? Array.from(block.text.matchAll(/\S+/g))[anchor.wordIndex]?.[0] ?? ""
-        : "";
-      if (isActive) {
-        onSwitchAnchorChange?.(anchor.blockId, word, anchor.wordIndex);
+  const handlePagerPageChange = useCallback(
+    (
+      current: number,
+      total: number,
+      sourcePage: number,
+      anchor?: { blockId: string; blockOffset: number; wordIndex: number },
+    ) => {
+      lastSourcePageRef.current = sourcePage;
+      setCurrentSourcePage(sourcePage);
+      if (anchor) {
+        modeTextAnchorRef.current = anchor;
+        const nextTtsOffset = ttsPositionForBlock(
+          blocks,
+          anchor.blockId,
+          anchor.blockOffset,
+        );
+        ttsStartOffsetRef.current = nextTtsOffset;
+        setTtsStartOffset(nextTtsOffset);
+        const block = blocks.find(
+          (candidate) => candidate.id === anchor.blockId,
+        );
+        const word = block
+          ? (Array.from(block.text.matchAll(/\S+/g))[anchor.wordIndex]?.[0] ??
+            "")
+          : "";
+        if (isActive) {
+          onSwitchAnchorChange?.(anchor.blockId, word, anchor.wordIndex);
+        }
       }
-    }
-    onPaginationChange?.(current, total);
-    onPageChange?.(sourcePage);
-  }, [blocks, isActive, onPageChange, onPaginationChange, onSwitchAnchorChange]);
+      onPaginationChange?.(current, total);
+      onPageChange?.(sourcePage);
+    },
+    [blocks, isActive, onPageChange, onPaginationChange, onSwitchAnchorChange],
+  );
 
   useEffect(() => {
     // Reader and Translated stay mounted behind each other. Never let a hidden
@@ -948,12 +1043,15 @@ const textColor = isDark && !colorsCustomized
       if (
         requiresDrawAcknowledgement &&
         acknowledgedSwitchDestinationRef.current === destinationNonce
-      ) return;
+      )
+        return;
       attempts += 1;
-      webViewRef.current?.postMessage(JSON.stringify({
-        type: "goToSourcePage",
-        ...activeModeDestination,
-      }));
+      webViewRef.current?.postMessage(
+        JSON.stringify({
+          type: "goToSourcePage",
+          ...activeModeDestination,
+        }),
+      );
       if (requiresDrawAcknowledgement && attempts < 40) {
         retryTimer = setTimeout(deliver, 200);
       }
@@ -964,28 +1062,46 @@ const textColor = isDark && !colorsCustomized
       cancelAnimationFrame(frame);
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [activeModeDestination, isActive, isPaged, syncPageTransition, webViewReady]);
-
+  }, [
+    activeModeDestination,
+    isActive,
+    isPaged,
+    syncPageTransition,
+    webViewReady,
+  ]);
 
   const sendReaderSettings = useCallback(() => {
     webViewRef.current?.postMessage(
-    JSON.stringify({
-      type: 'readerSettings',
-      fontFamily: fontFamily,
-      fontSize: fontSize,
-      lineHeight: lineHeight,
-      paragraphSpacing: paragraphSpacing,
-      verticalMarginPreset,
-      horizontalMarginPreset,
-      letterSpacing: letterSpacing,
-      wordSpacing: wordSpacing,
-      bold: bold,
-      automaticHyphenation: automaticHyphenation,
-      backgroundColor: backgroundColor,
-      textColor: textColor,
-    })
+      JSON.stringify({
+        type: "readerSettings",
+        fontFamily: fontFamily,
+        fontSize: fontSize,
+        lineHeight: lineHeight,
+        paragraphSpacing: paragraphSpacing,
+        verticalMarginPreset,
+        horizontalMarginPreset,
+        letterSpacing: letterSpacing,
+        wordSpacing: wordSpacing,
+        bold: bold,
+        automaticHyphenation: automaticHyphenation,
+        backgroundColor: backgroundColor,
+        textColor: textColor,
+      }),
     );
-  }, [fontFamily, fontSize, lineHeight, paragraphSpacing, verticalMarginPreset, horizontalMarginPreset, letterSpacing, wordSpacing, bold, automaticHyphenation, backgroundColor, textColor]);
+  }, [
+    fontFamily,
+    fontSize,
+    lineHeight,
+    paragraphSpacing,
+    verticalMarginPreset,
+    horizontalMarginPreset,
+    letterSpacing,
+    wordSpacing,
+    bold,
+    automaticHyphenation,
+    backgroundColor,
+    textColor,
+  ]);
 
   useEffect(() => {
     sendReaderSettings();
@@ -993,51 +1109,63 @@ const textColor = isDark && !colorsCustomized
 
   useEffect(() => {
     if (!webViewReady) return;
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setTopBarVisibility",
-      visible: topBarVisible,
-      topBoundary: topBarVisible ? headerOverlayHeight : 0,
-    }));
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setTopBarVisibility",
+        visible: topBarVisible,
+        topBoundary: topBarVisible ? headerOverlayHeight : 0,
+      }),
+    );
   }, [headerOverlayHeight, topBarVisible, webViewReady]);
 
   useEffect(() => {
     if (!webViewReady) return;
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setSwitchHighlightVisible",
-      visible: showSwitchHighlight,
-    }));
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setSwitchHighlightVisible",
+        visible: showSwitchHighlight,
+      }),
+    );
   }, [showSwitchHighlight, webViewReady]);
 
   useEffect(() => {
     if (!webViewReady) return;
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setReaderGuideMode",
-      mode: readerGuideMode,
-    }));
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setReaderGuideMode",
+        mode: readerGuideMode,
+      }),
+    );
   }, [readerGuideMode, webViewReady]);
 
   useEffect(() => {
     if (!webViewReady) return;
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setGuideBackgroundDimming",
-      percentage: guideBackgroundDimming,
-    }));
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setGuideBackgroundDimming",
+        percentage: guideBackgroundDimming,
+      }),
+    );
   }, [guideBackgroundDimming, webViewReady]);
 
   useEffect(() => {
     if (!webViewReady) return;
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setReaderGuideColor",
-      color: guideColor,
-    }));
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setReaderGuideColor",
+        color: guideColor,
+      }),
+    );
   }, [guideColor, webViewReady]);
 
   useEffect(() => {
     if (!webViewReady) return;
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setSwitchHighlightColor",
-      color: switchHighlightColor,
-    }));
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setSwitchHighlightColor",
+        color: switchHighlightColor,
+      }),
+    );
   }, [switchHighlightColor, webViewReady]);
 
   const handleReaderLoadEnd = useCallback(() => {
@@ -1045,26 +1173,36 @@ const textColor = isDark && !colorsCustomized
     onReady?.();
     sendReaderSettings();
     syncPageTransition();
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setSwitchHighlightVisible",
-      visible: showSwitchHighlight,
-    }));
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setReaderGuideMode",
-      mode: readerGuideMode,
-    }));
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setGuideBackgroundDimming",
-      percentage: guideBackgroundDimming,
-    }));
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setReaderGuideColor",
-      color: guideColor,
-    }));
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "setSwitchHighlightColor",
-      color: switchHighlightColor,
-    }));
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setSwitchHighlightVisible",
+        visible: showSwitchHighlight,
+      }),
+    );
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setReaderGuideMode",
+        mode: readerGuideMode,
+      }),
+    );
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setGuideBackgroundDimming",
+        percentage: guideBackgroundDimming,
+      }),
+    );
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setReaderGuideColor",
+        color: guideColor,
+      }),
+    );
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "setSwitchHighlightColor",
+        color: switchHighlightColor,
+      }),
+    );
     // iOS WKWebView can settle on a non-zero document offset after load (the
     // native contentInset then tucks the opening line up under the header).
     // A freshly opened reader must always start at the absolute top. Wait a
@@ -1087,35 +1225,44 @@ const textColor = isDark && !colorsCustomized
     if (recoveryPage !== null) {
       recoveryPageRef.current = null;
       setTimeout(() => {
-        webViewRef.current?.postMessage(JSON.stringify({
-          type: "goToSourcePage",
-          page: recoveryPage,
-        }));
+        webViewRef.current?.postMessage(
+          JSON.stringify({
+            type: "goToSourcePage",
+            page: recoveryPage,
+          }),
+        );
       }, 0);
     }
-  }, [guideBackgroundDimming, guideColor, onReady, readerGuideMode, sendReaderSettings, showSwitchHighlight, switchHighlightColor, syncPageTransition]);
+  }, [
+    guideBackgroundDimming,
+    guideColor,
+    onReady,
+    readerGuideMode,
+    sendReaderSettings,
+    showSwitchHighlight,
+    switchHighlightColor,
+    syncPageTransition,
+  ]);
   // Toolbar animation
   const [toolbarTranslateY] = useState(() => new Animated.Value(0));
 
   // Previous scroll position
-  const lastScrollY =
-    useRef(0);
+  const lastScrollY = useRef(0);
 
   // Track toolbar visibility
-  const toolbarHidden =
-    useRef(false);
+  const toolbarHidden = useRef(false);
   const chromeResizeGuardUntil = useRef(0);
   const wordGuideScrollArmed = useRef(false);
 
   // Prevent multiple animations from running
-  const toolbarAnimation =
-    useRef<Animated.CompositeAnimation | null>(null);
+  const toolbarAnimation = useRef<Animated.CompositeAnimation | null>(null);
 
   // --------------------------------
   // HTML READER
   // --------------------------------
 
-  const htmlContent = useMemo(() => `
+  const htmlContent = useMemo(
+    () => `
     <!DOCTYPE html>
 
     <html lang="${readerLanguageCode}" dir="${readerDirection}">
@@ -2122,7 +2269,15 @@ const textColor = isDark && !colorsCustomized
       </body>
 
     </html>
-  `, [latoBoldBase64, readerDirection, readerLanguageCode, readerMarkup, sourceSansBase64]);
+  `,
+    [
+      latoBoldBase64,
+      readerDirection,
+      readerLanguageCode,
+      readerMarkup,
+      sourceSansBase64,
+    ],
+  );
 
   const webViewSource = useMemo(() => ({ html: htmlContent }), [htmlContent]);
 
@@ -2140,15 +2295,11 @@ const textColor = isDark && !colorsCustomized
 
     toolbarAnimation.current?.stop();
 
-    toolbarAnimation.current =
-      Animated.timing(
-        toolbarTranslateY,
-        {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: true,
-        }
-      );
+    toolbarAnimation.current = Animated.timing(toolbarTranslateY, {
+      toValue: 0,
+      duration: 250,
+      useNativeDriver: true,
+    });
 
     toolbarAnimation.current.start();
     chromeResizeGuardUntil.current = Date.now() + 400;
@@ -2165,15 +2316,11 @@ const textColor = isDark && !colorsCustomized
 
     toolbarAnimation.current?.stop();
 
-    toolbarAnimation.current =
-      Animated.timing(
-        toolbarTranslateY,
-        {
-          toValue: 120,
-          duration: 250,
-          useNativeDriver: true,
-        }
-      );
+    toolbarAnimation.current = Animated.timing(toolbarTranslateY, {
+      toValue: 120,
+      duration: 250,
+      useNativeDriver: true,
+    });
 
     toolbarAnimation.current.start();
     chromeResizeGuardUntil.current = Date.now() + 400;
@@ -2195,14 +2342,9 @@ const textColor = isDark && !colorsCustomized
   // WEBVIEW MESSAGE HANDLER
   // --------------------------------
 
-  const handleWebViewMessage = (
-    event: any
-  ) => {
+  const handleWebViewMessage = (event: any) => {
     try {
-      const data =
-        JSON.parse(
-          event.nativeEvent.data
-        );
+      const data = JSON.parse(event.nativeEvent.data);
 
       // ------------------------------
       // SCROLL
@@ -2227,7 +2369,8 @@ const textColor = isDark && !colorsCustomized
         const prunedPages = new Set(data.pages.map(Number));
         if (prunedPages.size) {
           blocks.forEach((block) => {
-            if (prunedPages.has(block.page)) sentBlockIds.current.delete(block.id);
+            if (prunedPages.has(block.page))
+              sentBlockIds.current.delete(block.id);
           });
         }
         return;
@@ -2249,13 +2392,16 @@ const textColor = isDark && !colorsCustomized
         return;
       }
 
-      if (data.type === "readerPageMap" && data.pageMap && typeof data.pageMap === "object") {
+      if (
+        data.type === "readerPageMap" &&
+        data.pageMap &&
+        typeof data.pageMap === "object"
+      ) {
         onPageMapChange?.(data.pageMap as Record<number, number>);
         return;
       }
 
       if (data.type === "scroll") {
-
         if (typeof data.sourcePage === "number") {
           lastSourcePageRef.current = data.sourcePage;
           setCurrentSourcePage(data.sourcePage);
@@ -2265,12 +2411,9 @@ const textColor = isDark && !colorsCustomized
           }
         }
 
-        const currentScrollY =
-          data.scrollY;
+        const currentScrollY = data.scrollY;
 
-        const difference =
-          currentScrollY -
-          lastScrollY.current;
+        const difference = currentScrollY - lastScrollY.current;
 
         // Hiding the header changes the WebView viewport height. WebKit emits
         // a synthetic scroll update for that resize; treating it as a real
@@ -2295,24 +2438,18 @@ const textColor = isDark && !colorsCustomized
         /*
          * Scrolling DOWN
          */
-        if (
-          difference > 0 &&
-          currentScrollY > 30
-        ) {
+        if (difference > 0 && currentScrollY > 30) {
           hideToolbar();
           wordGuideScrollArmed.current = false;
-        }
-
-        /*
-         * Scrolling UP
-         */
-        else if (difference < 0) {
+        } else if (difference < 0) {
+          /*
+           * Scrolling UP
+           */
           showToolbar();
           wordGuideScrollArmed.current = false;
         }
 
-        lastScrollY.current =
-          currentScrollY;
+        lastScrollY.current = currentScrollY;
 
         return;
       }
@@ -2322,7 +2459,9 @@ const textColor = isDark && !colorsCustomized
       // ------------------------------
 
       if (data.type === "selection") {
-        scrollSelectionRangesRef.current = Array.isArray(data.ranges) ? data.ranges : [];
+        scrollSelectionRangesRef.current = Array.isArray(data.ranges)
+          ? data.ranges
+          : [];
         setSelectionHasHighlight(Boolean(data.hasHighlight));
         return;
       }
@@ -2341,13 +2480,14 @@ const textColor = isDark && !colorsCustomized
         return;
       }
 
-
       if (data.type === "askAI") {
         if (!isPremium) {
           setShowAiPremiumPrompt(true);
           return;
         }
-        setSelectedAIText(typeof data.text === "string" ? data.text.trim() : "");
+        setSelectedAIText(
+          typeof data.text === "string" ? data.text.trim() : "",
+        );
         openBottomSheet("ai");
         return;
       }
@@ -2357,22 +2497,25 @@ const textColor = isDark && !colorsCustomized
         return;
       }
 
-      if (data.type === "switchHighlightDrawn" && typeof data.nonce === "number") {
+      if (
+        data.type === "switchHighlightDrawn" &&
+        typeof data.nonce === "number"
+      ) {
         acknowledgedSwitchDestinationRef.current = data.nonce;
         return;
       }
 
       if (data.type === "switchAnchor" && typeof data.blockId === "string") {
-        const wordIndex = typeof data.wordIndex === "number"
-          ? Math.max(0, data.wordIndex)
-          : 0;
+        const wordIndex =
+          typeof data.wordIndex === "number" ? Math.max(0, data.wordIndex) : 0;
         const sourceBlock = blocks.find((block) => block.id === data.blockId);
         const wordAtIndex = sourceBlock
           ? Array.from(sourceBlock.text.matchAll(/\S+/g))[wordIndex]
           : undefined;
-        const blockOffset = typeof data.blockOffset === "number"
-          ? data.blockOffset
-          : wordAtIndex?.index;
+        const blockOffset =
+          typeof data.blockOffset === "number"
+            ? data.blockOffset
+            : wordAtIndex?.index;
         if (blockOffset !== undefined) {
           modeTextAnchorRef.current = {
             blockId: data.blockId,
@@ -2394,14 +2537,8 @@ const textColor = isDark && !colorsCustomized
         }
         return;
       }
-
     } catch (error) {
-
-      console.log(
-        "WebView message error:",
-        error
-      );
-
+      console.log("WebView message error:", error);
     }
   };
 
@@ -2425,10 +2562,7 @@ const textColor = isDark && !colorsCustomized
   // TOOLBAR BUTTON
   // --------------------------------
 
-  const handleToolbarPress = (
-    item: ReaderBottomNavItem
-  ) => {
-
+  const handleToolbarPress = (item: ReaderBottomNavItem) => {
     if (item === "ai" && !isPremium) {
       setShowAiPremiumPrompt(true);
       return;
@@ -2441,10 +2575,13 @@ const textColor = isDark && !colorsCustomized
 
     if (item === "ai") {
       setAiExpanded(false);
+      setAiSheetSnapPoint("42%");
     }
 
     if (item === "tts" && !isPaged) {
-      webViewRef.current?.postMessage(JSON.stringify({ type: "requestReaderText" }));
+      webViewRef.current?.postMessage(
+        JSON.stringify({ type: "requestReaderText" }),
+      );
     }
 
     /*
@@ -2452,7 +2589,6 @@ const textColor = isDark && !colorsCustomized
      * when user interacts with it.
      */
     showToolbar();
-
   };
 
   // --------------------------------
@@ -2460,9 +2596,7 @@ const textColor = isDark && !colorsCustomized
   // --------------------------------
 
   const renderBottomSheetContent = () => {
-
     switch (activeItem) {
-
       case "font":
         return <MemoizedFontSettings />;
 
@@ -2498,13 +2632,24 @@ const textColor = isDark && !colorsCustomized
             pageCount={pageCount}
             blocks={blocks}
             isExpanded={aiExpanded}
+            conversations={aiConversations}
+            setConversations={setAiConversations}
             onComposerActive={(reason) => {
               setAiExpanded(true);
+              setAiSheetSnapPoint("90%");
               if (reason === "suggestion") {
                 requestAnimationFrame(() => {
-                  bottomSheetRef.current?.snapToIndex(1);
+                  bottomSheetRef.current?.snapToIndex(0);
                 });
               }
+            }}
+            onContextLayoutChange={(state) => {
+              setAiSheetSnapPoint(
+                state === "menu" ? "58%" : state === "range" ? "50%" : "42%",
+              );
+              requestAnimationFrame(() => {
+                bottomSheetRef.current?.snapToIndex(0);
+              });
             }}
           />
         );
@@ -2519,25 +2664,25 @@ const textColor = isDark && !colorsCustomized
       default:
         return null;
     }
-
   };
 
   const usesFixedSettingsSheet =
     activeItem === "background" && backgroundSettingsTab !== "presets";
 
   const bottomSheetSnapPoints = useMemo(
-    () => activeItem === "tts"
-      ? undefined
-      : activeItem === "ai"
-      ? ["40%", "90%"]
-      : activeItem === "settings"
-      ? ["82%"]
-      : activeItem === "font"
-      ? ["40%", "88%"]
-      : usesFixedSettingsSheet
-        ? ["40%"]
-        : ["40%", "82%"],
-    [activeItem, usesFixedSettingsSheet],
+    () =>
+      activeItem === "tts"
+        ? undefined
+        : activeItem === "ai"
+          ? [aiSheetSnapPoint]
+          : activeItem === "settings"
+            ? ["82%"]
+            : activeItem === "font"
+              ? ["40%", "88%"]
+              : usesFixedSettingsSheet
+                ? ["40%"]
+                : ["40%", "82%"],
+    [activeItem, aiSheetSnapPoint, usesFixedSettingsSheet],
   );
 
   if (!latoBoldBase64 || !sourceSansBase64) {
@@ -2545,13 +2690,8 @@ const textColor = isDark && !colorsCustomized
   }
 
   return (
-    <BottomSheet
-      ref={bottomSheetRef}
-      defaultSnapIndex={0}
-    >
-
+    <BottomSheet ref={bottomSheetRef} defaultSnapIndex={0}>
       <View className="flex-1">
-
         <Modal
           animationType="fade"
           transparent
@@ -2569,12 +2709,19 @@ const textColor = isDark && !colorsCustomized
               style={styles.noteModalBackdrop}
             />
             <View style={[styles.noteCard, isDark && styles.noteCardDark]}>
-              <Text style={[styles.noteEyebrow, isDark && styles.noteMutedDark]}>NOTE</Text>
+              <Text
+                style={[styles.noteEyebrow, isDark && styles.noteMutedDark]}
+              >
+                NOTE
+              </Text>
               <Text style={[styles.noteTitle, isDark && styles.noteTextDark]}>
                 {noteEditor?.id ? "Edit note" : "Add a note"}
               </Text>
               {noteEditor?.selectedText ? (
-                <Text numberOfLines={3} style={[styles.noteQuote, isDark && styles.noteQuoteDark]}>
+                <Text
+                  numberOfLines={3}
+                  style={[styles.noteQuote, isDark && styles.noteQuoteDark]}
+                >
                   “{noteEditor.selectedText}”
                 </Text>
               ) : null}
@@ -2589,13 +2736,26 @@ const textColor = isDark && !colorsCustomized
                 value={noteDraft}
               />
               <View style={styles.noteActions}>
-                <Pressable onPress={() => setNoteEditor(null)} style={styles.noteCancelButton}>
-                  <Text style={[styles.noteCancelText, isDark && styles.noteMutedDark]}>Cancel</Text>
+                <Pressable
+                  onPress={() => setNoteEditor(null)}
+                  style={styles.noteCancelButton}
+                >
+                  <Text
+                    style={[
+                      styles.noteCancelText,
+                      isDark && styles.noteMutedDark,
+                    ]}
+                  >
+                    Cancel
+                  </Text>
                 </Pressable>
                 <Pressable
                   disabled={!noteDraft.trim()}
                   onPress={saveReaderNote}
-                  style={[styles.noteSaveButton, !noteDraft.trim() && styles.noteSaveButtonDisabled]}
+                  style={[
+                    styles.noteSaveButton,
+                    !noteDraft.trim() && styles.noteSaveButtonDisabled,
+                  ]}
                 >
                   <Text style={styles.noteSaveText}>Save note</Text>
                 </Pressable>
@@ -2670,180 +2830,181 @@ const textColor = isDark && !colorsCustomized
         {/* ========================= */}
 
         <Animated.View style={{ flex: 1, opacity: readerResizeOpacity }}>
-        <SafeAreaView
-          edges={isLandscape ? ["left", "right"] : []}
-          style={{
-            flex: 1,
-            backgroundColor,
-            // Keep the pager geometry independent from toolbar visibility.
-            // In compact mode the toolbar overlays the page, like a reading
-            // app, so tapping the page never causes repagination or page loss.
-            paddingTop: isPaged && !isLandscape
-              ? verticalMarginPreset === "compact"
-                ? readerSafeAreaInsets.top
-                : headerOverlayHeight
-              : 0,
-          }}
-        >
-          <View className="flex-1">
-          {isPaged && modeHandoffReady && (
-            <View style={StyleSheet.absoluteFill}>
-              <HorizontalReaderPager
-                blocks={blocks}
-                isActive={isActive}
-                userHighlights={pagerHighlights}
-                onSelectionHighlightRequest={(highlights) => {
-                  pendingPagerHighlightRef.current = highlights;
-                  setHighlightPickerVisible(true);
-                }}
-                onSelectionRemoveHighlight={(ranges) => {
-                  setPagerHighlights((current) => current.filter((highlight) =>
-                    !ranges.some((range) =>
-                      highlight.blockId === range.blockId &&
-                      highlight.offset < range.offset + range.length &&
-                      highlight.offset + highlight.length > range.offset
-                    )
-                  ));
-                }}
-                onSelectionAddNote={(ranges, selectedText) => {
-                  setNoteDraft("");
-                  setNoteEditor({ ranges, selectedText, source: "paged" });
-                }}
-                onOpenNote={openReaderNote}
-                onSelectionAskAI={(text) => {
-                  if (!isPremium) {
-                    setShowAiPremiumPrompt(true);
-                    return;
-                  }
-                  setSelectedAIText(text.trim());
-                  openBottomSheet("ai");
-                }}
-                readingDirection={readerDirection}
-                userNotes={readerNotes}
-                spokenWordHighlight={spokenWordHighlight}
-                guideMode={readerGuideMode}
-                guideBackgroundDimming={guideBackgroundDimming}
-                guideColor={guideColor}
-                switchHighlightColor={switchHighlightColor}
-                onGuideClose={closeReaderGuide}
-                destination={activeModeDestination}
-                stationarySwitchHighlight={stationarySwitchHighlight}
-                fontFamily={fontFamily.split(",")[0].replaceAll("'", "").trim()}
-                latoBoldBase64={latoBoldBase64}
-                sourceSansBase64={sourceSansBase64}
-                fontSize={fontSize}
-                lineHeight={lineHeight}
-                paragraphSpacing={paragraphSpacing}
-                letterSpacing={letterSpacing}
-                wordSpacing={wordSpacing}
-                bold={bold}
-                automaticHyphenation={automaticHyphenation}
-                verticalMarginPreset={verticalMarginPreset}
-                horizontalMarginPreset={horizontalMarginPreset}
-                backgroundColor={backgroundColor}
-                textColor={textColor}
-                onPageChange={handlePagerPageChange}
-                onPageMapChange={onPageMapChange}
-                onReaderTap={() => {
-                  if (readerGuideMode) return;
-                  if (toolbarHidden.current) showToolbar();
-                  else hideToolbar();
-                }}
-                onReaderReveal={() => {
-                  if (!readerGuideMode) showToolbar();
-                }}
-                onReady={onReady}
-                onSwipeStart={hideToolbar}
-                onViewportSettled={handlePagerViewportSettled}
-              />
-            </View>
-          )}
-          {!isPaged && modeHandoffReady && (
-          <View
-            pointerEvents="auto"
-            style={StyleSheet.absoluteFill}
+          <SafeAreaView
+            edges={isLandscape ? ["left", "right"] : []}
+            style={{
+              flex: 1,
+              backgroundColor,
+              // Keep the pager geometry independent from toolbar visibility.
+              // In compact mode the toolbar overlays the page, like a reading
+              // app, so tapping the page never causes repagination or page loss.
+              paddingTop:
+                isPaged && !isLandscape
+                  ? verticalMarginPreset === "compact"
+                    ? readerSafeAreaInsets.top
+                    : headerOverlayHeight
+                  : 0,
+            }}
           >
-          <WebView
-            key={`reader-web-runtime-20260828-2-${annotationScope}`}
-            ref={webViewRef}
-
-          source={webViewSource}
-
-          style={{
-            flex: 1,
-            backgroundColor,
-          }}
-
-          onLoadEnd={handleReaderLoadEnd}
-
-          onContentProcessDidTerminate={() => {
-            recoveryPageRef.current = lastSourcePageRef.current;
-            appendedBlockCount.current = initialBlocks.length;
-            sentBlockIds.current = new Set(initialBlocks.map((block) => block.id));
-            setWebViewReady(false);
-            webViewRef.current?.reload();
-          }}
-
-          /*
-           * Native scrolling.
-           */
-          scrollEnabled={!isPaged}
-
-          contentInset={
-            !isPaged && !isLandscape
-              ? { top: headerOverlayHeight, left: 0, bottom: 0, right: 0 }
-              : undefined
-          }
-
-          contentInsetAdjustmentBehavior="never"
-
-          /*
-           * Native bounce behavior.
-           */
-          bounces={!isPaged && !useTranslatedTextDirection}
-
-          /*
-           * Smooth iOS scrolling.
-           */
-          decelerationRate="normal"
-
-          /*
-           * Android overscroll.
-           */
-          overScrollMode={isPaged || useTranslatedTextDirection ? "never" : "always"}
-
-          showsVerticalScrollIndicator={!isPaged}
-
-          /*
-           * JavaScript required for:
-           * - scroll detection
-           * - text selection
-           */
-          javaScriptEnabled={true}
-
-          /*
-           * Keep WebView content from navigating
-           * unexpectedly.
-           */
-          onShouldStartLoadWithRequest={() => {
-            return true;
-          }}
-
-          /*
-           * Receive messages from HTML.
-           */
-          onMessage={
-            handleWebViewMessage
-          }
-
-          menuItems={selectionHasHighlight ? readerMenuItems : readerMenuItemsWithoutRemove}
-
-          onCustomMenuSelection={handleCustomMenuSelection}
-
-          /*
-           * Injected JavaScript.
-           */
-          injectedJavaScript={`
+            <View className="flex-1">
+              {isPaged && modeHandoffReady && (
+                <View style={StyleSheet.absoluteFill}>
+                  <HorizontalReaderPager
+                    blocks={blocks}
+                    isActive={isActive}
+                    userHighlights={pagerHighlights}
+                    onSelectionHighlightRequest={(highlights) => {
+                      pendingPagerHighlightRef.current = highlights;
+                      setHighlightPickerVisible(true);
+                    }}
+                    onSelectionRemoveHighlight={(ranges) => {
+                      setPagerHighlights((current) =>
+                        current.filter(
+                          (highlight) =>
+                            !ranges.some(
+                              (range) =>
+                                highlight.blockId === range.blockId &&
+                                highlight.offset <
+                                  range.offset + range.length &&
+                                highlight.offset + highlight.length >
+                                  range.offset,
+                            ),
+                        ),
+                      );
+                    }}
+                    onSelectionAddNote={(ranges, selectedText) => {
+                      setNoteDraft("");
+                      setNoteEditor({ ranges, selectedText, source: "paged" });
+                    }}
+                    onOpenNote={openReaderNote}
+                    onSelectionAskAI={(text) => {
+                      if (!isPremium) {
+                        setShowAiPremiumPrompt(true);
+                        return;
+                      }
+                      setSelectedAIText(text.trim());
+                      openBottomSheet("ai");
+                    }}
+                    readingDirection={readerDirection}
+                    userNotes={readerNotes}
+                    spokenWordHighlight={spokenWordHighlight}
+                    guideMode={readerGuideMode}
+                    guideBackgroundDimming={guideBackgroundDimming}
+                    guideColor={guideColor}
+                    switchHighlightColor={switchHighlightColor}
+                    onGuideClose={closeReaderGuide}
+                    destination={activeModeDestination}
+                    stationarySwitchHighlight={stationarySwitchHighlight}
+                    fontFamily={fontFamily
+                      .split(",")[0]
+                      .replaceAll("'", "")
+                      .trim()}
+                    latoBoldBase64={latoBoldBase64}
+                    sourceSansBase64={sourceSansBase64}
+                    fontSize={fontSize}
+                    lineHeight={lineHeight}
+                    paragraphSpacing={paragraphSpacing}
+                    letterSpacing={letterSpacing}
+                    wordSpacing={wordSpacing}
+                    bold={bold}
+                    automaticHyphenation={automaticHyphenation}
+                    verticalMarginPreset={verticalMarginPreset}
+                    horizontalMarginPreset={horizontalMarginPreset}
+                    backgroundColor={backgroundColor}
+                    textColor={textColor}
+                    onPageChange={handlePagerPageChange}
+                    onPageMapChange={onPageMapChange}
+                    onReaderTap={() => {
+                      if (readerGuideMode) return;
+                      if (toolbarHidden.current) showToolbar();
+                      else hideToolbar();
+                    }}
+                    onReaderReveal={() => {
+                      if (!readerGuideMode) showToolbar();
+                    }}
+                    onReady={onReady}
+                    onSwipeStart={hideToolbar}
+                    onViewportSettled={handlePagerViewportSettled}
+                  />
+                </View>
+              )}
+              {!isPaged && modeHandoffReady && (
+                <View pointerEvents="auto" style={StyleSheet.absoluteFill}>
+                  <WebView
+                    key={`reader-web-runtime-20260828-2-${annotationScope}`}
+                    ref={webViewRef}
+                    source={webViewSource}
+                    style={{
+                      flex: 1,
+                      backgroundColor,
+                    }}
+                    onLoadEnd={handleReaderLoadEnd}
+                    onContentProcessDidTerminate={() => {
+                      recoveryPageRef.current = lastSourcePageRef.current;
+                      appendedBlockCount.current = initialBlocks.length;
+                      sentBlockIds.current = new Set(
+                        initialBlocks.map((block) => block.id),
+                      );
+                      setWebViewReady(false);
+                      webViewRef.current?.reload();
+                    }}
+                    /*
+                     * Native scrolling.
+                     */
+                    scrollEnabled={!isPaged}
+                    contentInset={
+                      !isPaged && !isLandscape
+                        ? {
+                            top: headerOverlayHeight,
+                            left: 0,
+                            bottom: 0,
+                            right: 0,
+                          }
+                        : undefined
+                    }
+                    contentInsetAdjustmentBehavior="never"
+                    /*
+                     * Native bounce behavior.
+                     */
+                    bounces={!isPaged && !useTranslatedTextDirection}
+                    /*
+                     * Smooth iOS scrolling.
+                     */
+                    decelerationRate="normal"
+                    /*
+                     * Android overscroll.
+                     */
+                    overScrollMode={
+                      isPaged || useTranslatedTextDirection ? "never" : "always"
+                    }
+                    showsVerticalScrollIndicator={!isPaged}
+                    /*
+                     * JavaScript required for:
+                     * - scroll detection
+                     * - text selection
+                     */
+                    javaScriptEnabled={true}
+                    /*
+                     * Keep WebView content from navigating
+                     * unexpectedly.
+                     */
+                    onShouldStartLoadWithRequest={() => {
+                      return true;
+                    }}
+                    /*
+                     * Receive messages from HTML.
+                     */
+                    onMessage={handleWebViewMessage}
+                    menuItems={
+                      selectionHasHighlight
+                        ? readerMenuItems
+                        : readerMenuItemsWithoutRemove
+                    }
+                    onCustomMenuSelection={handleCustomMenuSelection}
+                    /*
+                     * Injected JavaScript.
+                     */
+                    injectedJavaScript={`
             (function() {
 
               /*
@@ -3878,9 +4039,25 @@ const textColor = isDark && !colorsCustomized
               window.__applyReaderTransition = applyReaderTransition;
 
               window.addEventListener('resize', function() {
+                // Capture the position BEFORE the resize reflows the content.
+                // WebKit preserves the pixel scroll offset, so after reflow it
+                // points at a different paragraph; remap it proportionally.
+                const beforeY = lastScrollMetrics.y;
+                const beforeH = lastScrollMetrics.height;
                 setTimeout(function() {
                   refreshReaderPages();
                   pruneDistantSections();
+                  const afterH = document.documentElement.scrollHeight;
+                  if (
+                    window.__readerTransition === 'scroll' &&
+                    afterH > 0 && beforeH > 0 && beforeY > 0
+                  ) {
+                    const targetY = beforeY * (afterH / beforeH);
+                    const delta = targetY - window.scrollY;
+                    if (Math.abs(delta) > 1) {
+                      window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
+                    }
+                  }
                   if (readerGuideMode) {
                     if (readerGuideMode === 'word') {
                       if (currentWordNode && currentWordStart >= 0) {
@@ -4062,6 +4239,11 @@ const textColor = isDark && !colorsCustomized
               }
 
               let scrollTimer = null;
+              // Track the last stable scroll position + document height so an
+              // orientation change can re-anchor the reading position after the
+              // text reflows (WebKit preserves the pixel scroll offset, which
+              // lands on a different paragraph at the new width).
+              let lastScrollMetrics = { y: 0, height: 0 };
 
               window.addEventListener(
                 'scroll',
@@ -4094,6 +4276,10 @@ const textColor = isDark && !colorsCustomized
                   if (!scrollTimer) {
                     scrollTimer = setTimeout(
                       function() {
+
+                        lastScrollMetrics.y = window.scrollY;
+                        lastScrollMetrics.height =
+                          document.documentElement.scrollHeight;
 
                         window.ReactNativeWebView.postMessage(
                           JSON.stringify({
@@ -4217,12 +4403,11 @@ const textColor = isDark && !colorsCustomized
 
             true;
           `}
-
-          />
-          </View>
-          )}
-          </View>
-        </SafeAreaView>
+                  />
+                </View>
+              )}
+            </View>
+          </SafeAreaView>
         </Animated.View>
 
         {/* ========================= */}
@@ -4230,34 +4415,32 @@ const textColor = isDark && !colorsCustomized
         {/* ========================= */}
 
         {!isLandscape && !readerGuideMode && (
-  <Animated.View
-    style={{
-      transform: [
-        {
-          translateY:
-            toolbarTranslateY,
-        },
-      ],
-    }}
-  >
-    <ReaderToolbar
-      activeItem={activeItem}
-      isAiLocked={!isPremium}
-      onSelectItem={handleToolbarPress}
-    />
-  </Animated.View>
-)}
+          <Animated.View
+            style={{
+              transform: [
+                {
+                  translateY: toolbarTranslateY,
+                },
+              ],
+            }}
+          >
+            <ReaderToolbar
+              activeItem={activeItem}
+              isAiLocked={!isPremium}
+              onSelectItem={handleToolbarPress}
+            />
+          </Animated.View>
+        )}
 
         {readerGuideMode && !isPaged && (
-          <View
-            pointerEvents="box-none"
-            style={StyleSheet.absoluteFill}
-          >
+          <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
             <Pressable
               accessibilityLabel="Move reading guide. Tap upper half for up, lower half for down"
               accessibilityRole="button"
               onPress={(event) => {
-                moveLineGuide(event.nativeEvent.pageY < windowHeight / 2 ? -1 : 1);
+                moveLineGuide(
+                  event.nativeEvent.pageY < windowHeight / 2 ? -1 : 1,
+                );
               }}
               style={StyleSheet.absoluteFill}
             />
@@ -4280,22 +4463,17 @@ const textColor = isDark && !colorsCustomized
           snapPoints={bottomSheetSnapPoints}
           enableDynamicSizing={activeItem === "tts"}
           maxDynamicContentSize={windowHeight * 0.9}
-          handleComponent={
-            activeItem === "ai"
-              ? ReaderAiBottomSheetHandle
-              : HiddenBottomSheetHandle
-          }
+          handleComponent={HiddenBottomSheetHandle}
           keyboardBehavior={activeItem === "ai" ? "interactive" : undefined}
           keyboardBlurBehavior={activeItem === "ai" ? "restore" : undefined}
-          android_keyboardInputMode={activeItem === "ai" ? "adjustResize" : undefined}
+          android_keyboardInputMode={
+            activeItem === "ai" ? "adjustResize" : undefined
+          }
           enableContentPanningGesture
           enableHandlePanningGesture
-          backdropComponent={
-            BottomSheetBackdrop
-          }
+          backdropComponent={BottomSheetBackdrop}
         >
-
-          {activeItem !== "ai" && <BottomSheetDragIndicator />}
+          <BottomSheetDragIndicator />
 
           {activeItem === "ai" || activeItem === "settings" ? (
             renderBottomSheetContent()
@@ -4304,7 +4482,6 @@ const textColor = isDark && !colorsCustomized
               {renderBottomSheetContent()}
             </BottomSheetContent>
           )}
-
         </BottomSheetPortal>
 
         <PremiumFeatureModal
@@ -4313,13 +4490,14 @@ const textColor = isDark && !colorsCustomized
           onClose={() => setShowAiPremiumPrompt(false)}
           onUpgrade={() => {
             setShowAiPremiumPrompt(false);
-            router.push({ pathname: '/onboarding/premium', params: { source: 'app' } });
+            router.push({
+              pathname: "/onboarding/premium",
+              params: { source: "app" },
+            });
           }}
           visible={showAiPremiumPrompt}
         />
-
       </View>
-
     </BottomSheet>
   );
 };
@@ -4352,18 +4530,71 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   noteCardDark: { borderColor: "#343A31", backgroundColor: "#1A1E18" },
-  noteEyebrow: { color: "#B42318", fontFamily: "Lato_700Bold", fontSize: 10, letterSpacing: 1.2 },
-  noteTitle: { marginTop: 5, color: "#20251D", fontFamily: "Lato_700Bold", fontSize: 22 },
+  noteEyebrow: {
+    color: "#B42318",
+    fontFamily: "Lato_700Bold",
+    fontSize: 10,
+    letterSpacing: 1.2,
+  },
+  noteTitle: {
+    marginTop: 5,
+    color: "#20251D",
+    fontFamily: "Lato_700Bold",
+    fontSize: 22,
+  },
   noteTextDark: { color: "#F4F5F1" },
   noteMutedDark: { color: "#A6ADA1" },
-  noteQuote: { marginTop: 12, color: "#687061", fontFamily: "SourceSans3_400Regular", fontSize: 14, fontStyle: "italic", lineHeight: 20 },
+  noteQuote: {
+    marginTop: 12,
+    color: "#687061",
+    fontFamily: "SourceSans3_400Regular",
+    fontSize: 14,
+    fontStyle: "italic",
+    lineHeight: 20,
+  },
   noteQuoteDark: { color: "#B8BEB3" },
-  noteInput: { minHeight: 125, marginTop: 15, padding: 14, borderWidth: 1, borderColor: "#D9DED2", borderRadius: 15, color: "#20251D", backgroundColor: "#F8F8F3", fontFamily: "SourceSans3_400Regular", fontSize: 16, lineHeight: 22 },
-  noteInputDark: { borderColor: "#3B4237", color: "#F4F5F1", backgroundColor: "#121510" },
-  noteActions: { marginTop: 16, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
-  noteCancelButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16 },
-  noteCancelText: { color: "#66705E", fontFamily: "Lato_700Bold", fontSize: 14 },
-  noteSaveButton: { minHeight: 46, justifyContent: "center", paddingHorizontal: 20, borderRadius: 14, backgroundColor: "#639922" },
+  noteInput: {
+    minHeight: 125,
+    marginTop: 15,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#D9DED2",
+    borderRadius: 15,
+    color: "#20251D",
+    backgroundColor: "#F8F8F3",
+    fontFamily: "SourceSans3_400Regular",
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  noteInputDark: {
+    borderColor: "#3B4237",
+    color: "#F4F5F1",
+    backgroundColor: "#121510",
+  },
+  noteActions: {
+    marginTop: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
+  noteCancelButton: {
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  noteCancelText: {
+    color: "#66705E",
+    fontFamily: "Lato_700Bold",
+    fontSize: 14,
+  },
+  noteSaveButton: {
+    minHeight: 46,
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    borderRadius: 14,
+    backgroundColor: "#639922",
+  },
   noteSaveButtonDisabled: { opacity: 0.45 },
   noteSaveText: { color: "#FFFFFF", fontFamily: "Lato_700Bold", fontSize: 14 },
   noteDestructiveActions: {
@@ -4372,8 +4603,16 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(180, 35, 24, 0.2)",
   },
-  noteDestructiveButton: { minHeight: 42, alignItems: "center", justifyContent: "center" },
-  noteDestructiveText: { color: "#B42318", fontFamily: "Lato_700Bold", fontSize: 14 },
+  noteDestructiveButton: {
+    minHeight: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  noteDestructiveText: {
+    color: "#B42318",
+    fontFamily: "Lato_700Bold",
+    fontSize: 14,
+  },
   lineGuideClose: {
     position: "absolute",
     bottom: 24,

@@ -1,6 +1,9 @@
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 import type { SQLiteDatabase } from "expo-sqlite";
-import { withSerializedWriteTransaction } from "./serializedWriteTransaction";
+import {
+  withSerializedWrite,
+  withSerializedWriteTransaction,
+} from "./serializedWriteTransaction";
 
 export async function getCachedPdfTranslations(
   db: SQLiteDatabase,
@@ -80,20 +83,24 @@ export async function savePdfTranslationPreference(
   languageCode?: string,
 ) {
   if (!languageCode) {
-    await db.runAsync(
-      "DELETE FROM pdf_translation_preferences WHERE pdf_id = ?",
-      pdfId,
+    await withSerializedWrite(db, (database) =>
+      database.runAsync(
+        "DELETE FROM pdf_translation_preferences WHERE pdf_id = ?",
+        pdfId,
+      ),
     );
     return;
   }
-  await db.runAsync(
-    `INSERT INTO pdf_translation_preferences (pdf_id, language_code, updated_at)
+  await withSerializedWrite(db, (database) =>
+    database.runAsync(
+      `INSERT INTO pdf_translation_preferences (pdf_id, language_code, updated_at)
      VALUES (?, ?, ?)
      ON CONFLICT(pdf_id) DO UPDATE SET
        language_code = excluded.language_code,
        updated_at = excluded.updated_at`,
-    pdfId,
-    languageCode,
-    new Date().toISOString(),
+      pdfId,
+      languageCode,
+      new Date().toISOString(),
+    ),
   );
 }

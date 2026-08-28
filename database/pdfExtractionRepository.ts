@@ -3,6 +3,7 @@ import type {
   ExtractedPdfPage,
 } from "@/modules/bic-pdf-reader";
 import type { SQLiteDatabase } from "expo-sqlite";
+import { withSerializedWrite } from "./serializedWriteTransaction";
 
 // Version 17 adds multi-signal page scoring plus document-wide scan sampling.
 export const PDF_EXTRACTION_ENGINE_VERSION = 17;
@@ -55,22 +56,34 @@ export async function getCachedPdfExtractionPreview(
     }
     const document = await getCachedPdfExtraction(db, pdfId);
     return document
-      ? { pageCount: document.pageCount, pages: document.pages.slice(0, pageLimit) }
+      ? {
+          pageCount: document.pageCount,
+          pages: document.pages.slice(0, pageLimit),
+        }
       : null;
   } catch {
     // Older SQLite builds may not expose JSON table functions. Preserve the
     // existing cache path in that case, even though it must parse the full blob.
     const document = await getCachedPdfExtraction(db, pdfId);
     return document
-      ? { pageCount: document.pageCount, pages: document.pages.slice(0, pageLimit) }
+      ? {
+          pageCount: document.pageCount,
+          pages: document.pages.slice(0, pageLimit),
+        }
       : null;
   }
 }
 
-export async function getCachedPdfExtraction(db: SQLiteDatabase, pdfId: string) {
+export async function getCachedPdfExtraction(
+  db: SQLiteDatabase,
+  pdfId: string,
+) {
   const inMemory = extractionMemoryCache.get(pdfId);
   if (inMemory) return inMemory;
-  const row = await db.getFirstAsync<{ document_json: string; engine_version: number }>(
+  const row = await db.getFirstAsync<{
+    document_json: string;
+    engine_version: number;
+  }>(
     "SELECT document_json, engine_version FROM pdf_extractions WHERE pdf_id = ?",
     pdfId,
   );
@@ -80,7 +93,9 @@ export async function getCachedPdfExtraction(db: SQLiteDatabase, pdfId: string) 
     extractionMemoryCache.set(pdfId, document);
     return document;
   } catch {
-    await db.runAsync("DELETE FROM pdf_extractions WHERE pdf_id = ?", pdfId);
+    await withSerializedWrite(db, (database) =>
+      database.runAsync("DELETE FROM pdf_extractions WHERE pdf_id = ?", pdfId),
+    );
     return null;
   }
 }
@@ -91,16 +106,18 @@ export async function savePdfExtraction(
   document: ExtractedPdfDocument,
 ) {
   extractionMemoryCache.set(pdfId, document);
-  await db.runAsync(
-    `INSERT INTO pdf_extractions (pdf_id, engine_version, document_json, extracted_at)
+  await withSerializedWrite(db, (database) =>
+    database.runAsync(
+      `INSERT INTO pdf_extractions (pdf_id, engine_version, document_json, extracted_at)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(pdf_id) DO UPDATE SET
        engine_version = excluded.engine_version,
        document_json = excluded.document_json,
        extracted_at = excluded.extracted_at`,
-    pdfId,
-    PDF_EXTRACTION_ENGINE_VERSION,
-    JSON.stringify(document),
-    new Date().toISOString(),
+      pdfId,
+      PDF_EXTRACTION_ENGINE_VERSION,
+      JSON.stringify(document),
+      new Date().toISOString(),
+    ),
   );
 }

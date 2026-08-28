@@ -2,6 +2,25 @@ import type { SQLiteDatabase } from "expo-sqlite";
 
 let pendingWrite: Promise<void> = Promise.resolve();
 
+function enqueueWrite<T>(task: () => Promise<T>) {
+  const operation = pendingWrite.then(task);
+  pendingWrite = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  return operation;
+}
+
+/**
+ * Run a single database mutation after all previously queued mutations finish.
+ */
+export function withSerializedWrite<T>(
+  db: SQLiteDatabase,
+  task: (database: SQLiteDatabase) => Promise<T>,
+) {
+  return enqueueWrite(() => task(db));
+}
+
 /**
  * Keep write transactions on the shared Expo SQLite connection sequential.
  * Reader, Translated, and translation caching can otherwise begin overlapping
@@ -11,9 +30,5 @@ export function withSerializedWriteTransaction(
   db: SQLiteDatabase,
   task: (transaction: SQLiteDatabase) => Promise<void>,
 ) {
-  const operation = pendingWrite.then(() =>
-    db.withExclusiveTransactionAsync(task)
-  );
-  pendingWrite = operation.catch(() => undefined);
-  return operation;
+  return enqueueWrite(() => db.withExclusiveTransactionAsync(task));
 }

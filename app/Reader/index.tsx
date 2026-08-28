@@ -128,6 +128,11 @@ const CHAPTER_EXTRACTION_PAGES_ABOVE = 3;
 const CHAPTER_EXTRACTION_PAGE_COUNT = 7;
 const TRANSLATION_PREFETCH_DISTANCE = 7;
 const EXTRACTION_CACHE_PAGE_INTERVAL = 32;
+// Translation is windowed around the current reading position (plus the
+// opening pages) so a long book is translated as the user reads instead of in
+// one continuous background sweep that saturates the JS thread.
+const TRANSLATION_WINDOW_BEHIND = 5;
+const TRANSLATION_WINDOW_AHEAD = 40;
 
 const readerSnapshotCache = new WeakMap<
   ExtractedPdfDocument,
@@ -355,6 +360,8 @@ export default function ReaderScreen() {
   );
   const scheduledTranslationLanguage = React.useRef<string | null>(null);
   const activeTranslationLanguage = React.useRef<string | null>(null);
+  const activeTabRef = React.useRef<ReaderMode>("reader");
+  const translatedDisplayCurrentPageRef = React.useRef(1);
   const translationSourceLanguage = React.useRef<string | undefined>(undefined);
   const latestReaderBlocks = React.useRef(readerBlocks);
   const latestPdfOutline = React.useRef(pdfOutline);
@@ -377,6 +384,8 @@ export default function ReaderScreen() {
   useScreenRotation(handleOrientationChange);
 
   activeTranslationLanguage.current = translationLanguage?.code ?? null;
+  activeTabRef.current = activeTab;
+  translatedDisplayCurrentPageRef.current = translatedDisplayCurrentPage;
   latestReaderBlocks.current = readerBlocks;
   latestPdfOutline.current = pdfOutline;
   latestReaderPageSizes.current = readerPageSizes;
@@ -504,6 +513,13 @@ export default function ReaderScreen() {
       .catch(() => undefined)
       .then(async () => {
         while (activeTranslationLanguage.current === languageCode) {
+          // Translate only while the Translated tab is actually on screen. A
+          // background sweep over a long book saturates the JS thread and
+          // makes the rest of the app sluggish.
+          if (activeTabRef.current !== "translated") {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            continue;
+          }
           const latestContentBlocks = latestReaderBlocks.current;
           const firstContentPage = latestContentBlocks[0]?.page;
           const warmContentBlocks = firstContentPage === undefined
@@ -574,9 +590,32 @@ export default function ReaderScreen() {
             missingBlocks = [...nearbyBlocks, ...sequentialBlocks];
 
           }
+          // Bound the sweep to a window around the reader's position (plus the
+          // opening pages) so the Translated tab becomes usable quickly and the
+          // worker never chases the whole document in one go.
+          const translationAnchorPage =
+            requestedTranslationPage.current ??
+            translatedDisplayCurrentPageRef.current ??
+            1;
+          missingBlocks = missingBlocks.filter(
+            (block) =>
+              block.page <= 2 ||
+              (block.page >=
+                Math.max(1, translationAnchorPage - TRANSLATION_WINDOW_BEHIND) &&
+                block.page <=
+                  translationAnchorPage + TRANSLATION_WINDOW_AHEAD),
+          );
           missingBlocks = missingBlocks.slice(0, TRANSLATION_WORK_CHUNK);
 
-          if (missingBlocks.length === 0) break;
+          if (missingBlocks.length === 0) {
+            // The current window is fully translated. Wait briefly so the
+            // reader can advance (or extraction can add pages) before checking
+            // again — without spinning the JS thread.
+            setTranslationLoading(false);
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            continue;
+          }
+          setTranslationLoading(true);
           await translatePdfBlocks(
             missingBlocks,
             languageCode,
@@ -605,6 +644,9 @@ export default function ReaderScreen() {
               translationSourceLanguage.current = detectedLanguage;
             },
           );
+          // Yield to the JS event loop between chunks so React can flush the
+          // published updates and keep the UI responsive while translating.
+          await new Promise((resolve) => setTimeout(resolve, 0));
         }
 
         if (activeTranslationLanguage.current === languageCode) {

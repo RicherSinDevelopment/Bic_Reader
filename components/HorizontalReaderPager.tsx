@@ -35,6 +35,7 @@ type Segment = {
   spacingAfter: number;
   paragraphStart: boolean;
   sectionOpening: boolean;
+  runningTitle: string;
 };
 
 type PageAnchor = {
@@ -51,6 +52,7 @@ type MarginPreset = "compact" | "comfortable" | "relaxed";
 
 type Props = {
   blocks: ExtractedPdfBlock[];
+  isActive?: boolean;
   userHighlights?: Array<{
     blockId: string;
     offset: number;
@@ -154,17 +156,21 @@ function HorizontalSelectablePage({
   userNotes,
   onReaderReveal,
   onReady,
+  onSwitchHighlightReady,
   topContentInset,
   onGuideLines,
   guideWord,
   onGuideWordRects,
   guideActive,
+  readerPageNumber,
+  pageTopMargin,
+  pageBottomMargin,
 }: {
   page: Segment[];
   userHighlights: Props["userHighlights"];
   spokenWordHighlight: Props["spokenWordHighlight"];
   searchHighlight?: TextRange;
-  switchHighlight?: TextRange;
+  switchHighlight?: TextRange & { nonce: number };
   switchHighlightColor: string;
   displayText: (text: string) => string;
   readingDirection: "ltr" | "rtl";
@@ -188,20 +194,19 @@ function HorizontalSelectablePage({
   userNotes: ReaderNote[];
   onReaderReveal?: () => void;
   onReady?: () => void;
+  onSwitchHighlightReady?: () => void;
   topContentInset: number;
   onGuideLines?: (lines: GuideLine[]) => void;
   guideWord?: TextRange;
   onGuideWordRects?: (rects: GuideLine[], target?: TextRange) => void;
   guideActive: boolean;
+  readerPageNumber: number;
+  pageTopMargin: number;
+  pageBottomMargin: number;
 }) {
   const webViewRef = useRef<WebView>(null);
-  // The page surface intentionally has no running header/footer. Those
-  // decorations made OCR-heavy documents look like a fragmented contents
-  // page and introduced unnecessary layout movement.
-  const runningHeader = "";
-  const pageNumber = "";
-  const verticalMargin = 0;
-  const topSafeInset = 0;
+  const runningHeader = page.find((segment) => segment.runningTitle)?.runningTitle ?? "";
+  const pageNumber = String(readerPageNumber);
   const selectionRangesRef = useRef<TextRange[]>([]);
   const [selectionHasHighlight, setSelectionHasHighlight] = useState(false);
 
@@ -228,18 +233,18 @@ function HorizontalSelectablePage({
       className: "reader-note",
       noteId: note.id,
     }));
-    [searchHighlight, switchHighlight].forEach((highlight, index) => {
-      if (!highlight || highlight.blockId !== segment.blockId) return;
-      const start = highlight.offset - segment.startOffset;
-      if (start < 0 || start >= segment.text.length) return;
-      highlights.push({
-        start,
-        end: Math.min(segment.text.length, start + highlight.length),
-        color: index === 0 ? "#facc15" : `${switchHighlightColor}AD`,
-        className: index === 0 ? "reader-search-highlight" : "reader-switch-highlight",
-        noteId: undefined,
-      });
-    });
+    if (searchHighlight?.blockId === segment.blockId) {
+      const start = searchHighlight.offset - segment.startOffset;
+      if (start >= 0 && start < segment.text.length) {
+        highlights.push({
+          start,
+          end: Math.min(segment.text.length, start + searchHighlight.length),
+          color: "#facc15",
+          className: "reader-search-highlight",
+          noteId: undefined,
+        });
+      }
+    }
     highlights.sort((left, right) => left.start - right.start);
     let cursor = 0;
     const contents = highlights.map((highlight) => {
@@ -254,9 +259,9 @@ function HorizontalSelectablePage({
       return `${before}<mark class="${highlight.className}" style="background-color:${escapeHtml(highlight.color)}">${selected}</mark>`;
     }).join("") + escapeHtml(displayText(segment.text.slice(cursor)));
     const scale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
-    const indent = segment.paragraphStart && !segment.sectionOpening ? "&#8195;" : "";
-    return `<div class="segment ${segment.sectionOpening ? "section-opening" : ""}" data-block-id="${escapeHtml(segment.blockId)}" data-start="${segment.startOffset}" data-prefix="${indent ? 1 : 0}" style="font-size:${fontSize * scale}px;line-height:${fontSize * scale * lineHeight}px;margin-top:${segment.spacingBefore}px;margin-bottom:${segment.spacingAfter}px">${indent}${contents}</div>`;
-  }).join(""), [displayText, fontSize, lineHeight, page, searchHighlight, switchHighlight, switchHighlightColor, userHighlights, userNotes]);
+    const paragraphClass = segment.paragraphStart ? " paragraph-start" : "";
+    return `<div class="segment${paragraphClass} ${segment.sectionOpening ? "section-opening" : ""}" data-block-id="${escapeHtml(segment.blockId)}" data-start="${segment.startOffset}" data-prefix="0" style="font-size:${fontSize * scale}px;line-height:${fontSize * scale * lineHeight}px;margin-top:${segment.spacingBefore}px;margin-bottom:${segment.spacingAfter}px">${contents}</div>`;
+  }).join(""), [displayText, fontSize, lineHeight, page, searchHighlight, userHighlights, userNotes]);
 
   const webFontFamily = fontFamily === "Lato_700Bold"
     ? "LatoReaderBold"
@@ -268,7 +273,7 @@ function HorizontalSelectablePage({
       : "";
   const html = useMemo(() => `<!doctype html><html dir="${readingDirection}"><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
     ${fontFaceCss}
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:${topContentInset}px 0 ${bottomPadding}px;color:${textColor};font-family:${JSON.stringify(webFontFamily)},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.page-running-header,.page-number{position:fixed;z-index:2;left:0;right:0;color:${textColor};opacity:.5;text-align:center;pointer-events:none}.page-running-header{top:${Math.max(topSafeInset + 6, verticalMargin * 0.45)}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${Math.max(11, fontSize * 0.58)}px;font-weight:600;letter-spacing:.02em}.page-number{bottom:${Math.max(14, bottomPadding - 2)}px;font-size:${Math.max(11, fontSize * 0.62)}px;font-variant-numeric:tabular-nums}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.2s ease-out forwards}@keyframes readerSwitchPulse{0%{background-color:color-mix(in srgb,${switchHighlightColor} 56%,transparent);box-shadow:0 0 0 0 color-mix(in srgb,${switchHighlightColor} 30%,transparent)}32%{background-color:color-mix(in srgb,${switchHighlightColor} 92%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,${switchHighlightColor} 20%,transparent)}62%{background-color:color-mix(in srgb,${switchHighlightColor} 66%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,${switchHighlightColor} 12%,transparent)}100%{background-color:transparent;box-shadow:0 0 0 0 transparent}}@keyframes readerSwitchFade{from{background-color:color-mix(in srgb,${switchHighlightColor} 66%,transparent)}to{background-color:transparent}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body><div class="page-running-header">${escapeHtml(runningHeader)}</div>${markup}<div class="page-number">${pageNumber}</div><script>
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:${topContentInset}px 0 ${bottomPadding}px;color:${textColor};font-family:${webFontFamily},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.page-running-header,.page-number{position:fixed;z-index:2;left:0;right:0;color:${textColor};opacity:.48;text-align:center;pointer-events:none}.page-running-header{top:${pageTopMargin}px;padding:0 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${Math.max(11, fontSize * 0.58)}px;font-weight:600;letter-spacing:.025em}.page-number{bottom:${pageBottomMargin}px;font-size:${Math.max(11, fontSize * 0.62)}px;font-variant-numeric:tabular-nums}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.segment.paragraph-start{text-indent:1.35em}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.2s ease-out forwards}@keyframes readerSwitchPulse{0%{background-color:color-mix(in srgb,${switchHighlightColor} 56%,transparent);box-shadow:0 0 0 0 color-mix(in srgb,${switchHighlightColor} 30%,transparent)}32%{background-color:color-mix(in srgb,${switchHighlightColor} 92%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,${switchHighlightColor} 20%,transparent)}62%{background-color:color-mix(in srgb,${switchHighlightColor} 66%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,${switchHighlightColor} 12%,transparent)}100%{background-color:transparent;box-shadow:0 0 0 0 transparent}}@keyframes readerSwitchFade{from{background-color:color-mix(in srgb,${switchHighlightColor} 66%,transparent)}to{background-color:transparent}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body><div class="page-running-header">${escapeHtml(runningHeader)}</div>${markup}<div class="page-number">${pageNumber}</div><script>
     window.__selectionRanges=[];
     function cleanLength(value){return String(value||'').replace(/\\u00ad/g,'').length}
     function rawIndexForClean(value,target){let clean=0;for(let index=0;index<value.length;index++){if(value[index]!=='\\u00ad'){if(clean===target)return index;clean++}}return value.length}
@@ -277,6 +282,15 @@ function HorizontalSelectablePage({
       if(!blockId||!length)return;const segment=Array.from(document.querySelectorAll('[data-block-id]')).find(function(item){const start=Number(item.dataset.start||0);return item.dataset.blockId===blockId&&offset>=start&&offset<start+cleanLength(item.textContent)-Number(item.dataset.prefix||0)});if(!segment)return;
       const localStart=offset-Number(segment.dataset.start||0)+Number(segment.dataset.prefix||0);const localEnd=localStart+length;let cleanCursor=0;const walker=document.createTreeWalker(segment,NodeFilter.SHOW_TEXT);const nodes=[];let node=walker.nextNode();while(node){const nodeLength=cleanLength(node.textContent||'');nodes.push({node:node,start:cleanCursor,end:cleanCursor+nodeLength});cleanCursor+=nodeLength;node=walker.nextNode()}
       nodes.reverse().forEach(function(entry){const textNode=entry.node;const value=textNode.textContent||'';if(localEnd<=entry.start||localStart>=entry.end)return;const start=rawIndexForClean(value,Math.max(0,localStart-entry.start));const end=rawIndexForClean(value,Math.min(entry.end-entry.start,localEnd-entry.start));if(end<=start)return;const range=document.createRange();range.setStart(textNode,start);range.setEnd(textNode,end);const mark=document.createElement('mark');mark.className='tts-word-active';mark.style.backgroundColor='#fde047';range.surroundContents(mark)});
+    }
+    window.__setSwitchHighlight=function(target){
+      document.querySelectorAll('.reader-switch-highlight').forEach(function(mark){const parent=mark.parentNode;mark.replaceWith(document.createTextNode(mark.textContent||''));parent&&parent.normalize()});
+      if(!target||!target.blockId||!target.length)return;
+      const segment=Array.from(document.querySelectorAll('[data-block-id]')).find(function(item){const start=Number(item.dataset.start||0);return item.dataset.blockId===target.blockId&&target.offset>=start&&target.offset<start+cleanLength(item.textContent)-Number(item.dataset.prefix||0)});
+      if(!segment)return;
+      const localStart=target.offset-Number(segment.dataset.start||0)+Number(segment.dataset.prefix||0);const localEnd=localStart+target.length;let cleanCursor=0;const walker=document.createTreeWalker(segment,NodeFilter.SHOW_TEXT);const nodes=[];let node=walker.nextNode();while(node){const nodeLength=cleanLength(node.textContent||'');nodes.push({node:node,start:cleanCursor,end:cleanCursor+nodeLength});cleanCursor+=nodeLength;node=walker.nextNode()}
+      let painted=false;nodes.reverse().forEach(function(entry){const textNode=entry.node;const value=textNode.textContent||'';if(localEnd<=entry.start||localStart>=entry.end)return;const start=rawIndexForClean(value,Math.max(0,localStart-entry.start));const end=rawIndexForClean(value,Math.min(entry.end-entry.start,localEnd-entry.start));if(end<=start)return;const range=document.createRange();range.setStart(textNode,start);range.setEnd(textNode,end);const mark=document.createElement('mark');mark.className='reader-switch-highlight';range.surroundContents(mark);painted=true});
+      if(painted)requestAnimationFrame(function(){requestAnimationFrame(function(){window.ReactNativeWebView.postMessage(JSON.stringify({type:'switchHighlightReady',nonce:target.nonce}))})});
     }
     function captureSelection(){
       const selection=window.getSelection();
@@ -297,7 +311,7 @@ function HorizontalSelectablePage({
     }
     let timer;document.addEventListener('selectionchange',function(){clearTimeout(timer);timer=setTimeout(captureSelection,80)});
     document.addEventListener('click',function(event){const marker=event.target.closest('[data-open-note]');if(marker)window.ReactNativeWebView.postMessage(JSON.stringify({type:'openNote',noteId:marker.dataset.openNote}))});
-  </script></body></html>`, [automaticHyphenation, backgroundColor, bold, bottomPadding, fontFaceCss, fontSize, letterSpacing, markup, pageNumber, readingDirection, runningHeader, switchHighlightColor, textColor, topContentInset, topSafeInset, verticalMargin, webFontFamily, wordSpacing]);
+  </script></body></html>`, [automaticHyphenation, backgroundColor, bold, bottomPadding, fontFaceCss, fontSize, letterSpacing, markup, pageBottomMargin, pageNumber, pageTopMargin, readingDirection, runningHeader, switchHighlightColor, textColor, topContentInset, webFontFamily, wordSpacing]);
 
   const source = useMemo(() => ({ html }), [html]);
   const ttsInjection = useMemo(
@@ -307,6 +321,13 @@ function HorizontalSelectablePage({
   useEffect(() => {
     webViewRef.current?.injectJavaScript(ttsInjection);
   }, [ttsInjection]);
+  const switchHighlightInjection = useMemo(
+    () => `window.__setSwitchHighlight?.(${JSON.stringify(switchHighlight ?? null)});true;`,
+    [switchHighlight],
+  );
+  useEffect(() => {
+    webViewRef.current?.injectJavaScript(switchHighlightInjection);
+  }, [switchHighlightInjection]);
   const guideWordInjection = useMemo(() => `window.__reportGuideWord?.(${JSON.stringify(guideWord ?? null)});true;`, [guideWord]);
   useEffect(() => {
     webViewRef.current?.injectJavaScript(guideWordInjection);
@@ -328,6 +349,7 @@ function HorizontalSelectablePage({
     menuItems={selectionHasHighlight ? horizontalReaderMenuItems : horizontalReaderMenuItemsWithoutRemove}
     onLoadEnd={() => {
       webViewRef.current?.injectJavaScript(ttsInjection);
+      webViewRef.current?.injectJavaScript(switchHighlightInjection);
       webViewRef.current?.injectJavaScript(`
         window.__reportGuideGeometry = function() {
           setTimeout(function() {
@@ -429,6 +451,11 @@ function HorizontalSelectablePage({
           if (hadSelection && !selectionRangesRef.current.length) onReaderReveal?.();
         } else if (message.type === "openNote" && typeof message.noteId === "string") {
           onOpenNote?.(message.noteId);
+        } else if (
+          message.type === "switchHighlightReady" &&
+          message.nonce === switchHighlight?.nonce
+        ) {
+          onSwitchHighlightReady?.();
         } else if (message.type === "guideLines" && Array.isArray(message.lines)) {
           onGuideLines?.(message.lines.filter((line): line is GuideLine =>
             typeof line?.left === "number" && typeof line.top === "number" &&
@@ -471,8 +498,28 @@ function buildPages(
 ) {
   const pages: Segment[][] = [[]];
   let usedHeight = 0;
+  const isRunningTitle = (block: ExtractedPdfBlock) => {
+    const text = block.text.trim();
+    if (
+      (block.kind !== "title" && block.kind !== "heading") ||
+      !text ||
+      text.length > 100 ||
+      (text.match(/\S+/g)?.length ?? 0) > 12
+    ) return false;
+    const firstLetter = text.match(/\p{L}/u)?.[0];
+    const hasLetterCase = firstLetter &&
+      firstLetter.toLocaleUpperCase() !== firstLetter.toLocaleLowerCase();
+    return Boolean(
+      firstLetter &&
+      (!hasLetterCase || firstLetter === firstLetter.toLocaleUpperCase())
+    );
+  };
+  let runningTitle = blocks.find(isRunningTitle)?.text.trim() ?? "";
 
   blocks.forEach((block, blockIndex) => {
+    if (isRunningTitle(block)) {
+      runningTitle = block.text.trim();
+    }
     let sourceOffset = 0;
     const fixedOffset = fixedPageAnchor?.blockId === block.id
       ? Math.max(0, Math.min(block.text.length, fixedPageAnchor.blockOffset))
@@ -482,7 +529,9 @@ function buildPages(
     const sectionOpening = block.kind === "paragraph" && (
       blockIndex === 0 || previousKind === "title" || previousKind === "heading"
     );
-    const textScale = block.kind === "title" ? 1.65 : block.kind === "heading" ? 1.3 : 1;
+    // Keep the pagination estimate identical to the rendered heading sizes;
+    // overestimating these left avoidable blank space near page bottoms.
+    const textScale = block.kind === "title" ? 1.55 : block.kind === "heading" ? 1.25 : 1;
     const scaledLineHeight = baseLineHeight * textScale;
     const scaledCharactersPerLine = Math.max(8, Math.floor(charactersPerLine / textScale));
 
@@ -558,6 +607,7 @@ function buildPages(
           spacingAfter,
           paragraphStart: block.kind === "paragraph" && sourceOffset === 0,
           sectionOpening: sectionOpening && sourceOffset === 0,
+          runningTitle,
         });
         const wrappedLines = Math.max(
           1,
@@ -590,6 +640,7 @@ function cachedBuildPages(
   fixedPageAnchor?: PageAnchor,
 ) {
   const key = [
+    "framed-pages-v2",
     blocks.length,
     blocks[blocks.length - 1]?.id ?? "empty",
     blocks[blocks.length - 1]?.text.length ?? 0,
@@ -654,6 +705,7 @@ function pageIndexForAnchor(pages: Segment[][], anchor?: PageAnchor) {
 
 export default function HorizontalReaderPager({
   blocks,
+  isActive = true,
   userHighlights = [],
   onSelectionHighlightRequest,
   onSelectionRemoveHighlight,
@@ -701,6 +753,17 @@ export default function HorizontalReaderPager({
   const [containerHeight, setContainerHeight] = useState(0);
   const heightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pagerWarm, setPagerWarm] = useState(false);
+  const [viewablePageIndex, setViewablePageIndex] = useState(0);
+  const [paintedSwitchNonce, setPaintedSwitchNonce] = useState<number | null>(null);
+  const onViewablePagesChanged = useRef(({
+    viewableItems,
+  }: {
+    viewableItems: Array<{ index: number | null; isViewable: boolean }>;
+  }) => {
+    const visible = viewableItems.find((item) => item.isViewable && item.index != null);
+    if (visible?.index != null) setViewablePageIndex(visible.index);
+  }).current;
+  const pageViewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<number | null>(null);
   const [dismissedSwitchNonce, setDismissedSwitchNonce] = useState<number | null>(null);
   const [lineGuideIndex, setLineGuideIndex] = useState(0);
@@ -784,12 +847,17 @@ export default function HorizontalReaderPager({
     relaxed: 46,
   }[horizontalMarginPreset];
   const verticalMargin = {
-    compact: 14,
+    compact: 22,
     comfortable: 24,
-    relaxed: 38,
+    relaxed: 48,
   }[verticalMarginPreset];
-  const topContentInset = verticalMargin;
-  const bottomContentInset = verticalMargin + 12 + insets.bottom;
+  const headerHeight = verticalMarginPreset === "compact" ? 40 : 44;
+  const footerHeight = verticalMarginPreset === "compact" ? 18 : 38;
+  const topContentInset = verticalMargin + headerHeight;
+  const pageBottomMargin = verticalMarginPreset === "compact"
+    ? Math.max(10, insets.bottom)
+    : verticalMargin + Math.max(6, insets.bottom);
+  const bottomContentInset = pageBottomMargin + footerHeight;
   const horizontalPadding = Math.max(sideMargin, (width - 680) / 2);
   const charactersPerLine = Math.max(
     12,
@@ -1341,13 +1409,45 @@ export default function HorizontalReaderPager({
     ? stationarySwitchHighlight
     : navigationSwitchHighlight;
   const activeSwitchNonce = activeSwitchHighlight?.nonce;
+  const activeSwitchPage = useMemo(() => {
+    if (!activeSwitchHighlight) return -1;
+    return pages.findIndex((page) => page.some((segment) =>
+      segment.blockId === activeSwitchHighlight.blockId &&
+      activeSwitchHighlight.offset >= segment.startOffset &&
+      activeSwitchHighlight.offset < segment.startOffset + segment.text.length
+    ));
+  }, [activeSwitchHighlight, pages]);
   useEffect(() => {
-    if (activeSwitchNonce === undefined || activeSwitchNonce === dismissedSwitchNonce) return;
-    const timer = setTimeout(() => {
-      setDismissedSwitchNonce(activeSwitchNonce);
-    }, 1600);
-    return () => clearTimeout(timer);
-  }, [activeSwitchNonce, dismissedSwitchNonce]);
+    if (
+      !isActive ||
+      activeSwitchNonce === undefined ||
+      activeSwitchNonce === dismissedSwitchNonce ||
+      activeSwitchNonce !== paintedSwitchNonce ||
+      activeSwitchPage < 0 ||
+      activeSwitchPage !== viewablePageIndex
+    ) return;
+
+    // The translated pager is intentionally warmed while hidden. Do not spend
+    // the highlight's lifetime there: wait until its target page is visible,
+    // then allow React Native and the selectable page one frame to paint it.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      timer = setTimeout(() => {
+        setDismissedSwitchNonce(activeSwitchNonce);
+      }, 1600);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (timer) clearTimeout(timer);
+    };
+  }, [
+    activeSwitchNonce,
+    activeSwitchPage,
+    dismissedSwitchNonce,
+    isActive,
+    paintedSwitchNonce,
+    viewablePageIndex,
+  ]);
   const selectableSearchHighlight = destination &&
     destination.nonce !== dismissedSearchNonce &&
     destination.blockId && destination.searchQuery && destination.searchMatchIndex !== undefined
@@ -1358,7 +1458,11 @@ export default function HorizontalReaderPager({
       }
     : undefined;
   const selectableSwitchHighlight = useMemo(() => {
-    if (!activeSwitchHighlight || activeSwitchHighlight.nonce === dismissedSwitchNonce) return undefined;
+    if (
+      !isActive ||
+      !activeSwitchHighlight ||
+      activeSwitchHighlight.nonce === dismissedSwitchNonce
+    ) return undefined;
     const block = blocks.find((candidate) => candidate.id === activeSwitchHighlight.blockId);
     if (!block) return undefined;
     const match = Array.from(block.text.matchAll(/\S+/g)).find((candidate) =>
@@ -1368,8 +1472,9 @@ export default function HorizontalReaderPager({
       blockId: activeSwitchHighlight.blockId,
       offset: match.index ?? activeSwitchHighlight.offset,
       length: match[0].length,
+      nonce: activeSwitchHighlight.nonce,
     } : undefined;
-  }, [activeSwitchHighlight, blocks, dismissedSwitchNonce]);
+  }, [activeSwitchHighlight, blocks, dismissedSwitchNonce, isActive]);
   const renderSegment = (segment: Segment, index: number, pageIndex: number) => {
     const isSearchTarget = destination?.nonce !== dismissedSearchNonce &&
       destination?.blockId === segment.blockId &&
@@ -1404,7 +1509,7 @@ export default function HorizontalReaderPager({
     const spokenLength = isSpokenTarget ? spokenWordHighlight!.length : 0;
     const headingScale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
     const openingWord = "";
-    const paragraphIndent = segment.paragraphStart && !segment.sectionOpening
+    const paragraphIndent = segment.paragraphStart
       ? "\u2003"
       : "";
     const typographyStyle = {
@@ -1617,6 +1722,8 @@ export default function HorizontalReaderPager({
         windowSize={pagerWarm ? 3 : 1}
         removeClippedSubviews
         showsHorizontalScrollIndicator={false}
+        onViewableItemsChanged={onViewablePagesChanged}
+        viewabilityConfig={pageViewabilityConfig}
         keyExtractor={(_, pageIndex) => `reader-page-${pageIndex}`}
         getItemLayout={(_, pageIndex) => ({
           index: pageIndex,
@@ -1668,12 +1775,26 @@ export default function HorizontalReaderPager({
             style={{
               backgroundColor,
               height: "100%",
-              paddingHorizontal: horizontalPadding,
-              paddingTop: topContentInset,
-              paddingBottom: bottomContentInset,
+              paddingHorizontal: 6,
+              paddingVertical: 5,
               width,
             }}
           >
+            <View
+              pointerEvents="none"
+              style={{
+                ...StyleSheet.absoluteFillObject,
+                backgroundColor: "transparent",
+                borderRadius: 24,
+                marginHorizontal: 6,
+                marginVertical: 5,
+                shadowColor: "#000000",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.06,
+                shadowRadius: 10,
+                zIndex: 3,
+              }}
+            />
             {guideMode ? (
               <View pointerEvents="none" style={{ opacity: 0 }}>
                 {page.map((segment, segmentIndex) => renderSegment(segment, segmentIndex, pageIndex))}
@@ -1710,7 +1831,13 @@ export default function HorizontalReaderPager({
                 onAskAI={onSelectionAskAI}
                 onReaderReveal={onReaderReveal}
                 onReady={reportReady}
+                onSwitchHighlightReady={activeSwitchHighlight && pageIndex === activeSwitchPage
+                  ? () => setPaintedSwitchNonce(activeSwitchHighlight.nonce)
+                  : undefined}
                 guideActive={Boolean(guideMode) && pageIndex === currentPageRef.current}
+                readerPageNumber={pageIndex + 1}
+                pageTopMargin={verticalMargin}
+                pageBottomMargin={pageBottomMargin}
                 guideWord={activeGuideWord?.pageIndex === pageIndex ? activeGuideWord : undefined}
                 onGuideLines={(lines) => {
                   const pageLines = lines.map((line) => ({ ...line, left: line.left + horizontalPadding }));

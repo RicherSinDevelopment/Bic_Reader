@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from "expo-sqlite";
+import { withSerializedWriteTransaction } from "./serializedWriteTransaction";
 
 export type StoredHighlight = {
   blockId: string;
@@ -64,14 +65,14 @@ export async function saveReaderAnnotations(
   notes: StoredNote[],
 ) {
   const timestamp = new Date().toISOString();
-  await db.withTransactionAsync(async () => {
-    await db.runAsync(
+  await withSerializedWriteTransaction(db, async (transaction) => {
+    await transaction.runAsync(
       "DELETE FROM reader_annotations WHERE pdf_id = ? AND scope = ?",
       pdfId,
       scope,
     );
     for (const [index, highlight] of highlights.entries()) {
-      await db.runAsync(
+      await transaction.runAsync(
         `INSERT INTO reader_annotations
          (id, annotation_id, pdf_id, scope, kind, block_id, start_offset, text_length, color, note_text, created_at)
          VALUES (?, ?, ?, ?, 'highlight', ?, ?, ?, ?, NULL, ?)`,
@@ -87,7 +88,7 @@ export async function saveReaderAnnotations(
       );
     }
     for (const [index, note] of notes.entries()) {
-      await db.runAsync(
+      await transaction.runAsync(
         `INSERT INTO reader_annotations
          (id, annotation_id, pdf_id, scope, kind, block_id, start_offset, text_length, color, note_text, created_at)
          VALUES (?, ?, ?, ?, 'note', ?, ?, ?, NULL, ?, ?)`,

@@ -78,8 +78,10 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
 
   return (
     <BottomSheetScrollView
+      style={{ flex: 1 }}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 }}
       showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
     >
       <Text className="text-lg font-semibold text-slate-900 dark:text-[#F4F5F1]">
         Reader Settings
@@ -304,13 +306,12 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
         </View>
       </View>
 
-      {transition === "pager" ? (
-        <View className="mt-6 border-t border-slate-200 pt-5 dark:border-white/10">
+      <View className="mt-6 border-t border-slate-200 pt-5 dark:border-white/10">
           <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
             Top & bottom margin
           </Text>
           <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
-            Controls the breathing room above and below the text.
+            Controls the page edges and the space reserved around the chapter title and page number.
           </Text>
           <View className="mt-3 flex-row gap-2">
             {marginPresets.map((preset) => {
@@ -331,10 +332,9 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
               );
             })}
           </View>
-        </View>
-      ) : null}
+      </View>
 
-      <View className={transition === "pager" ? "mt-5" : "mt-6 border-t border-slate-200 pt-5 dark:border-white/10"}>
+      <View className="mt-5">
         <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
           Left & right margin
         </Text>

@@ -1,5 +1,6 @@
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 import type { SQLiteDatabase } from "expo-sqlite";
+import { withSerializedWriteTransaction } from "./serializedWriteTransaction";
 
 export async function getCachedPdfTranslations(
   db: SQLiteDatabase,
@@ -32,8 +33,8 @@ export async function savePdfTranslations(
   blocks: ExtractedPdfBlock[],
 ) {
   if (blocks.length === 0) return;
-  await db.withTransactionAsync(async () => {
-    const statement = await db.prepareAsync(
+  await withSerializedWriteTransaction(db, async (transaction) => {
+    const statement = await transaction.prepareAsync(
       `INSERT INTO pdf_translations (
          pdf_id, language_code, source_block_id, block_json, translated_at
        ) VALUES (?, ?, ?, ?, ?)

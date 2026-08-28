@@ -76,8 +76,8 @@ export const useReaderSettingsStore =
   create<ReaderSettingsState>((set) => ({
     fontFamily: 'SourceSans3_400Regular',
     fontSize: 22,
-    lineHeight: 1.6,
-    paragraphSpacing: 0.65,
+    lineHeight: 1.5,
+    paragraphSpacing: 0.3,
     spacingPreset: "comfortable",
     verticalMarginPreset: "comfortable",
     horizontalMarginPreset: "comfortable",
@@ -131,9 +131,9 @@ export const useReaderSettingsStore =
 
     setSpacingPreset: (preset) => {
       const settings = {
-        compact: { lineHeight: 1.45, paragraphSpacing: 0.45 },
-        comfortable: { lineHeight: 1.6, paragraphSpacing: 0.65 },
-        relaxed: { lineHeight: 1.78, paragraphSpacing: 0.9 },
+        compact: { lineHeight: 1.4, paragraphSpacing: 0.2 },
+        comfortable: { lineHeight: 1.5, paragraphSpacing: 0.3 },
+        relaxed: { lineHeight: 1.7, paragraphSpacing: 0.45 },
       }[preset];
       set({
         ...settings,

@@ -45,7 +45,7 @@ import {
 } from "react-native";
 
 import { useReaderSettingsStore } from '@/stores/readerSettingsStore';
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 import {
@@ -253,6 +253,7 @@ const ReaderView = ({
   useTranslatedTextDirection = false,
 }: ReaderViewProps) => {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const readerSafeAreaInsets = useSafeAreaInsets();
   const readerResizeOpacity = useRef(new Animated.Value(1)).current;
   const previousWindowWidth = useRef(windowWidth);
   const db = useSQLiteContext();
@@ -454,6 +455,7 @@ const ReaderView = ({
   }, [isLandscape]);
   // WebView reference
   const webViewRef = useRef<WebView>(null);
+  const acknowledgedSwitchDestinationRef = useRef<number | null>(null);
   const transition = useReaderSettingsStore((state) => state.transition);
   const { isPaged, syncPageTransition } = usePageTransition({
     webViewRef,
@@ -880,17 +882,43 @@ const textColor = isDark && !colorsCustomized
   }, [blocks, isActive, onPageChange, onPaginationChange, onSwitchAnchorChange]);
 
   useEffect(() => {
-    if (!webViewReady || isPaged) return;
+    // Reader and Translated stay mounted behind each other. Never let a hidden
+    // vertical WebView consume a destination: its highlight animation would
+    // finish before the tab becomes visible. Including isActive retries the
+    // exact same pending destination as soon as this reader comes onscreen.
+    if (!webViewReady || isPaged || !isActive) return;
     syncPageTransition();
     if (!activeModeDestination) return;
-    const frame = requestAnimationFrame(() => {
+    const destinationNonce = activeModeDestination.nonce;
+    const requiresDrawAcknowledgement =
+      activeModeDestination.switchHighlightWordIndex !== undefined ||
+      activeModeDestination.switchHighlightWordProgress !== undefined ||
+      Boolean(activeModeDestination.switchHighlightQuery);
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const deliver = () => {
+      if (cancelled) return;
+      if (
+        requiresDrawAcknowledgement &&
+        acknowledgedSwitchDestinationRef.current === destinationNonce
+      ) return;
+      attempts += 1;
       webViewRef.current?.postMessage(JSON.stringify({
         type: "goToSourcePage",
         ...activeModeDestination,
       }));
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [activeModeDestination, isPaged, syncPageTransition, webViewReady]);
+      if (requiresDrawAcknowledgement && attempts < 40) {
+        retryTimer = setTimeout(deliver, 200);
+      }
+    };
+    const frame = requestAnimationFrame(deliver);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [activeModeDestination, isActive, isPaged, syncPageTransition, webViewReady]);
 
 
   const sendReaderSettings = useCallback(() => {
@@ -1637,7 +1665,8 @@ const textColor = isDark && !colorsCustomized
                 resolvedTarget,
                 pending.switchHighlightWordIndex,
                 pending.switchHighlightWordProgress,
-                pending.switchHighlightQuery
+                pending.switchHighlightQuery,
+                pending.nonce
               );
               if (!didDraw && highlightAttempt < 12) {
                 requestAnimationFrame(drawDestinationHighlight);
@@ -1812,10 +1841,11 @@ const textColor = isDark && !colorsCustomized
           message.paragraphSpacing + 'em'
         );
 
-        // Vertical scrolling keeps a stable top and bottom inset so content
-        // never shifts beneath the reader chrome. The adjustable vertical
-        // margin presets are reserved for horizontal, page-based reading.
-        const verticalMargin = 24;
+        const verticalMargin = {
+          compact: 12,
+          comfortable: 24,
+          relaxed: 48
+        }[message.verticalMarginPreset] || 24;
         const horizontalMargin = {
           compact: 14,
           comfortable: 28,
@@ -2268,6 +2298,11 @@ const textColor = isDark && !colorsCustomized
         return;
       }
 
+      if (data.type === "switchHighlightDrawn" && typeof data.nonce === "number") {
+        acknowledgedSwitchDestinationRef.current = data.nonce;
+        return;
+      }
+
       if (data.type === "switchAnchor" && typeof data.blockId === "string") {
         const wordIndex = typeof data.wordIndex === "number"
           ? Math.max(0, data.wordIndex)
@@ -2436,6 +2471,8 @@ const textColor = isDark && !colorsCustomized
       ? undefined
       : activeItem === "ai"
       ? ["40%", "90%"]
+      : activeItem === "settings"
+      ? ["82%"]
       : activeItem === "font"
       ? ["40%", "88%"]
       : usesFixedSettingsSheet
@@ -2579,10 +2616,14 @@ const textColor = isDark && !colorsCustomized
           style={{
             flex: 1,
             backgroundColor,
-            // Keep the paged reading frame stable whether controls are shown
-            // or hidden; changing its origin during a page turn is visibly
-            // jarring and can make text appear to blink.
-            paddingTop: isPaged && !isLandscape ? headerOverlayHeight : 0,
+            // Keep the pager geometry independent from toolbar visibility.
+            // In compact mode the toolbar overlays the page, like a reading
+            // app, so tapping the page never causes repagination or page loss.
+            paddingTop: isPaged && !isLandscape
+              ? verticalMarginPreset === "compact"
+                ? readerSafeAreaInsets.top
+                : headerOverlayHeight
+              : 0,
           }}
         >
           <View className="flex-1">
@@ -2590,6 +2631,7 @@ const textColor = isDark && !colorsCustomized
             <View style={StyleSheet.absoluteFill}>
               <HorizontalReaderPager
                 blocks={blocks}
+                isActive={isActive}
                 userHighlights={pagerHighlights}
                 onSelectionHighlightRequest={(highlights) => {
                   pendingPagerHighlightRef.current = highlights;
@@ -2662,6 +2704,7 @@ const textColor = isDark && !colorsCustomized
             style={StyleSheet.absoluteFill}
           >
           <WebView
+            key={`reader-web-runtime-20260828-2-${annotationScope}`}
             ref={webViewRef}
 
           source={webViewSource}
@@ -2820,7 +2863,8 @@ const textColor = isDark && !colorsCustomized
                 block,
                 wordIndex,
                 wordProgress,
-                translatedQuery
+                translatedQuery,
+                destinationNonce
               ) {
                 if (!block) return false;
                 const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
@@ -2869,15 +2913,38 @@ const textColor = isDark && !colorsCustomized
                   selected.node,
                   selected.match.index + selected.match[0].length
                 );
-                const didDraw = drawReaderSwitchHighlight(range, true);
                 if (window.__readerTransition === 'scroll') {
                   const rect = range.getBoundingClientRect();
                   const desiredTop = readerVisibleTopBoundary() + 8;
-                  window.scrollBy({
-                    top: rect.top - desiredTop,
-                    left: 0,
-                    behavior: 'auto'
+                  const adjustment = rect.top - desiredTop;
+                  if (Math.abs(adjustment) > 0.5) {
+                    window.scrollBy({
+                      top: adjustment,
+                      left: 0,
+                      behavior: 'auto'
+                    });
+                  }
+                  // Scrolling emits an event that clears transient markers.
+                  // Paint only after WebKit has committed the destination,
+                  // otherwise the highlight deletes itself on first open.
+                  requestAnimationFrame(function() {
+                    requestAnimationFrame(function() {
+                      if (drawReaderSwitchHighlight(range, true)) {
+                        window.ReactNativeWebView.postMessage(JSON.stringify({
+                          type: 'switchHighlightDrawn',
+                          nonce: destinationNonce
+                        }));
+                      }
+                    });
                   });
+                  return true;
+                }
+                const didDraw = drawReaderSwitchHighlight(range, true);
+                if (didDraw) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'switchHighlightDrawn',
+                    nonce: destinationNonce
+                  }));
                 }
                 return didDraw;
               };
@@ -4113,7 +4180,7 @@ const textColor = isDark && !colorsCustomized
 
           {activeItem !== "ai" && <BottomSheetDragIndicator />}
 
-          {activeItem === "ai" ? (
+          {activeItem === "ai" || activeItem === "settings" ? (
             renderBottomSheetContent()
           ) : (
             <BottomSheetContent>

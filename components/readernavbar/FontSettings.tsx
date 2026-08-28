@@ -180,7 +180,7 @@ export default function FontSettings() {
             })}
           </View>
           <Text style={styles.presetDescription}>
-            Comfortable uses balanced 1.6× line spacing and consistent paragraph gaps.
+            Comfortable uses balanced 1.5× line spacing with book-style paragraph rhythm.
           </Text>
         </View>
 

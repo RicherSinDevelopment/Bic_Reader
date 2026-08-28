@@ -760,7 +760,6 @@ export default function HorizontalReaderPager({
   const readyReportedRef = useRef(false);
   const navigatedDestinationKeyRef = useRef<string | null>(null);
   const [paginationAnchor, setPaginationAnchor] = useState<PageAnchor>();
-  const viewportFrameRef = useRef<number | null>(null);
   const pendingViewportRestoreRef = useRef(false);
   const [pagerWarm, setPagerWarm] = useState(false);
   const [viewablePageIndex, setViewablePageIndex] = useState(0);
@@ -808,11 +807,6 @@ export default function HorizontalReaderPager({
   const { width, height: usableHeight } = viewport;
   const insets = useSafeAreaInsets();
 
-  useEffect(() => () => {
-    if (viewportFrameRef.current !== null) {
-      cancelAnimationFrame(viewportFrameRef.current);
-    }
-  }, []);
   const reportReady = useCallback(() => {
     setPagerWarm(true);
     if (readyReportedRef.current) return;
@@ -1704,14 +1698,12 @@ export default function HorizontalReaderPager({
 
         // Width and height must commit together. Updating them independently
         // paginates the book twice and exposes a stretched intermediate page.
-        if (viewportFrameRef.current !== null) {
-          cancelAnimationFrame(viewportFrameRef.current);
-        }
+        // React batches the single update, so committing here synchronously is
+        // safe: the FlatList key (width + height) and every page measurement
+        // switch to the rotated geometry in the same commit, leaving no frame
+        // where the pager is laid out at the old width inside the new frame.
         pendingViewportRestoreRef.current = true;
-        viewportFrameRef.current = requestAnimationFrame(() => {
-          setViewport({ width: nextWidth, height: nextHeight });
-          viewportFrameRef.current = null;
-        });
+        setViewport({ width: nextWidth, height: nextHeight });
       }}
       onTouchStart={(event) => {
         touchStart.current = {

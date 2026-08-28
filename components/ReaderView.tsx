@@ -32,6 +32,7 @@ import React, {
 } from "react";
 import {
   Animated,
+  Easing,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -452,15 +453,22 @@ const ReaderView = ({
     if (Math.abs(previousWindowWidth.current - windowWidth) < 1) return;
     previousWindowWidth.current = windowWidth;
     readerResizeOpacity.stopAnimation();
-    readerResizeOpacity.setValue(0.08);
-    const timer = setTimeout(() => {
-      Animated.timing(readerResizeOpacity, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }).start();
-    }, 100);
-    return () => clearTimeout(timer);
+    // Keep the content visible during the rotation. The repagination and the
+    // pager remount resolve within a frame or two of the new width committing,
+    // so a shallow, fast dip is enough to mask it without the reader appearing
+    // to fade to a blank screen.
+    readerResizeOpacity.setValue(0.55);
+    const animation = Animated.timing(readerResizeOpacity, {
+      toValue: 1,
+      duration: 140,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => {
+      animation.stop();
+      readerResizeOpacity.setValue(1);
+    };
   }, [readerResizeOpacity, windowWidth]);
   const [modeHandoff, setModeHandoff] = useState<{
     isPaged: boolean;

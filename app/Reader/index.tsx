@@ -206,7 +206,7 @@ function BookPageSkeleton() {
 }
 
 export default function ReaderScreen() {
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const translatedActionWidth = Math.min(
     36,
     Math.max(28, (windowWidth / 2 - 108) / 3),
@@ -274,7 +274,12 @@ export default function ReaderScreen() {
     nonce: number;
   } | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
-  const [isLandscape, setIsLandscape] = useState(false);
+  // Derive landscape from the live window dimensions instead of a separately
+  // debounced orientation event. The native layout rotates at the same moment
+  // windowWidth/windowHeight change, so the chrome (header, status bar, content
+  // offsets) now updates in the exact same render as the rotation instead of a
+  // visible frame later.
+  const isLandscape = windowWidth > windowHeight;
   const [readerBlocks, setReaderBlocks] = useState<ExtractedPdfBlock[]>([]);
   const [readerPageSizes, setReaderPageSizes] = useState<
     Record<number, PdfPageSize>
@@ -368,7 +373,6 @@ export default function ReaderScreen() {
     headerVisibility.stopAnimation();
     headerVisibility.setValue(landscape ? 0 : 1);
     if (!landscape) setReaderChromeHidden(false);
-    setIsLandscape(landscape);
   }, [headerVisibility]);
   useScreenRotation(handleOrientationChange);
 

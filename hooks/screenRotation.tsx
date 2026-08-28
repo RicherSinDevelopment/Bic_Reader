@@ -6,20 +6,16 @@ export function useScreenRotation(
   setIsLandscape: (value: boolean) => void
 ) {
   const lastLandscape = useRef<boolean | null>(null);
-  const orientationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Commit the orientation change immediately. The native viewport has already
+  // rotated by the time the orientation event arrives, so deferring the state
+  // update (e.g. with setTimeout) only leaves React rendering with stale
+  // isLandscape values against the already-rotated layout — the source of the
+  // double-layout "jump" during rotation.
   const updateLandscape = useCallback((value: boolean) => {
     if (lastLandscape.current === value) return;
-
-    if (orientationTimer.current) clearTimeout(orientationTimer.current);
-    const commit = () => {
-      lastLandscape.current = value;
-      setIsLandscape(value);
-      orientationTimer.current = null;
-    };
-
-    if (lastLandscape.current === null) commit();
-    else orientationTimer.current = setTimeout(commit, 100);
+    lastLandscape.current = value;
+    setIsLandscape(value);
   }, [setIsLandscape]);
 
   const disableRotation = useReaderSettingsStore(
@@ -64,10 +60,6 @@ export function useScreenRotation(
 
     return () => {
       isActive = false;
-      if (orientationTimer.current) {
-        clearTimeout(orientationTimer.current);
-        orientationTimer.current = null;
-      }
       subscription?.remove();
 
       if (!disableRotation) {

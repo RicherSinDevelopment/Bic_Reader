@@ -230,6 +230,15 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
     </section>`).join("\n");
 }
 
+// The reader WebView keeps only a sliding window of the book in its DOM. A
+// 1000-page document otherwise balloons to tens of thousands of DOM elements,
+// which re-layouts on every rotation (and can kill the WKWebView content
+// process). These bounds control how far ahead content is appended and how far
+// behind the JS prunes it.
+const APPEND_AHEAD_PAGES = 220;
+const APPEND_BEHIND_PAGES = 100;
+const PRUNE_BEHIND_PAGES = 160;
+
 const ReaderView = ({
   documentId,
   annotationScope,
@@ -449,27 +458,36 @@ const ReaderView = ({
     transition,
   });
 
+  // Fade the mask back in only once the pager has committed its repaginated
+  // layout. A shallow hold is kept during the (coalesced) repagination; a
+  // fallback timer guards against the pager not remounting.
+  const handlePagerViewportSettled = useCallback(() => {
+    readerResizeOpacity.stopAnimation();
+    Animated.timing(readerResizeOpacity, {
+      toValue: 1,
+      duration: 160,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [readerResizeOpacity]);
+
   useLayoutEffect(() => {
     if (Math.abs(previousWindowWidth.current - windowWidth) < 1) return;
     previousWindowWidth.current = windowWidth;
     readerResizeOpacity.stopAnimation();
-    // Keep the content visible during the rotation. The repagination and the
-    // pager remount resolve within a frame or two of the new width committing,
-    // so a shallow, fast dip is enough to mask it without the reader appearing
-    // to fade to a blank screen.
-    readerResizeOpacity.setValue(0.55);
-    const animation = Animated.timing(readerResizeOpacity, {
-      toValue: 1,
-      duration: 140,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    });
-    animation.start();
-    return () => {
-      animation.stop();
+    // The vertical WebView reflows natively; a mask would only dim it for no
+    // reason. Only the pager (which remounts and repaginates) needs masking.
+    if (!isPaged) {
       readerResizeOpacity.setValue(1);
-    };
-  }, [readerResizeOpacity, windowWidth]);
+      return;
+    }
+    readerResizeOpacity.setValue(0.55);
+    const fallback = setTimeout(() => {
+      readerResizeOpacity.stopAnimation();
+      readerResizeOpacity.setValue(1);
+    }, 900);
+    return () => clearTimeout(fallback);
+  }, [isPaged, readerResizeOpacity, windowWidth]);
   const [modeHandoff, setModeHandoff] = useState<{
     isPaged: boolean;
     destination: ReaderDestination | null;
@@ -521,7 +539,20 @@ const ReaderView = ({
   useEffect(() => {
     if (!webViewReady) return;
     const revision = ++annotationDeliveryRevisionRef.current;
-    const remaining = blocks.filter((block) => !sentBlockIds.current.has(block.id));
+    // Only send the window of the book around the current position (plus any
+    // pending navigation target). The JS prunes sections far behind the view;
+    // this bounds the DOM so large books stay responsive on rotation.
+    const anchorPage = Math.max(1, currentSourcePage || 1);
+    const destinationPage = activeModeDestination?.page;
+    const lowAnchor = Math.min(anchorPage, destinationPage ?? anchorPage);
+    const highAnchor = Math.max(anchorPage, destinationPage ?? anchorPage);
+    const windowStart = Math.max(1, lowAnchor - APPEND_BEHIND_PAGES);
+    const windowEnd = highAnchor + APPEND_AHEAD_PAGES;
+    const remaining = blocks.filter((block) =>
+      block.page >= windowStart &&
+      block.page <= windowEnd &&
+      !sentBlockIds.current.has(block.id)
+    );
     const destinationBlocks = activeModeDestination
       ? remaining.filter((block) => activeModeDestination.blockId
           ? block.id === activeModeDestination.blockId
@@ -530,10 +561,15 @@ const ReaderView = ({
     const appended = destinationBlocks.length
       ? destinationBlocks.slice(0, 220)
       : remaining.slice(0, 220);
-    const highestAvailablePage = blocks.reduce(
-      (highest, block) => Math.max(highest, block.page),
-      0,
-    );
+    let highestAvailablePage = 0;
+    blocks.forEach((block) => {
+      if (
+        sentBlockIds.current.has(block.id) &&
+        block.page > highestAvailablePage
+      ) {
+        highestAvailablePage = block.page;
+      }
+    });
     const hasMore =
       highestAvailablePage < (sourcePageCount ?? pageCount) ||
       remaining.length > appended.length;
@@ -566,6 +602,7 @@ const ReaderView = ({
     appendPass,
     activeModeDestination,
     blocks,
+    currentSourcePage,
     pageCount,
     pagerHighlights,
     readerNotes,
@@ -2183,6 +2220,19 @@ const textColor = isDark && !colorsCustomized
         return;
       }
 
+      if (data.type === "prunedPages" && Array.isArray(data.pages)) {
+        // The WebView removed sections far behind the viewport to keep the DOM
+        // bounded. Drop those blocks from the sent set so they can be
+        // re-appended if the reader scrolls back into them.
+        const prunedPages = new Set(data.pages.map(Number));
+        if (prunedPages.size) {
+          blocks.forEach((block) => {
+            if (prunedPages.has(block.page)) sentBlockIds.current.delete(block.id);
+          });
+        }
+        return;
+      }
+
       if (data.type === "readerSwipeStart") {
         hideToolbar();
         return;
@@ -2704,6 +2754,7 @@ const textColor = isDark && !colorsCustomized
                 }}
                 onReady={onReady}
                 onSwipeStart={hideToolbar}
+                onViewportSettled={handlePagerViewportSettled}
               />
             </View>
           )}
@@ -3680,26 +3731,25 @@ const textColor = isDark && !colorsCustomized
                 );
                 if (!sections.length) return lastReportedSourcePage || 1;
 
-                if (window.__readerTransition !== 'scroll') {
-                  const edgeX = document.documentElement.dir === 'rtl'
-                    ? window.innerWidth - 24
-                    : 24;
-                  const hit = document.elementFromPoint(edgeX, 36) ||
-                    document.elementFromPoint(window.innerWidth / 2, 36);
-                  const visibleSection = hit?.closest?.('[data-source-page-section]');
-                  if (visibleSection) {
-                    return Number(visibleSection.dataset.sourcePageSection) ||
-                      lastReportedSourcePage || 1;
-                  }
+                const edgeX = document.documentElement.dir === 'rtl'
+                  ? window.innerWidth - 24
+                  : 24;
+                const anchorY = Math.min(48, window.innerHeight * 0.1);
+
+                // Cheap hit test at the reading area's top edge. Accurate for
+                // the common case, and it avoids forcing a layout pass over
+                // every section — on long books that ran on every scroll
+                // report and again on every orientation change.
+                const hit = document.elementFromPoint(edgeX, anchorY) ||
+                  document.elementFromPoint(window.innerWidth / 2, anchorY);
+                const hitSection = hit?.closest?.('[data-source-page-section]');
+                if (hitSection) {
+                  return Number(hitSection.dataset.sourcePageSection) ||
+                    lastReportedSourcePage || 1;
                 }
 
-                // Use the reading area's top edge as the page boundary. An
-                // elementFromPoint probe farther down can still hit the prior
-                // section when a page starts with whitespace or a divider.
-                const anchorY = Math.min(48, window.innerHeight * 0.1);
-                // Adjacent sections may overlap because their first/last text
-                // margins collapse. Choose the latest section that has crossed
-                // the anchor, not the first section whose rectangle contains it.
+                // Fallback for pages that start with whitespace or a divider:
+                // choose the latest section whose top has crossed the anchor.
                 let section = null;
                 sections.forEach(function(item) {
                   if (item.getBoundingClientRect().top <= anchorY) {
@@ -3830,6 +3880,7 @@ const textColor = isDark && !colorsCustomized
               window.addEventListener('resize', function() {
                 setTimeout(function() {
                   refreshReaderPages();
+                  pruneDistantSections();
                   if (readerGuideMode) {
                     if (readerGuideMode === 'word') {
                       if (currentWordNode && currentWordStart >= 0) {
@@ -3955,6 +4006,61 @@ const textColor = isDark && !colorsCustomized
                 }
               }, { passive: true });
 
+              function pruneDistantSections() {
+                // Only the vertical (native-scroll) reader can prune — the
+                // paged reader needs the full document for its column flow.
+                if (window.__readerTransition !== 'scroll') return;
+                const sections = document.querySelectorAll(
+                  '[data-source-page-section]'
+                );
+                if (sections.length < 300) return;
+                const probeY = Math.min(48, window.innerHeight * 0.1);
+                const hit = document.elementFromPoint(
+                  Math.max(1, window.innerWidth / 2),
+                  probeY
+                );
+                const visibleSection = hit?.closest?.(
+                  '[data-source-page-section]'
+                );
+                const currentPage = Number(
+                  visibleSection?.dataset.sourcePageSection
+                ) || 0;
+                if (!currentPage) return;
+
+                const minKeepPage = Math.max(
+                  1,
+                  currentPage - ${PRUNE_BEHIND_PAGES}
+                );
+                const anchorTop = visibleSection
+                  ? visibleSection.getBoundingClientRect().top
+                  : null;
+
+                const prunedPages = [];
+                sections.forEach(function(section) {
+                  const page = Number(section.dataset.sourcePageSection);
+                  if (page < minKeepPage) {
+                    prunedPages.push(page);
+                    section.remove();
+                  }
+                });
+                if (!prunedPages.length) return;
+
+                // Keep the visible content from jumping when the sections
+                // above it are removed.
+                if (visibleSection && anchorTop !== null) {
+                  const nextTop = visibleSection.getBoundingClientRect().top;
+                  const delta = nextTop - anchorTop;
+                  if (Math.abs(delta) > 0.5) {
+                    window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
+                  }
+                }
+
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'prunedPages',
+                  pages: prunedPages
+                }));
+              }
+
               let scrollTimer = null;
 
               window.addEventListener(
@@ -3998,6 +4104,8 @@ const textColor = isDark && !colorsCustomized
                         );
 
                         reportSwitchAnchor();
+
+                        pruneDistantSections();
 
                         scrollTimer = null;
 

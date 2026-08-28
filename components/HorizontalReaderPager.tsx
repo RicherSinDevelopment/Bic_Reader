@@ -107,6 +107,7 @@ type Props = {
   onReaderReveal?: () => void;
   onReady?: () => void;
   onSwipeStart?: () => void;
+  onViewportSettled?: () => void;
 };
 
 const horizontalReaderMenuItems = [
@@ -752,6 +753,7 @@ export default function HorizontalReaderPager({
   onReaderReveal,
   onReady,
   onSwipeStart,
+  onViewportSettled,
 }: Props) {
   const isRtl = readingDirection === "rtl";
   const pagerRef = useRef<FlatList<Segment[]>>(null);
@@ -760,6 +762,7 @@ export default function HorizontalReaderPager({
   const readyReportedRef = useRef(false);
   const navigatedDestinationKeyRef = useRef<string | null>(null);
   const [paginationAnchor, setPaginationAnchor] = useState<PageAnchor>();
+  const viewportFrameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingViewportRestoreRef = useRef(false);
   const [pagerWarm, setPagerWarm] = useState(false);
   const [viewablePageIndex, setViewablePageIndex] = useState(0);
@@ -806,6 +809,13 @@ export default function HorizontalReaderPager({
   }));
   const { width, height: usableHeight } = viewport;
   const insets = useSafeAreaInsets();
+
+  useEffect(() => () => {
+    if (viewportFrameRef.current !== null) {
+      clearTimeout(viewportFrameRef.current);
+      viewportFrameRef.current = null;
+    }
+  }, []);
 
   const reportReady = useCallback(() => {
     setPagerWarm(true);
@@ -1027,7 +1037,9 @@ export default function HorizontalReaderPager({
 
     // The keyed pager now has one consistent set of landscape or portrait
     // measurements and the preserved text anchor is restored synchronously.
-  }, [pages, preservedViewportPage, reportPageChange, width]);
+    // Signal the parent so it can fade its resize mask back in exactly now.
+    onViewportSettled?.();
+  }, [onViewportSettled, pages, preservedViewportPage, reportPageChange, width]);
 
   useLayoutEffect(() => {
     if (!destination || !pages.length) return;
@@ -1696,14 +1708,19 @@ export default function HorizontalReaderPager({
         const meaningfulHeightChange = Math.abs(nextHeight - viewport.height) > 80;
         if (!widthChanged && !meaningfulHeightChange) return;
 
-        // Width and height must commit together. Updating them independently
-        // paginates the book twice and exposes a stretched intermediate page.
-        // React batches the single update, so committing here synchronously is
-        // safe: the FlatList key (width + height) and every page measurement
-        // switch to the rotated geometry in the same commit, leaving no frame
-        // where the pager is laid out at the old width inside the new frame.
+        // A rotation fires several onLayout passes in quick succession (frame
+        // resize, chrome collapse, status bar). Repaginating the book once,
+        // after the viewport settles, keeps long documents from being fully
+        // re-paginated multiple times on the JS thread while the screen
+        // rotates — the sequence that freezes the app on large books.
+        if (viewportFrameRef.current !== null) {
+          clearTimeout(viewportFrameRef.current);
+        }
         pendingViewportRestoreRef.current = true;
-        setViewport({ width: nextWidth, height: nextHeight });
+        viewportFrameRef.current = setTimeout(() => {
+          viewportFrameRef.current = null;
+          setViewport({ width: nextWidth, height: nextHeight });
+        }, 80);
       }}
       onTouchStart={(event) => {
         touchStart.current = {

@@ -180,7 +180,7 @@ export default function Profile() {
                 <Pressable
                   accessibilityRole="button"
                   disabled={isSubscriptionLoading}
-                  onPress={() => router.push('/onboarding/premium')}
+                  onPress={() => router.push({ pathname: '/onboarding/premium', params: { source: 'app' } })}
                   style={({ pressed }) => [
                     styles.upgradeButton,
                     isSubscriptionLoading && styles.saveButtonDisabled,

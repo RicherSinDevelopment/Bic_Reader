@@ -18,8 +18,6 @@ export function useScreenRotation(
       orientationTimer.current = null;
     };
 
-    // Apply the initial state immediately. During rotation, wait briefly for
-    // the native viewport to settle so the Reader paginates only once.
     if (lastLandscape.current === null) commit();
     else orientationTimer.current = setTimeout(commit, 100);
   }, [setIsLandscape]);

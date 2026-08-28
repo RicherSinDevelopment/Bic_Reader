@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -30,6 +30,8 @@ const premiumBenefits = [
 const freeBenefits = ['Up to 5 PDFs', 'Reader Mode', 'Reading customization', 'Highlights'];
 
 export default function PremiumOnboardingScreen() {
+  const { source } = useLocalSearchParams<{ source?: string }>();
+  const isOnboardingFlow = source !== 'app';
   const { session } = useAuth();
   const {
     isLoading: isMembershipLoading,
@@ -203,9 +205,11 @@ export default function PremiumOnboardingScreen() {
             {PRIVACY_URL ? <Pressable onPress={() => void Linking.openURL(PRIVACY_URL)}><Text style={styles.footerLink}>Privacy</Text></Pressable> : null}
           </View>
 
-          <View style={styles.pagination} accessibilityLabel="Onboarding page 5 of 5">
-            <View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} /><View style={styles.activeDot} />
-          </View>
+          {isOnboardingFlow ? (
+            <View style={styles.pagination} accessibilityLabel="Onboarding page 5 of 5">
+              <View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} /><View style={styles.dot} /><View style={styles.activeDot} />
+            </View>
+          ) : null}
         </View>
       </View>
     </SafeAreaView>

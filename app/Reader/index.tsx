@@ -362,7 +362,15 @@ export default function ReaderScreen() {
   } =
     useSwitchHighlight(readerBlocks, readerPageSizes);
 
-  useScreenRotation(setIsLandscape);
+  const handleOrientationChange = useCallback((landscape: boolean) => {
+    // Restore portrait chrome in the same React batch as orientation. A
+    // separate follow-up effect produced a visible hidden-then-shown frame.
+    headerVisibility.stopAnimation();
+    headerVisibility.setValue(landscape ? 0 : 1);
+    if (!landscape) setReaderChromeHidden(false);
+    setIsLandscape(landscape);
+  }, [headerVisibility]);
+  useScreenRotation(handleOrientationChange);
 
   activeTranslationLanguage.current = translationLanguage?.code ?? null;
   latestReaderBlocks.current = readerBlocks;
@@ -964,8 +972,13 @@ export default function ReaderScreen() {
   }, [db, pdf, pdfId]);
 
   useEffect(() => {
+    if (isLandscape) {
+      headerVisibility.stopAnimation();
+      headerVisibility.setValue(0);
+      return;
+    }
     const animation = Animated.timing(headerVisibility, {
-      toValue: isLandscape || readerChromeHidden ? 0 : 1,
+      toValue: readerChromeHidden ? 0 : 1,
       duration: 140,
       useNativeDriver: true,
     });
@@ -1594,7 +1607,7 @@ export default function ReaderScreen() {
         animated
         hidden={
           (activeTab === "reader" || activeTab === "translated") &&
-          readerChromeHidden
+          (isLandscape || readerChromeHidden)
         }
         style="auto"
       />

@@ -211,7 +211,7 @@ const HomePage = () => {
     onClose={() => setShowLibraryLimit(false)}
     onUpgrade={() => {
       setShowLibraryLimit(false);
-      router.push('/onboarding/premium');
+      router.push({ pathname: '/onboarding/premium', params: { source: 'app' } });
     }}
     visible={showLibraryLimit}
   />

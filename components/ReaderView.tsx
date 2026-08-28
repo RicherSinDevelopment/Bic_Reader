@@ -262,20 +262,6 @@ const ReaderView = ({
   const router = useRouter();
   const [fontAssets] = useAssets([Lato_700Bold, SourceSans3_400Regular]);
 
-  useLayoutEffect(() => {
-    if (Math.abs(previousWindowWidth.current - windowWidth) < 1) return;
-    previousWindowWidth.current = windowWidth;
-    readerResizeOpacity.stopAnimation();
-    readerResizeOpacity.setValue(0.08);
-    const timer = setTimeout(() => {
-      Animated.timing(readerResizeOpacity, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }).start();
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [readerResizeOpacity, windowWidth]);
   const [latoBoldBase64, setLatoBoldBase64] = useState<string | null>(null);
   const [sourceSansBase64, setSourceSansBase64] = useState<string | null>(null);
   const [activeItem, setActiveItem] =
@@ -461,6 +447,21 @@ const ReaderView = ({
     webViewRef,
     transition,
   });
+
+  useLayoutEffect(() => {
+    if (Math.abs(previousWindowWidth.current - windowWidth) < 1) return;
+    previousWindowWidth.current = windowWidth;
+    readerResizeOpacity.stopAnimation();
+    readerResizeOpacity.setValue(0.08);
+    const timer = setTimeout(() => {
+      Animated.timing(readerResizeOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }).start();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [readerResizeOpacity, windowWidth]);
   const [modeHandoff, setModeHandoff] = useState<{
     isPaged: boolean;
     destination: ReaderDestination | null;
@@ -4196,7 +4197,7 @@ const textColor = isDark && !colorsCustomized
           onClose={() => setShowAiPremiumPrompt(false)}
           onUpgrade={() => {
             setShowAiPremiumPrompt(false);
-            router.push('/onboarding/premium');
+            router.push({ pathname: '/onboarding/premium', params: { source: 'app' } });
           }}
           visible={showAiPremiumPrompt}
         />

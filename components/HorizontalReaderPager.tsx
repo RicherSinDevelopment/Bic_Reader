@@ -457,14 +457,20 @@ function HorizontalSelectablePage({
         ) {
           onSwitchHighlightReady?.();
         } else if (message.type === "guideLines" && Array.isArray(message.lines)) {
-          onGuideLines?.(message.lines.filter((line): line is GuideLine =>
-            typeof line?.left === "number" && typeof line.top === "number" &&
-            typeof line.width === "number" && typeof line.height === "number"
+          onGuideLines?.(message.lines.filter((line: unknown): line is GuideLine =>
+            typeof line === "object" && line !== null &&
+            typeof (line as GuideLine).left === "number" &&
+            typeof (line as GuideLine).top === "number" &&
+            typeof (line as GuideLine).width === "number" &&
+            typeof (line as GuideLine).height === "number"
           ));
         } else if (message.type === "guideWordRects" && Array.isArray(message.rects)) {
-          onGuideWordRects?.(message.rects.filter((rect): rect is GuideLine =>
-            typeof rect?.left === "number" && typeof rect.top === "number" &&
-            typeof rect.width === "number" && typeof rect.height === "number"
+          onGuideWordRects?.(message.rects.filter((rect: unknown): rect is GuideLine =>
+            typeof rect === "object" && rect !== null &&
+            typeof (rect as GuideLine).left === "number" &&
+            typeof (rect as GuideLine).top === "number" &&
+            typeof (rect as GuideLine).width === "number" &&
+            typeof (rect as GuideLine).height === "number"
           ), message.target && typeof message.target.blockId === "string" &&
             typeof message.target.offset === "number" && typeof message.target.length === "number"
             ? message.target : undefined);
@@ -487,6 +493,38 @@ function HorizontalSelectablePage({
   />;
 }
 
+const MemoizedHorizontalSelectablePage = React.memo(
+  HorizontalSelectablePage,
+  (previous, next) =>
+    previous.page === next.page &&
+    previous.userHighlights === next.userHighlights &&
+    previous.userNotes === next.userNotes &&
+    previous.spokenWordHighlight === next.spokenWordHighlight &&
+    previous.searchHighlight === next.searchHighlight &&
+    previous.switchHighlight === next.switchHighlight &&
+    previous.switchHighlightColor === next.switchHighlightColor &&
+    previous.displayText === next.displayText &&
+    previous.readingDirection === next.readingDirection &&
+    previous.fontFamily === next.fontFamily &&
+    previous.latoBoldBase64 === next.latoBoldBase64 &&
+    previous.sourceSansBase64 === next.sourceSansBase64 &&
+    previous.fontSize === next.fontSize &&
+    previous.lineHeight === next.lineHeight &&
+    previous.letterSpacing === next.letterSpacing &&
+    previous.wordSpacing === next.wordSpacing &&
+    previous.bold === next.bold &&
+    previous.automaticHyphenation === next.automaticHyphenation &&
+    previous.backgroundColor === next.backgroundColor &&
+    previous.textColor === next.textColor &&
+    previous.bottomPadding === next.bottomPadding &&
+    previous.topContentInset === next.topContentInset &&
+    previous.guideWord === next.guideWord &&
+    previous.guideActive === next.guideActive &&
+    previous.readerPageNumber === next.readerPageNumber &&
+    previous.pageTopMargin === next.pageTopMargin &&
+    previous.pageBottomMargin === next.pageBottomMargin,
+);
+
 function buildPages(
   blocks: ExtractedPdfBlock[],
   charactersPerLine: number,
@@ -494,7 +532,6 @@ function buildPages(
   baseLineHeight: number,
   baseFontSize: number,
   paragraphSpacing: number,
-  fixedPageAnchor?: PageAnchor,
 ) {
   const pages: Segment[][] = [[]];
   let usedHeight = 0;
@@ -521,10 +558,6 @@ function buildPages(
       runningTitle = block.text.trim();
     }
     let sourceOffset = 0;
-    const fixedOffset = fixedPageAnchor?.blockId === block.id
-      ? Math.max(0, Math.min(block.text.length, fixedPageAnchor.blockOffset))
-      : undefined;
-    let fixedBreakApplied = fixedOffset === undefined;
     const previousKind = blocks[blockIndex - 1]?.kind;
     const sectionOpening = block.kind === "paragraph" && (
       blockIndex === 0 || previousKind === "title" || previousKind === "heading"
@@ -536,14 +569,6 @@ function buildPages(
     const scaledCharactersPerLine = Math.max(8, Math.floor(charactersPerLine / textScale));
 
     while (sourceOffset < block.text.length) {
-      if (!fixedBreakApplied && sourceOffset === fixedOffset) {
-        if (usedHeight > 0) {
-          pages.push([]);
-          usedHeight = 0;
-        }
-        fixedBreakApplied = true;
-      }
-
       let spacingBefore = sourceOffset === 0 && usedHeight > 0
         ? block.kind === "title"
           ? baseFontSize * 1.15
@@ -574,17 +599,6 @@ function buildPages(
       if (end < block.text.length) {
         const breakAt = block.text.lastIndexOf(" ", end);
         if (breakAt > sourceOffset) end = breakAt + 1;
-      }
-      if (
-        !fixedBreakApplied &&
-        fixedOffset !== undefined &&
-        fixedOffset > sourceOffset &&
-        fixedOffset < end
-      ) {
-        // Preserve the current leading word as a real page boundary. Merely
-        // navigating to the page containing it can leave it halfway down the
-        // page after a font-size or spacing change.
-        end = fixedOffset;
       }
       if (end <= sourceOffset) end = Math.min(block.text.length, sourceOffset + available);
 
@@ -637,7 +651,6 @@ function cachedBuildPages(
   baseLineHeight: number,
   baseFontSize: number,
   paragraphSpacing: number,
-  fixedPageAnchor?: PageAnchor,
 ) {
   const key = [
     "framed-pages-v2",
@@ -649,8 +662,6 @@ function cachedBuildPages(
     Math.round(baseLineHeight * 100),
     Math.round(baseFontSize * 100),
     Math.round(paragraphSpacing * 100),
-    fixedPageAnchor?.blockId ?? "no-anchor",
-    fixedPageAnchor?.blockOffset ?? -1,
   ].join(":");
   let entries = paginationCache.get(blocks);
   if (!entries) {
@@ -667,9 +678,8 @@ function cachedBuildPages(
     baseLineHeight,
     baseFontSize,
     paragraphSpacing,
-    fixedPageAnchor,
   );
-  if (entries.size >= 4) {
+  if (entries.size >= 8) {
     const oldestKey = entries.keys().next().value;
     if (oldestKey !== undefined) entries.delete(oldestKey);
   }
@@ -750,8 +760,8 @@ export default function HorizontalReaderPager({
   const readyReportedRef = useRef(false);
   const navigatedDestinationKeyRef = useRef<string | null>(null);
   const [paginationAnchor, setPaginationAnchor] = useState<PageAnchor>();
-  const [containerHeight, setContainerHeight] = useState(0);
-  const heightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewportFrameRef = useRef<number | null>(null);
+  const pendingViewportRestoreRef = useRef(false);
   const [pagerWarm, setPagerWarm] = useState(false);
   const [viewablePageIndex, setViewablePageIndex] = useState(0);
   const [paintedSwitchNonce, setPaintedSwitchNonce] = useState<number | null>(null);
@@ -791,30 +801,18 @@ export default function HorizontalReaderPager({
   const touchStart = useRef({ x: 0, y: 0, time: 0 });
   const hyphenationCache = useRef(new Map<string, string>());
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const [width, setWidth] = useState(windowWidth);
-  const widthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [viewport, setViewport] = useState(() => ({
+    width: windowWidth,
+    height: windowHeight,
+  }));
+  const { width, height: usableHeight } = viewport;
   const insets = useSafeAreaInsets();
 
-  useEffect(() => {
-    if (Math.abs(windowWidth - width) < 1) return;
-    if (widthTimerRef.current) clearTimeout(widthTimerRef.current);
-    widthTimerRef.current = setTimeout(() => {
-      setWidth(windowWidth);
-      widthTimerRef.current = null;
-    }, 100);
-
-    return () => {
-      if (widthTimerRef.current) {
-        clearTimeout(widthTimerRef.current);
-        widthTimerRef.current = null;
-      }
-    };
-  }, [windowWidth, width]);
-
   useEffect(() => () => {
-    if (heightTimerRef.current) clearTimeout(heightTimerRef.current);
+    if (viewportFrameRef.current !== null) {
+      cancelAnimationFrame(viewportFrameRef.current);
+    }
   }, []);
-  const usableHeight = containerHeight || windowHeight;
   const reportReady = useCallback(() => {
     setPagerWarm(true);
     if (readyReportedRef.current) return;
@@ -887,7 +885,6 @@ export default function HorizontalReaderPager({
       baseLineHeight,
       deferredFontSize,
       deferredParagraphSpacing,
-      paginationAnchor,
     ),
     [
       baseLineHeight,
@@ -896,7 +893,6 @@ export default function HorizontalReaderPager({
       deferredFontSize,
       deferredParagraphSpacing,
       pageContentHeight,
-      paginationAnchor,
     ]
   );
 
@@ -1005,32 +1001,59 @@ export default function HorizontalReaderPager({
     if (anchoredPage >= 0) return anchoredPage;
     return 0;
   }, [destination, pages, paginationAnchor]);
+  const destinationNavigationKey = destination ? String(destination.nonce) : null;
+  const destinationIsPending = Boolean(
+    destinationNavigationKey &&
+    navigatedDestinationKeyRef.current !== destinationNavigationKey
+  );
+  const preservedViewportPage = useMemo(() => {
+    // A destination is a one-time navigation command, not permanent pager
+    // state. Once it has been consumed, rotation and repagination must follow
+    // the last visible text anchor instead of replaying the old page number.
+    if (
+      destination &&
+      navigatedDestinationKeyRef.current !== String(destination.nonce)
+    ) return destinationPage;
+    const anchoredPage = pageIndexForAnchor(pages, visiblePageAnchorRef.current);
+    return anchoredPage >= 0
+      ? anchoredPage
+      : Math.max(0, Math.min(pages.length - 1, currentPageRef.current));
+  }, [destination, destinationPage, pages]);
+
+  useLayoutEffect(() => {
+    if (!pendingViewportRestoreRef.current || !pages.length) return;
+
+    pendingViewportRestoreRef.current = false;
+    currentPageRef.current = preservedViewportPage;
+    pagerRef.current?.scrollToOffset({
+      animated: false,
+      offset: preservedViewportPage * width,
+    });
+    reportPageChange(preservedViewportPage);
+
+    // The keyed pager now has one consistent set of landscape or portrait
+    // measurements and the preserved text anchor is restored synchronously.
+  }, [pages, preservedViewportPage, reportPageChange, width]);
+
   useLayoutEffect(() => {
     if (!destination || !pages.length) return;
-    currentPageRef.current = destinationPage;
-    reportPageChange(destinationPage);
-  }, [destination, destinationPage, pages.length, reportPageChange]);
-
-  useEffect(() => {
-    if (!destination || !pages.length) return;
-    // Pagination is rebuilt after the pager receives its measured height and
-    // whenever typography changes. The same destination nonce can therefore
-    // resolve to a different horizontal page; include the resolved layout in
-    // the key so the exact word is repositioned after pagination settles.
-    const navigationKey = [
-      destination.nonce,
-      destinationPage,
-      Math.round(width),
-      Math.round(pageContentHeight),
-    ].join(':');
-    if (navigatedDestinationKeyRef.current === navigationKey) return;
+    if (!destinationIsPending || !destinationNavigationKey) return;
     pagerRef.current?.scrollToOffset({
       animated: false,
       offset: destinationPage * width,
     });
     currentPageRef.current = destinationPage;
-    navigatedDestinationKeyRef.current = navigationKey;
-  }, [destination, destinationPage, pageContentHeight, pages.length, width]);
+    navigatedDestinationKeyRef.current = destinationNavigationKey;
+    reportPageChange(destinationPage);
+  }, [
+    destination,
+    destinationIsPending,
+    destinationNavigationKey,
+    destinationPage,
+    pages.length,
+    reportPageChange,
+    width,
+  ]);
 
   useLayoutEffect(() => {
     if (destination) return;
@@ -1159,7 +1182,7 @@ export default function HorizontalReaderPager({
     );
     if (!pageSegment) return undefined;
     const sourceLocalOffset = activeGuideWord.offset - measurement.segmentStart!;
-    const openingWord = "";
+    const openingWord: string = "";
     const displayedOpeningWord = openingWord ? textForDisplay(openingWord) : "";
     const displayedSegment = openingWord
       ? displayedOpeningWord + textForDisplay(pageSegment.text.slice(openingWord.length))
@@ -1508,7 +1531,7 @@ export default function HorizontalReaderPager({
       : -1;
     const spokenLength = isSpokenTarget ? spokenWordHighlight!.length : 0;
     const headingScale = segment.kind === "title" ? 1.55 : segment.kind === "heading" ? 1.25 : 1;
-    const openingWord = "";
+    const openingWord: string = "";
     const paragraphIndent = segment.paragraphStart
       ? "\u2003"
       : "";
@@ -1672,34 +1695,32 @@ export default function HorizontalReaderPager({
     <View
       style={{ flex: 1, backgroundColor }}
       onLayout={(event) => {
+        const nextWidth = Math.round(event.nativeEvent.layout.width);
         const nextHeight = Math.round(event.nativeEvent.layout.height);
-        // Showing or hiding the iOS status bar changes the reported viewport
-        // by a small amount. Repaginating for that chrome-only change moves
-        // text even though the reader has not changed position. Preserve the
-        // established page geometry; still accept larger changes such as an
-        // orientation change or split-screen resize.
-        const isMeaningfulResize =
-          containerHeight === 0 || Math.abs(nextHeight - containerHeight) > 80;
-        if (nextHeight <= 0 || !isMeaningfulResize) return;
-        if (containerHeight === 0) {
-          setContainerHeight(nextHeight);
-          return;
-        }
+        if (nextWidth <= 0 || nextHeight <= 0) return;
+        const widthChanged = Math.abs(nextWidth - viewport.width) > 1;
+        const meaningfulHeightChange = Math.abs(nextHeight - viewport.height) > 80;
+        if (!widthChanged && !meaningfulHeightChange) return;
 
-        if (heightTimerRef.current) clearTimeout(heightTimerRef.current);
-        heightTimerRef.current = setTimeout(() => {
-          setContainerHeight(nextHeight);
-          heightTimerRef.current = null;
-        }, 100);
+        // Width and height must commit together. Updating them independently
+        // paginates the book twice and exposes a stretched intermediate page.
+        if (viewportFrameRef.current !== null) {
+          cancelAnimationFrame(viewportFrameRef.current);
+        }
+        pendingViewportRestoreRef.current = true;
+        viewportFrameRef.current = requestAnimationFrame(() => {
+          setViewport({ width: nextWidth, height: nextHeight });
+          viewportFrameRef.current = null;
+        });
       }}
-      onTouchStartCapture={(event) => {
+      onTouchStart={(event) => {
         touchStart.current = {
           x: event.nativeEvent.pageX,
           y: event.nativeEvent.pageY,
           time: Date.now(),
         };
       }}
-      onTouchEndCapture={(event) => {
+      onTouchEnd={(event) => {
         const dx = event.nativeEvent.pageX - touchStart.current.x;
         const dy = event.nativeEvent.pageY - touchStart.current.y;
         if (Math.hypot(dx, dy) < 10 && Date.now() - touchStart.current.time < 350) {
@@ -1708,19 +1729,20 @@ export default function HorizontalReaderPager({
       }}
     >
       <FlatList
+        key={`horizontal-pager-${Math.round(width)}-${Math.round(usableHeight)}`}
         ref={pagerRef}
         style={{ flex: 1, backgroundColor }}
         data={pages}
         horizontal
         inverted={isRtl}
         pagingEnabled
-        initialScrollIndex={pages.length ? destinationPage : undefined}
+        initialScrollIndex={pages.length ? preservedViewportPage : undefined}
         bounces={false}
         overScrollMode="never"
         initialNumToRender={1}
-        maxToRenderPerBatch={pagerWarm ? 2 : 1}
+        maxToRenderPerBatch={1}
         windowSize={pagerWarm ? 3 : 1}
-        removeClippedSubviews
+        removeClippedSubviews={Platform.OS === "android"}
         showsHorizontalScrollIndicator={false}
         onViewableItemsChanged={onViewablePagesChanged}
         viewabilityConfig={pageViewabilityConfig}
@@ -1738,7 +1760,12 @@ export default function HorizontalReaderPager({
         }}
         scrollEventThrottle={16}
         onScroll={(event) => {
-          if (!pages.length || width <= 0) return;
+          if (
+            pendingViewportRestoreRef.current ||
+            Math.abs(windowWidth - width) > 1 ||
+            !pages.length ||
+            width <= 0
+          ) return;
           const position = Math.max(
             0,
             Math.min(
@@ -1751,6 +1778,7 @@ export default function HorizontalReaderPager({
           reportPageChange(position);
         }}
         onMomentumScrollEnd={(event) => {
+          if (pendingViewportRestoreRef.current || Math.abs(windowWidth - width) > 1) return;
           const position = Math.max(
             0,
             Math.min(
@@ -1801,7 +1829,7 @@ export default function HorizontalReaderPager({
               </View>
             ) : null}
             <View style={{ position: "absolute", left: horizontalPadding, right: horizontalPadding, top: 0, bottom: 0 }}>
-              <HorizontalSelectablePage
+              <MemoizedHorizontalSelectablePage
                 page={page}
                 userHighlights={userHighlights}
                 userNotes={userNotes}

@@ -52,8 +52,8 @@ export function usePdfLibrary() {
   }, [cloudRevision, refreshPdfs]);
 
   const importPdf = useCallback(
-    async (pickedPdf: PickedPdf) => {
-      const result = await importPickedPdf(db, pickedPdf);
+    async (pickedPdf: PickedPdf, options?: { allowNew?: boolean }) => {
+      const result = await importPickedPdf(db, pickedPdf, options);
 
       if (result.status === "imported") {
         await refreshPdfs();

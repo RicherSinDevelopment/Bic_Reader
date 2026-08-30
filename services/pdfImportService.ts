@@ -12,7 +12,8 @@ const PDF_DIRECTORY_NAME = "pdfs";
 
 export type PdfImportResult =
   | { status: "imported"; pdf: PdfDocument }
-  | { status: "duplicate" };
+  | { status: "duplicate"; pdfId: string }
+  | { status: "limit" };
 
 export function normalizePdfName(name: string) {
   const normalizedName = name
@@ -39,12 +40,17 @@ function getPdfDirectoryUri() {
 export async function importPdf(
   db: SQLiteDatabase,
   pickedPdf: PickedPdf,
+  options: { allowNew?: boolean } = {},
 ): Promise<PdfImportResult> {
   const normalizedName = normalizePdfName(pickedPdf.name);
   const duplicate = await findPdfByNormalizedName(db, normalizedName);
 
   if (duplicate) {
-    return { status: "duplicate" };
+    return { status: "duplicate", pdfId: duplicate.id };
+  }
+
+  if (options.allowNew === false) {
+    return { status: "limit" };
   }
 
   const directoryUri = getPdfDirectoryUri();
@@ -74,6 +80,14 @@ export async function importPdf(
     await insertPdf(db, pdf);
   } catch (error) {
     await FileSystem.deleteAsync(permanentUri, { idempotent: true });
+
+    // Another external-open handler may have inserted the same document after
+    // our initial duplicate check. Resolve that race to the existing record.
+    const racedDuplicate = await findPdfByNormalizedName(db, normalizedName);
+    if (racedDuplicate) {
+      return { status: "duplicate", pdfId: racedDuplicate.id };
+    }
+
     throw error;
   }
 

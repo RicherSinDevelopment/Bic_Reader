@@ -103,6 +103,7 @@ function RootNavigator() {
           name="HomePage"
           options={{ orientation: "portrait" }}
         />
+        <Stack.Screen name="OpenPdf" />
         <Stack.Screen name="Profile" />
         <Stack.Screen name="Reader" />
       </Stack.Protected>

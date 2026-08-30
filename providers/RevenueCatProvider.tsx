@@ -19,6 +19,45 @@ const ENTITLEMENT_ID = process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID ?? 'pro
 
 let isConfigured = false;
 let configuredUserId: string | null = null;
+let isLogHandlerConfigured = false;
+
+function configureRevenueCatLogging() {
+  if (isLogHandlerConfigured) return;
+
+  Purchases.setLogHandler((level, message) => {
+    const formattedMessage = `[RevenueCat] ${message}`;
+    const isEmptyOfferingsConfiguration =
+      message.includes('Error fetching offerings') &&
+      (message.includes('no App Store products registered') ||
+        message.includes('offerings are empty'));
+
+    // RevenueCat reports an empty dashboard Offering at ERROR level. That is
+    // an actionable configuration warning, but it is not an application crash
+    // and should not trigger Expo's development error overlay.
+    if (isEmptyOfferingsConfiguration) {
+      console.warn(formattedMessage);
+      return;
+    }
+
+    switch (level) {
+      case LOG_LEVEL.ERROR:
+        console.error(formattedMessage);
+        break;
+      case LOG_LEVEL.WARN:
+        console.warn(formattedMessage);
+        break;
+      case LOG_LEVEL.INFO:
+        console.info(formattedMessage);
+        break;
+      case LOG_LEVEL.DEBUG:
+      case LOG_LEVEL.VERBOSE:
+        if (__DEV__) console.debug(formattedMessage);
+        break;
+    }
+  });
+
+  isLogHandlerConfigured = true;
+}
 
 type RevenueCatContextValue = {
   error: string | null;
@@ -94,6 +133,7 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
         const userId = session?.user.id ?? null;
 
         if (!isConfigured) {
+          configureRevenueCatLogging();
           Purchases.setLogLevel(__DEV__ ? LOG_LEVEL.DEBUG : LOG_LEVEL.WARN);
           Purchases.configure({ apiKey: API_KEY, ...(userId ? { appUserID: userId } : {}) });
           isConfigured = true;

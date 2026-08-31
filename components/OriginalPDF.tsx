@@ -18,6 +18,7 @@ type OriginalPdfProps = {
   fileSize?: number;
   initialPage?: number;
   onPageChanged?: (page: number, totalPages: number) => void;
+  onReady?: () => void;
   onOutlineChanged?: (outline: PdfOutlineItem[]) => void;
   highlightTarget?: SwitchHighlightTarget | null;
   outlineOnly?: boolean;
@@ -109,6 +110,7 @@ export default function OriginalPDF({
   fileSize,
   initialPage = 1,
   onPageChanged,
+  onReady,
   onOutlineChanged,
   highlightTarget,
   outlineOnly = false,
@@ -174,6 +176,7 @@ export default function OriginalPDF({
       }
     } else if (message.type === "ready") {
       setReady(true);
+      onReady?.();
     } else if (message.type === "pageChanged") {
       onPageChanged?.(Number(message.page), Number(message.totalPages));
     } else if (message.type === "outline") {
@@ -181,7 +184,7 @@ export default function OriginalPDF({
     } else if (message.type === "error") {
       setErrorMessage(String(message.message ?? "Preview unavailable."));
     }
-  }, [onOutlineChanged, onPageChanged, pdfUri, sendToViewer]);
+  }, [onOutlineChanged, onPageChanged, onReady, pdfUri, sendToViewer]);
 
   const source = useMemo(() => html ? { html, baseUrl: "https://bic-reader.local/" } : undefined, [html]);
 

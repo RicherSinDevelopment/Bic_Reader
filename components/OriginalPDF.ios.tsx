@@ -11,6 +11,7 @@ type OriginalPdfProps = {
   fileSize?: number;
   initialPage?: number;
   onPageChanged?: (page: number, totalPages: number) => void;
+  onReady?: () => void;
   onOutlineChanged?: (outline: PdfOutlineItem[]) => void;
   highlightTarget?: SwitchHighlightTarget | null;
   outlineOnly?: boolean;
@@ -45,6 +46,7 @@ export default function OriginalPDF({
   pdfUri,
   initialPage = 1,
   onPageChanged,
+  onReady,
   onOutlineChanged,
   highlightTarget,
   outlineOnly = false,
@@ -82,10 +84,11 @@ export default function OriginalPDF({
     ) => {
       setLoading(false);
       markDocumentReady();
+      onReady?.();
       onOutlineChanged?.(convertOutline(tableContents));
       onPageChanged?.(Math.max(1, initialPage), totalPages);
     },
-    [initialPage, markDocumentReady, onOutlineChanged, onPageChanged],
+    [initialPage, markDocumentReady, onOutlineChanged, onPageChanged, onReady],
   );
 
   if (errorMessage) {

@@ -1,6 +1,8 @@
 import HorizontalReaderPager, {
+  type PageAnchor,
   type ReaderNote,
 } from "@/components/HorizontalReaderPager";
+import { verticalRestoreMessage } from "@/architecture/anchor/VerticalAnchorAdapter";
 import PremiumFeatureModal from "@/components/PremiumFeatureModal";
 import ReaderToolbar, { ReaderBottomNavItem } from "@/components/Readertoolbar";
 
@@ -103,11 +105,13 @@ type ReaderViewProps = {
   onPageChange?: (page: number) => void;
   onPaginationChange?: (currentPage: number, totalPages: number) => void;
   onPageMapChange?: (pageMap: Record<number, number>) => void;
+  onExplicitPageResolved?: (sourcePage: number, anchor: PageAnchor) => void;
   onSwitchAnchorChange?: (
     blockId: string,
     word: string,
     wordIndex: number,
   ) => void;
+  onUserInteraction?: () => void;
   showSwitchHighlight?: boolean;
   onReady?: () => void;
   onToolbarVisibilityChange?: (visible: boolean) => void;
@@ -272,7 +276,9 @@ const ReaderView = ({
   onPageChange,
   onPaginationChange,
   onPageMapChange,
+  onExplicitPageResolved,
   onSwitchAnchorChange,
+  onUserInteraction,
   showSwitchHighlight = false,
   onReady,
   onToolbarVisibilityChange,
@@ -338,13 +344,7 @@ const ReaderView = ({
   const sentBlockIds = useRef(new Set(initialBlocks.map((block) => block.id)));
   const annotationDeliveryRevisionRef = useRef(0);
   const lastSourcePageRef = useRef(1);
-  const modeTextAnchorRef = useRef<{
-    blockId: string;
-    blockOffset: number;
-    wordIndex: number;
-  } | null>(null);
   const [currentSourcePage, setCurrentSourcePage] = useState(1);
-  const recoveryPageRef = useRef<number | null>(null);
   const [webViewReady, setWebViewReady] = useState(false);
   const [appendPass, setAppendPass] = useState(0);
   const [highlightPickerVisible, setHighlightPickerVisible] = useState(false);
@@ -561,52 +561,9 @@ const ReaderView = ({
     }, 900);
     return () => clearTimeout(fallback);
   }, [isPaged, readerResizeOpacity, windowWidth]);
-  const [modeHandoff, setModeHandoff] = useState<{
-    isPaged: boolean;
-    destination: ReaderDestination | null;
-    previousDestinationNonce: number | null;
-  }>(() => ({
-    isPaged,
-    destination: null,
-    previousDestinationNonce: null,
-  }));
-
-  useLayoutEffect(() => {
-    setModeHandoff((current) => {
-      if (current.isPaged === isPaged) return current;
-      const anchor = modeTextAnchorRef.current;
-      return {
-        isPaged,
-        destination: {
-          page: Math.max(1, lastSourcePageRef.current),
-          blockId: anchor?.blockId,
-          // Horizontal pagination uses this offset to resolve the exact segment.
-          searchMatchIndex: anchor?.blockOffset,
-          // Use the same anchor for the temporary handoff marker. Previously
-          // only the vertical destination received a switch-highlight target.
-          switchHighlightOffset: anchor?.blockOffset,
-          // Vertical scrolling uses the word index to restore the precise line.
-          switchHighlightWordIndex: anchor?.wordIndex,
-          nonce: Date.now(),
-        },
-        previousDestinationNonce: destination?.nonce ?? null,
-      };
-    });
-  }, [destination?.nonce, isPaged]);
-
-  const modeHandoffReady = modeHandoff.isPaged === isPaged;
-
-  // A destination that arrives after the mode switch is explicit navigation
-  // (search, contents, or page picker) and must supersede the handoff. An old
-  // destination that was already consumed must not pull the new view backward.
-  const destinationChangedAfterHandoff = Boolean(
-    destination && destination.nonce !== modeHandoff.previousDestinationNonce,
-  );
-  const activeModeDestination = !modeHandoffReady
-    ? null
-    : destinationChangedAfterHandoff
-      ? destination
-      : (modeHandoff.destination ?? destination);
+  // Cross-layout location is supplied by TransitionController through the
+  // renderer adapter. ReaderView no longer invents a second handoff anchor.
+  const activeModeDestination = destination;
 
   useEffect(() => {
     if (!webViewReady) return;
@@ -616,26 +573,24 @@ const ReaderView = ({
     // this bounds the DOM so large books stay responsive on rotation.
     const anchorPage = Math.max(1, currentSourcePage || 1);
     const destinationPage = activeModeDestination?.page;
-    const lowAnchor = Math.min(anchorPage, destinationPage ?? anchorPage);
-    const highAnchor = Math.max(anchorPage, destinationPage ?? anchorPage);
-    const windowStart = Math.max(1, lowAnchor - APPEND_BEHIND_PAGES);
-    const windowEnd = highAnchor + APPEND_AHEAD_PAGES;
+    // Center the append window on the navigation target while one is in flight.
+    // Spanning from the current page all the way to a far destination pulled the
+    // whole book into the WebView DOM at once, which could OOM the content
+    // process mid-jump. The destination is cleared once the transition lands, so
+    // the window recenters on the reader's real position afterwards.
+    const focusPage = destinationPage ?? anchorPage;
+    const windowStart = Math.max(1, focusPage - APPEND_BEHIND_PAGES);
+    const windowEnd = focusPage + APPEND_AHEAD_PAGES;
     const remaining = blocks.filter(
       (block) =>
         block.page >= windowStart &&
         block.page <= windowEnd &&
         !sentBlockIds.current.has(block.id),
     );
-    const destinationBlocks = activeModeDestination
-      ? remaining.filter((block) =>
-          activeModeDestination.blockId
-            ? block.id === activeModeDestination.blockId
-            : block.page === activeModeDestination.page,
-        )
-      : [];
-    const appended = destinationBlocks.length
-      ? destinationBlocks.slice(0, 220)
-      : remaining.slice(0, 220);
+    // Append in page order. The destination lands after the pages in front of it
+    // are already in the DOM, so a single scrollIntoView is stable instead of
+    // landing on a sparse document and drifting as later batches insert above it.
+    const appended = remaining.slice(0, 220);
     let highestAvailablePage = 0;
     blocks.forEach((block) => {
       if (
@@ -997,7 +952,6 @@ const ReaderView = ({
       lastSourcePageRef.current = sourcePage;
       setCurrentSourcePage(sourcePage);
       if (anchor) {
-        modeTextAnchorRef.current = anchor;
         const nextTtsOffset = ttsPositionForBlock(
           blocks,
           anchor.blockId,
@@ -1047,10 +1001,7 @@ const ReaderView = ({
         return;
       attempts += 1;
       webViewRef.current?.postMessage(
-        JSON.stringify({
-          type: "goToSourcePage",
-          ...activeModeDestination,
-        }),
+        verticalRestoreMessage(activeModeDestination),
       );
       if (requiresDrawAcknowledgement && attempts < 40) {
         retryTimer = setTimeout(deliver, 200);
@@ -1069,6 +1020,13 @@ const ReaderView = ({
     syncPageTransition,
     webViewReady,
   ]);
+
+  useEffect(() => {
+    if (!webViewReady || isPaged || activeModeDestination) return;
+    webViewRef.current?.postMessage(JSON.stringify({
+      type: "releaseSourceDestination",
+    }));
+  }, [activeModeDestination, isPaged, webViewReady]);
 
   const sendReaderSettings = useCallback(() => {
     webViewRef.current?.postMessage(
@@ -1221,18 +1179,6 @@ const ReaderView = ({
       })();
       true;
     `);
-    const recoveryPage = recoveryPageRef.current;
-    if (recoveryPage !== null) {
-      recoveryPageRef.current = null;
-      setTimeout(() => {
-        webViewRef.current?.postMessage(
-          JSON.stringify({
-            type: "goToSourcePage",
-            page: recoveryPage,
-          }),
-        );
-      }, 0);
-    }
   }, [
     guideBackgroundDimming,
     guideColor,
@@ -1316,6 +1262,10 @@ const ReaderView = ({
 
             overscroll-behavior-y: auto;
             touch-action: pan-y;
+            /* Position preservation is handled explicitly when blocks are
+               inserted/pruned. Disable WebKit's second automatic adjustment,
+               which otherwise makes the viewport jump twice. */
+            overflow-anchor: none;
           }
 
           body {
@@ -1508,7 +1458,7 @@ const ReaderView = ({
             border-radius: 3px;
             background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 62%, transparent);
             pointer-events: none;
-            animation: reader-switch-pulse 1.2s ease-out forwards;
+            animation: reader-switch-pulse 1.2s ease-out 0.4s forwards;
           }
           @keyframes reader-switch-pulse {
             0% {
@@ -1538,7 +1488,7 @@ const ReaderView = ({
           }
           @media (prefers-reduced-motion: reduce) {
             #reader-switch-highlight {
-              animation: reader-switch-fade 0.8s ease-out forwards;
+              animation: reader-switch-fade 0.8s ease-out 0.4s forwards;
             }
           }
           #reader-line-guide,
@@ -1670,9 +1620,24 @@ const ReaderView = ({
             (Number(window.__readerTopBoundary) || 0) + 12
           )
         );
-        const viewportAnchor = document
-          .elementFromPoint(Math.max(1, window.innerWidth / 2), anchorProbeY)
-          ?.closest?.('[data-source-page-section]');
+        const anchorXs = document.documentElement.dir === 'rtl'
+          ? [window.innerWidth - 24, window.innerWidth / 2, 24]
+          : [24, window.innerWidth / 2, window.innerWidth - 24];
+        let viewportAnchor = null;
+        for (const x of anchorXs) {
+          viewportAnchor = document
+            .elementFromPoint(Math.max(1, Math.min(window.innerWidth - 1, x)), anchorProbeY)
+            ?.closest?.('[data-source-page-section]') || null;
+          if (viewportAnchor) break;
+        }
+        if (!viewportAnchor) {
+          viewportAnchor = Array.from(
+            document.querySelectorAll('[data-source-page-section]')
+          ).find(function(section) {
+            const rect = section.getBoundingClientRect();
+            return rect.bottom > anchorProbeY && rect.top < window.innerHeight;
+          }) || null;
+        }
         const anchorTop = viewportAnchor?.getBoundingClientRect().top;
         if (message.html) {
           const template = document.createElement('template');
@@ -1685,7 +1650,28 @@ const ReaderView = ({
             container.insertBefore(section, next || null);
           });
         }
-        if (viewportAnchor && Number.isFinite(anchorTop)) {
+        if (window.__activeProgrammaticTarget) {
+          // A programmatic destination is pinned. Newly appended sections in
+          // front of it would push the reading position toward earlier pages,
+          // so re-anchor on the target instead of preserving the (now stale)
+          // pixel offset. Coalesce bursts of append batches into a single
+          // layout on the next frame instead of forcing a synchronous
+          // full-document reflow for every batch.
+          if (
+            window.__activeProgrammaticTarget.isConnected &&
+            !window.__readerPinRescrollScheduled
+          ) {
+            window.__readerPinRescrollScheduled = true;
+            requestAnimationFrame(function() {
+              window.__readerPinRescrollScheduled = false;
+              const pinned = window.__activeProgrammaticTarget;
+              const alignedWord = window.__realignActiveProgrammaticWord?.();
+              if (!alignedWord && pinned && pinned.isConnected) {
+                pinned.scrollIntoView({ behavior: 'auto', block: 'start' });
+              }
+            });
+          }
+        } else if (viewportAnchor && Number.isFinite(anchorTop)) {
           const nextAnchorTop = viewportAnchor.getBoundingClientRect().top;
           const insertedOffset = nextAnchorTop - anchorTop;
           if (Math.abs(insertedOffset) > 0.5) {
@@ -1806,15 +1792,32 @@ const ReaderView = ({
         }
         return;
       }
+      if (message.type === 'releaseSourceDestination') {
+        window.__pendingSourceDestination = null;
+        window.__pinnedSourcePage = null;
+        window.__activeProgrammaticTarget = null;
+        window.__activeProgrammaticRange = null;
+        window.__activeProgrammaticWord = null;
+        window.__activeProgrammaticTargetNonce = null;
+        return;
+      }
       window.__tryPendingSourceDestination = window.__tryPendingSourceDestination || function() {
         const pending = window.__pendingSourceDestination;
         if (!pending) return;
+        // A newer destination supersedes any previously pinned element. Drop
+        // the old handle so its re-scroll can't fight the new target.
+        if (window.__activeProgrammaticTargetNonce !== pending.nonce) {
+          window.__activeProgrammaticTarget = null;
+          window.__activeProgrammaticRange = null;
+          window.__activeProgrammaticWord = null;
+          window.__activeProgrammaticTargetNonce = pending.nonce;
+        }
         const block = pending.blockId
           ? document.querySelector('[data-block-id="' + CSS.escape(pending.blockId) + '"]')
           : null;
         const target = block || document.querySelector('[data-source-page-section="' + pending.page + '"]');
         let resolvedTarget = target;
-        if (!resolvedTarget && window.__readerHasMore === false) {
+        if (!resolvedTarget && !pending.blockId && window.__readerHasMore === false) {
           const sections = Array.from(
             document.querySelectorAll('[data-source-page-section]')
           );
@@ -1832,6 +1835,13 @@ const ReaderView = ({
         const destinationTarget = searchHighlight || resolvedTarget;
         if (window.__readerTransition === 'scroll') {
           window.__pinnedSourcePage = Number(pending.page);
+          // Keep a handle on the element we scrolled to. Content for the pages
+          // in front of it is still being appended in the background; re-scroll
+          // after each append so the destination cannot silently drift to an
+          // earlier page (which is what made far TOC/search jumps land 100-200
+          // pages off and then "reset to the top").
+          window.__activeProgrammaticTarget = destinationTarget;
+          window.__activeProgrammaticTargetNonce = pending.nonce;
           destinationTarget.scrollIntoView({ behavior: 'auto', block: 'start' });
           requestAnimationFrame(function() {
             window.__reportSourcePage?.(pending.page);
@@ -1861,6 +1871,11 @@ const ReaderView = ({
                 pending.switchHighlightQuery,
                 pending.nonce
               );
+              if (didDraw) {
+                requestAnimationFrame(function() {
+                  window.__reportSwitchAnchor?.(true);
+                });
+              }
               if (!didDraw && highlightAttempt < 12) {
                 requestAnimationFrame(drawDestinationHighlight);
               }
@@ -2362,6 +2377,11 @@ const ReaderView = ({
         return;
       }
 
+      if (data.type === "readerUserInteraction") {
+        onUserInteraction?.();
+        return;
+      }
+
       if (data.type === "prunedPages" && Array.isArray(data.pages)) {
         // The WebView removed sections far behind the viewport to keep the DOM
         // bounded. Drop those blocks from the sent set so they can be
@@ -2508,21 +2528,6 @@ const ReaderView = ({
       if (data.type === "switchAnchor" && typeof data.blockId === "string") {
         const wordIndex =
           typeof data.wordIndex === "number" ? Math.max(0, data.wordIndex) : 0;
-        const sourceBlock = blocks.find((block) => block.id === data.blockId);
-        const wordAtIndex = sourceBlock
-          ? Array.from(sourceBlock.text.matchAll(/\S+/g))[wordIndex]
-          : undefined;
-        const blockOffset =
-          typeof data.blockOffset === "number"
-            ? data.blockOffset
-            : wordAtIndex?.index;
-        if (blockOffset !== undefined) {
-          modeTextAnchorRef.current = {
-            blockId: data.blockId,
-            blockOffset,
-            wordIndex,
-          };
-        }
         if (typeof data.ttsOffset === "number") {
           const nextTtsOffset = Math.max(0, data.ttsOffset);
           ttsStartOffsetRef.current = nextTtsOffset;
@@ -2532,7 +2537,7 @@ const ReaderView = ({
           onSwitchAnchorChange?.(
             data.blockId,
             typeof data.word === "string" ? data.word : "",
-            typeof data.wordIndex === "number" ? data.wordIndex : 0,
+            wordIndex,
           );
         }
         return;
@@ -2847,7 +2852,7 @@ const ReaderView = ({
             }}
           >
             <View className="flex-1">
-              {isPaged && modeHandoffReady && (
+              {isPaged && (
                 <View style={StyleSheet.absoluteFill}>
                   <HorizontalReaderPager
                     blocks={blocks}
@@ -2914,6 +2919,7 @@ const ReaderView = ({
                     textColor={textColor}
                     onPageChange={handlePagerPageChange}
                     onPageMapChange={onPageMapChange}
+                    onExplicitPageResolved={onExplicitPageResolved}
                     onReaderTap={() => {
                       if (readerGuideMode) return;
                       if (toolbarHidden.current) showToolbar();
@@ -2928,7 +2934,7 @@ const ReaderView = ({
                   />
                 </View>
               )}
-              {!isPaged && modeHandoffReady && (
+              {!isPaged && (
                 <View pointerEvents="auto" style={StyleSheet.absoluteFill}>
                   <WebView
                     key={`reader-web-runtime-20260828-2-${annotationScope}`}
@@ -2940,7 +2946,6 @@ const ReaderView = ({
                     }}
                     onLoadEnd={handleReaderLoadEnd}
                     onContentProcessDidTerminate={() => {
-                      recoveryPageRef.current = lastSourcePageRef.current;
                       appendedBlockCount.current = initialBlocks.length;
                       sentBlockIds.current = new Set(
                         initialBlocks.map((block) => block.id),
@@ -3145,6 +3150,12 @@ const ReaderView = ({
                       behavior: 'auto'
                     });
                   }
+                  // Keep the exact word pinned as earlier async blocks arrive.
+                  window.__activeProgrammaticRange = range.cloneRange();
+                  window.__activeProgrammaticWord = {
+                    blockId: block.dataset.blockId,
+                    wordIndex: words.indexOf(selected)
+                  };
                   // Scrolling emits an event that clears transient markers.
                   // Paint only after WebKit has committed the destination,
                   // otherwise the highlight deletes itself on first open.
@@ -3168,6 +3179,43 @@ const ReaderView = ({
                   }));
                 }
                 return didDraw;
+              };
+
+              window.__realignActiveProgrammaticWord = function() {
+                const descriptor = window.__activeProgrammaticWord;
+                if (!descriptor?.blockId) return false;
+                const block = document.querySelector(
+                  '[data-block-id="' + CSS.escape(descriptor.blockId) + '"]'
+                );
+                if (!block) return false;
+                const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+                const words = [];
+                let node = walker.nextNode();
+                while (node) {
+                  const text = node.textContent || '';
+                  Array.from(text.matchAll(/\\S+/g)).forEach(function(match) {
+                    words.push({ node: node, match: match });
+                  });
+                  node = walker.nextNode();
+                }
+                const selected = words[Math.max(
+                  0,
+                  Math.min(words.length - 1, Number(descriptor.wordIndex) || 0)
+                )];
+                if (!selected) return false;
+                const range = document.createRange();
+                range.setStart(selected.node, selected.match.index);
+                range.setEnd(selected.node, selected.match.index + selected.match[0].length);
+                const rect = Array.from(range.getClientRects()).find(function(item) {
+                  return item.width > 0 && item.height > 0;
+                });
+                if (!rect) return false;
+                window.__activeProgrammaticRange = range;
+                const delta = rect.top - (readerVisibleTopBoundary() + 8);
+                if (Math.abs(delta) > 0.5) {
+                  window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
+                }
+                return true;
               };
 
               function readerVisibleTopBoundary() {
@@ -4022,7 +4070,16 @@ const ReaderView = ({
                     : 'none';
                 }
 
-                window.scrollTo(0, 0);
+                // Scroll mode must never hard-reset the document here. The
+                // delivery effect posts this transition message and the restore
+                // target in the same tick, so scrolling to 0 flashed readers to
+                // the top on every tab switch / TOC jump until the destination
+                // resolved. Fresh-load top alignment is handled separately in
+                // the load-end reset. The pager still needs an explicit reset
+                // because its transform is computed from document flow.
+                if (window.__readerTransition !== 'scroll') {
+                  window.scrollTo(0, 0);
+                }
 
                 requestAnimationFrame(function() {
                   requestAnimationFrame(refreshReaderPages);
@@ -4080,7 +4137,16 @@ const ReaderView = ({
               // --------------------------------
 
               function releaseProgrammaticSourcePage() {
+                clearTimeout(pruneTimer);
+                pruneTimer = null;
                 window.__pinnedSourcePage = null;
+                window.__activeProgrammaticTarget = null;
+                window.__activeProgrammaticRange = null;
+                window.__activeProgrammaticWord = null;
+                window.__activeProgrammaticTargetNonce = null;
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'readerUserInteraction'
+                }));
               }
               window.addEventListener(
                 'touchstart',
@@ -4097,6 +4163,11 @@ const ReaderView = ({
                 releaseProgrammaticSourcePage,
                 { passive: true }
               );
+              window.addEventListener('touchend', function() {
+                requestAnimationFrame(function() {
+                  window.__reportSwitchAnchor?.(true);
+                });
+              }, { passive: true });
 
               let pagerTouchStart = null;
               window.addEventListener('touchstart', function(event) {
@@ -4191,11 +4262,15 @@ const ReaderView = ({
                   '[data-source-page-section]'
                 );
                 if (sections.length < 300) return;
-                const probeY = Math.min(48, window.innerHeight * 0.1);
-                const hit = document.elementFromPoint(
-                  Math.max(1, window.innerWidth / 2),
-                  probeY
+                const probeY = Math.min(
+                  window.innerHeight - 12,
+                  readerVisibleTopBoundary() + 12
                 );
+                const probeX = document.documentElement.dir === 'rtl'
+                  ? window.innerWidth - 24
+                  : 24;
+                const hit = document.elementFromPoint(probeX, probeY) ||
+                  document.elementFromPoint(window.innerWidth / 2, probeY);
                 const visibleSection = hit?.closest?.(
                   '[data-source-page-section]'
                 );
@@ -4239,6 +4314,7 @@ const ReaderView = ({
               }
 
               let scrollTimer = null;
+              let pruneTimer = null;
               // Track the last stable scroll position + document height so an
               // orientation change can re-anchor the reading position after the
               // text reflows (WebKit preserves the pixel scroll offset, which
@@ -4266,13 +4342,10 @@ const ReaderView = ({
                     clearReaderSwitchHighlight();
                   }
 
-                  /*
-                   * Wait for the next animation frame.
-                   *
-                   * This prevents sending a message
-                   * to React Native for every single
-                   * scroll event.
-                   */
+                  // A bounded 32 ms sampler keeps DOM range measurement off the
+                  // 60 fps hot path while staying within roughly two frames.
+                  // React Native keeps this result in a ref, so tab switching
+                  // does not wait for persistence or a React render.
                   if (!scrollTimer) {
                     scrollTimer = setTimeout(
                       function() {
@@ -4291,12 +4364,16 @@ const ReaderView = ({
 
                         reportSwitchAnchor();
 
-                        pruneDistantSections();
+                        clearTimeout(pruneTimer);
+                        pruneTimer = setTimeout(function() {
+                          pruneDistantSections();
+                          pruneTimer = null;
+                        }, 1200);
 
                         scrollTimer = null;
 
                       },
-                      80
+                      32
                     );
                   }
 

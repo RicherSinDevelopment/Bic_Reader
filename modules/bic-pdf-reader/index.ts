@@ -18,6 +18,7 @@ export type ExtractedPdfBlock = {
   readingOrder: number;
   confidence: number;
   hiddenInReader: boolean;
+  sourceContentHash?: string;
 };
 
 export type ExtractedPdfPage = {

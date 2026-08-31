@@ -42,6 +42,15 @@ const nativeTranslation = Platform.OS === "ios"
   : null;
 let translationRequestNumber = 0;
 
+export function translationSourceHash(text: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16)}-${text.length}`;
+}
+
 export function isBookTranslationCancellation(error: unknown) {
   return error instanceof Error &&
     error.message.includes("BIC_TRANSLATION_CANCELLED");
@@ -148,7 +157,6 @@ export async function translatePdfBlocks(
 
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
     const batch = batches[batchIndex];
-    const publishedIndices = new Set<number>();
     const pendingProgress = new Map<number, ExtractedPdfBlock>();
     let progressPublishTimer: ReturnType<typeof setTimeout> | null = null;
     let nextProgressIndex = 0;
@@ -158,7 +166,6 @@ export async function translatePdfBlocks(
       while (pendingProgress.has(nextProgressIndex)) {
         readyBlocks.push(pendingProgress.get(nextProgressIndex)!);
         pendingProgress.delete(nextProgressIndex);
-        publishedIndices.add(nextProgressIndex);
         nextProgressIndex += 1;
       }
       if (readyBlocks.length > 0) onBatch?.(readyBlocks);
@@ -177,6 +184,7 @@ export async function translatePdfBlocks(
           ...batch[progress.index],
           text: progress.translatedText,
           id: `translated-${targetLanguage}-${batch[progress.index].id}`,
+          sourceContentHash: translationSourceHash(batch[progress.index].text),
         });
 
         // Coalesce Apple's per-item events to avoid a React render and SQLite
@@ -205,16 +213,23 @@ export async function translatePdfBlocks(
       throw new Error("Apple could not detect the book's source language.");
     }
 
-    const translatedBatch = batch.map((block, index) => ({
-      ...block,
-      text: translatedTexts[index],
-      id: `translated-${targetLanguage}-${block.id}`,
-    }));
+    const translatedBatch = batch.map((block, index) => {
+      const completedText = translatedTexts[index]?.trim();
+      return {
+        ...block,
+        // Apple can legitimately return an empty string for punctuation or
+        // emit an empty progressive value before its completed result. Keep a
+        // renderable anchor in either case so this source block can always be
+        // restored precisely.
+        text: completedText ? translatedTexts[index] : block.text,
+        id: `translated-${targetLanguage}-${block.id}`,
+        sourceContentHash: translationSourceHash(block.text),
+      };
+    });
     translatedBlocks.push(...translatedBatch);
-    const unpublishedBlocks = translatedBatch.filter(
-      (_, index) => !publishedIndices.has(index),
-    );
-    if (unpublishedBlocks.length > 0) onBatch?.(unpublishedBlocks);
+    // Completed results are authoritative. Always publish them so a partial or
+    // empty progress event cannot remain in memory/SQLite indefinitely.
+    onBatch?.(translatedBatch);
   }
 
   return translatedBlocks;

@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
-const DATABASE_VERSION = 7;
+const DATABASE_VERSION = 8;
 
 export async function migrateDatabase(db: SQLiteDatabase) {
   await db.execAsync(`
@@ -125,6 +125,22 @@ export async function migrateDatabase(db: SQLiteDatabase) {
     await db.execAsync(`
       ALTER TABLE pdf_ai_conversations
       ADD COLUMN conversations_json TEXT NOT NULL DEFAULT '[]';
+    `);
+  }
+
+  if (currentVersion < 8) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS reader_positions (
+        pdf_id TEXT PRIMARY KEY NOT NULL,
+        source_page INTEGER NOT NULL,
+        source_block_id TEXT,
+        word_index INTEGER,
+        character_offset INTEGER,
+        block_progress REAL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (pdf_id) REFERENCES pdf_documents(id) ON DELETE CASCADE
+      );
     `);
   }
 

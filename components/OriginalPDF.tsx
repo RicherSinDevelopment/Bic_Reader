@@ -2,7 +2,13 @@ import { Text } from "@/components/ui/text";
 import type { SwitchHighlightTarget } from "@/hooks/switchhighlight";
 import { Asset } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ActivityIndicator, useColorScheme, View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
@@ -23,6 +29,7 @@ type OriginalPdfProps = {
   highlightTarget?: SwitchHighlightTarget | null;
   outlineOnly?: boolean;
   destination?: { page: number; nonce: number } | null;
+  resetZoomNonce?: number;
 };
 
 export type PdfOutlineItem = {
@@ -37,7 +44,10 @@ let cachedSources: Promise<PdfJsSources> | null = null;
 
 async function loadPdfJsSources() {
   cachedSources ??= (async () => {
-    const assets = [Asset.fromModule(PDF_JS_ASSET), Asset.fromModule(PDF_WORKER_ASSET)];
+    const assets = [
+      Asset.fromModule(PDF_JS_ASSET),
+      Asset.fromModule(PDF_WORKER_ASSET),
+    ];
     await Promise.all(assets.map((asset) => asset.downloadAsync()));
     const [library, worker] = await Promise.all(
       assets.map((asset) => {
@@ -52,7 +62,13 @@ async function loadPdfJsSources() {
   return cachedSources;
 }
 
-function makeViewerHtml(sources: PdfJsSources, size: number, firstChunk: string, initialPage: number, outlineOnly: boolean) {
+function makeViewerHtml(
+  sources: PdfJsSources,
+  size: number,
+  firstChunk: string,
+  initialPage: number,
+  outlineOnly: boolean,
+) {
   const config = JSON.stringify({
     library: sources.library,
     worker: sources.worker,
@@ -137,11 +153,19 @@ export default function OriginalPDF({
           length: Math.min(size, RANGE_CHUNK_SIZE),
         }),
       ]);
-      if (!cancelled) setHtml(makeViewerHtml(sources, size, firstChunk, initialPage, outlineOnly));
+      if (!cancelled)
+        setHtml(
+          makeViewerHtml(sources, size, firstChunk, initialPage, outlineOnly),
+        );
     })().catch((error) => {
-      if (!cancelled) setErrorMessage(error instanceof Error ? error.message : "Preview unavailable.");
+      if (!cancelled)
+        setErrorMessage(
+          error instanceof Error ? error.message : "Preview unavailable.",
+        );
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [fileSize, initialPage, outlineOnly, pdfUri]);
 
   const sendToViewer = useCallback((message: object) => {
@@ -149,7 +173,8 @@ export default function OriginalPDF({
   }, []);
 
   useEffect(() => {
-    if (ready) sendToViewer({ type: "highlight", target: highlightTarget ?? null });
+    if (ready)
+      sendToViewer({ type: "highlight", target: highlightTarget ?? null });
   }, [highlightTarget, ready, sendToViewer]);
 
   useEffect(() => {
@@ -158,38 +183,82 @@ export default function OriginalPDF({
     }
   }, [destination, ready, sendToViewer]);
 
-  const handleMessage = useCallback(async (event: WebViewMessageEvent) => {
-    let message: { type: string; [key: string]: unknown };
-    try { message = JSON.parse(event.nativeEvent.data); } catch { return; }
-    if (message.type === "requestRange") {
-      const begin = Number(message.begin);
-      const end = Number(message.end);
+  const handleMessage = useCallback(
+    async (event: WebViewMessageEvent) => {
+      let message: { type: string; [key: string]: unknown };
       try {
-        const base64 = await FileSystem.readAsStringAsync(pdfUri, {
-          encoding: FileSystem.EncodingType.Base64,
-          position: begin,
-          length: end - begin,
-        });
-        sendToViewer({ type: "rangeData", begin, byteLength: end - begin, base64 });
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Could not read the PDF.");
+        message = JSON.parse(event.nativeEvent.data);
+      } catch {
+        return;
       }
-    } else if (message.type === "ready") {
-      setReady(true);
-      onReady?.();
-    } else if (message.type === "pageChanged") {
-      onPageChanged?.(Number(message.page), Number(message.totalPages));
-    } else if (message.type === "outline") {
-      onOutlineChanged?.((message.outline as PdfOutlineItem[]) ?? []);
-    } else if (message.type === "error") {
-      setErrorMessage(String(message.message ?? "Preview unavailable."));
-    }
-  }, [onOutlineChanged, onPageChanged, onReady, pdfUri, sendToViewer]);
+      if (message.type === "requestRange") {
+        const begin = Number(message.begin);
+        const end = Number(message.end);
+        try {
+          const base64 = await FileSystem.readAsStringAsync(pdfUri, {
+            encoding: FileSystem.EncodingType.Base64,
+            position: begin,
+            length: end - begin,
+          });
+          sendToViewer({
+            type: "rangeData",
+            begin,
+            byteLength: end - begin,
+            base64,
+          });
+        } catch (error) {
+          setErrorMessage(
+            error instanceof Error ? error.message : "Could not read the PDF.",
+          );
+        }
+      } else if (message.type === "ready") {
+        setReady(true);
+        onReady?.();
+      } else if (message.type === "pageChanged") {
+        onPageChanged?.(Number(message.page), Number(message.totalPages));
+      } else if (message.type === "outline") {
+        onOutlineChanged?.((message.outline as PdfOutlineItem[]) ?? []);
+      } else if (message.type === "error") {
+        setErrorMessage(String(message.message ?? "Preview unavailable."));
+      }
+    },
+    [onOutlineChanged, onPageChanged, onReady, pdfUri, sendToViewer],
+  );
 
-  const source = useMemo(() => html ? { html, baseUrl: "https://bic-reader.local/" } : undefined, [html]);
+  const source = useMemo(
+    () => (html ? { html, baseUrl: "https://bic-reader.local/" } : undefined),
+    [html],
+  );
 
-  if (errorMessage) return <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#10120F]"><Text className="text-center font-lato-bold text-base text-black dark:text-[#F4F5F1]">Could not open this PDF</Text><Text className="mt-2 text-center text-sm text-black/50 dark:text-white/50">{errorMessage}</Text></View>;
-  if (!source) return <View className="flex-1 items-center justify-center bg-[#F7F5EC] dark:bg-[#10120F]"><ActivityIndicator size="large" color="#8fb996" /></View>;
+  if (errorMessage)
+    return (
+      <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#10120F]">
+        <Text className="text-center font-lato-bold text-base text-black dark:text-[#F4F5F1]">
+          Could not open this PDF
+        </Text>
+        <Text className="mt-2 text-center text-sm text-black/50 dark:text-white/50">
+          {errorMessage}
+        </Text>
+      </View>
+    );
+  if (!source)
+    return (
+      <View className="flex-1 items-center justify-center bg-[#F7F5EC] dark:bg-[#10120F]">
+        <ActivityIndicator size="large" color="#8fb996" />
+      </View>
+    );
 
-  return <WebView ref={webViewRef} source={source} originWhitelist={["*"]} onMessage={handleMessage} javaScriptEnabled domStorageEnabled allowsInlineMediaPlayback bounces={false} style={{ flex: 1, backgroundColor: isDark ? "#10120F" : "#F7F5EC" }} />;
+  return (
+    <WebView
+      ref={webViewRef}
+      source={source}
+      originWhitelist={["*"]}
+      onMessage={handleMessage}
+      javaScriptEnabled
+      domStorageEnabled
+      allowsInlineMediaPlayback
+      bounces={false}
+      style={{ flex: 1, backgroundColor: isDark ? "#10120F" : "#F7F5EC" }}
+    />
+  );
 }

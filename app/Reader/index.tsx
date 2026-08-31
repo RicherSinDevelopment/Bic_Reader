@@ -45,7 +45,13 @@ import {
   type ExtractedPdfBlock,
   type ExtractedPdfDocument,
 } from "@/modules/bic-pdf-reader";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -337,6 +343,21 @@ export default function ReaderScreen() {
     nonce: number;
   } | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [rotationMaskVisible, setRotationMaskVisible] = useState(false);
+  const rotationMaskFallback = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const rotationMaskStartedAt = React.useRef(0);
+  const rotationInProgress = React.useRef(false);
+  const layoutHandoffInProgress = React.useRef(false);
+  const previousRotationWidth = React.useRef(windowWidth);
+  const captureCanonicalAnchorRef = React.useRef<() => CanonicalAnchor | null>(
+    () => null,
+  );
+  const isRotationInProgress = useCallback(
+    () => rotationInProgress.current || layoutHandoffInProgress.current,
+    [],
+  );
   // Derive landscape from the live window dimensions instead of a separately
   // debounced orientation event. The native layout rotates at the same moment
   // windowWidth/windowHeight change, so the chrome (header, status bar, content
@@ -372,6 +393,7 @@ export default function ReaderScreen() {
   const originalCurrentPageRef = React.useRef(1);
   const pendingOriginalPageRef = React.useRef<number | null>(null);
   const [originalPageCount, setOriginalPageCount] = useState(0);
+  const [originalZoomResetNonce, setOriginalZoomResetNonce] = useState(0);
   const [originalDestination, setOriginalDestination] = useState<{
     page: number;
     nonce: number;
@@ -426,7 +448,7 @@ export default function ReaderScreen() {
   const scheduledTranslationLanguage = React.useRef<string | null>(null);
   const activeTranslationLanguage = React.useRef<string | null>(null);
   const activeTabRef = React.useRef<ReaderMode>("reader");
-  const translatedDisplayCurrentPageRef = React.useRef(1);
+  const translatedSourcePageRef = React.useRef(1);
   const translationSourceLanguage = React.useRef<string | undefined>(undefined);
   const latestReaderBlocks = React.useRef(readerBlocks);
   const latestTranslatedBlocks = React.useRef(translatedBlocks);
@@ -437,8 +459,11 @@ export default function ReaderScreen() {
   const latestReaderPageCount = React.useRef(readerPageCount);
   const positionRestoreApplied = React.useRef(false);
   const previousReaderTransition = React.useRef(readerTransition);
+  const pendingLayoutAnchor = React.useRef<CanonicalAnchor | null>(null);
   const previousPresentationKey = React.useRef(
-    `${readerPresentationKey}:${isLandscape ? "landscape" : "portrait"}`,
+    readerTransition === "pager"
+      ? `${readerPresentationKey}:${isLandscape ? "landscape" : "portrait"}`
+      : `${readerPresentationKey}:vertical`,
   );
   const positionPersistenceTimer = React.useRef<ReturnType<
     typeof setTimeout
@@ -446,7 +471,6 @@ export default function ReaderScreen() {
   const {
     actualReaderAnchor,
     actualTranslatedAnchor,
-    latestTranslatedAnchor,
     reportReaderAnchor: handleReaderSwitchAnchorChange,
     reportTranslatedAnchor: handleTranslatedSwitchAnchorChange,
   } = useTabSwitchTranslate({
@@ -455,6 +479,7 @@ export default function ReaderScreen() {
     activeMode: activeTab,
     readerBlocks,
     translatedBlocks,
+    isRotationInProgress,
   });
   const canonicalOriginalHighlight = useMemo(
     () =>
@@ -462,21 +487,97 @@ export default function ReaderScreen() {
     [canonicalAnchor, readerBlocks, readerPageSizes],
   );
 
+  const beginRotationMask = useCallback(() => {
+    if (activeTabRef.current === "original") return;
+    if (rotationMaskFallback.current)
+      clearTimeout(rotationMaskFallback.current);
+    rotationInProgress.current = true;
+    rotationMaskStartedAt.current = Date.now();
+    setRotationMaskVisible(true);
+    rotationMaskFallback.current = setTimeout(() => {
+      rotationInProgress.current = false;
+      setRotationMaskVisible(false);
+      rotationMaskFallback.current = null;
+    }, 800);
+  }, []);
+
+  const finishRotationMask = useCallback(() => {
+    rotationInProgress.current = false;
+    if (rotationMaskFallback.current) {
+      clearTimeout(rotationMaskFallback.current);
+      rotationMaskFallback.current = null;
+    }
+    const reveal = () => setRotationMaskVisible(false);
+    const remaining = Math.max(
+      0,
+      300 - (Date.now() - rotationMaskStartedAt.current),
+    );
+    if (remaining > 0) {
+      rotationMaskFallback.current = setTimeout(() => {
+        rotationMaskFallback.current = null;
+        reveal();
+      }, remaining);
+    } else {
+      reveal();
+    }
+  }, []);
+
   const handleOrientationChange = useCallback(
     (landscape: boolean) => {
+      // Vertical scrolling has its own rotation handoff. Pin the exact
+      // canonical block/word before native dimensions change so DOM insertion,
+      // pruning, and WebKit reflow cannot turn a source-page location into a
+      // stale pixel offset. Horizontal mode owns a separate pager state.
+      if (readerTransition !== "pager" && activeTabRef.current !== "original") {
+        const anchor = captureCanonicalAnchorRef.current();
+        if (anchor) {
+          const nonce = Date.now();
+          if (activeTabRef.current === "translated" && translationLanguage) {
+            setTranslatedDestination(
+              translatedDestinationForAnchor(
+                anchor,
+                translationLanguage.code,
+                latestTranslatedBlocks.current,
+                nonce,
+              ),
+            );
+          } else {
+            setReaderDestination(verticalDestination(anchor, nonce));
+          }
+        }
+      }
+      beginRotationMask();
       // Restore portrait chrome in the same React batch as orientation. A
       // separate follow-up effect produced a visible hidden-then-shown frame.
       headerVisibility.stopAnimation();
       headerVisibility.setValue(landscape ? 0 : 1);
       if (!landscape) setReaderChromeHidden(false);
     },
-    [headerVisibility],
+    [
+      beginRotationMask,
+      headerVisibility,
+      readerTransition,
+      translationLanguage,
+    ],
   );
   useScreenRotation(handleOrientationChange);
 
+  useLayoutEffect(() => {
+    if (Math.abs(previousRotationWidth.current - windowWidth) < 1) return;
+    previousRotationWidth.current = windowWidth;
+    beginRotationMask();
+  }, [beginRotationMask, windowWidth]);
+
+  useEffect(
+    () => () => {
+      if (rotationMaskFallback.current)
+        clearTimeout(rotationMaskFallback.current);
+    },
+    [],
+  );
+
   activeTranslationLanguage.current = translationLanguage?.code ?? null;
   activeTabRef.current = activeTab;
-  translatedDisplayCurrentPageRef.current = translatedDisplayCurrentPage;
   latestReaderBlocks.current = readerBlocks;
   latestTranslatedBlocks.current = translatedBlocks;
   latestPdf.current = pdf;
@@ -777,7 +878,7 @@ export default function ReaderScreen() {
           // worker never chases the whole document in one go.
           const translationAnchorPage =
             requestedTranslationPage.current ??
-            translatedDisplayCurrentPageRef.current ??
+            translatedSourcePageRef.current ??
             1;
           missingBlocks = missingBlocks.filter(
             (block) =>
@@ -880,7 +981,9 @@ export default function ReaderScreen() {
   );
 
   const handleTranslatedPageChange = useCallback((page: number) => {
+    if (activeTabRef.current !== "translated") return;
     setReaderCurrentPage(page);
+    translatedSourcePageRef.current = page;
     // Page reports drive chrome/prefetch only. They are approximate while the
     // DOM is growing and must never replace the precise visible-word anchor.
     requestedTranslationPage.current = page;
@@ -908,6 +1011,7 @@ export default function ReaderScreen() {
   }, []);
 
   const handleReaderPageChange = useCallback((page: number) => {
+    if (activeTabRef.current !== "reader") return;
     setReaderCurrentPage(page);
     // The subsequent switchAnchor message contains the authoritative word.
     // Publishing this approximate page first caused tab switches to capture a
@@ -1151,6 +1255,18 @@ export default function ReaderScreen() {
         }
       : current;
   }, [actualReaderAnchor, actualTranslatedAnchor, pdfId]);
+  captureCanonicalAnchorRef.current = captureCanonicalAnchor;
+
+  // The settings store changes before the horizontal pager mounts. Capture the
+  // old renderer's live word during this render, before the new pager can emit
+  // its initial page (page zero) and replace the vertical viewport anchor.
+  if (
+    readerTransition !== previousReaderTransition.current &&
+    pendingLayoutAnchor.current === null
+  ) {
+    layoutHandoffInProgress.current = true;
+    pendingLayoutAnchor.current = captureCanonicalAnchor();
+  }
 
   const runAnchorTransition = useCallback(
     async (
@@ -1164,7 +1280,11 @@ export default function ReaderScreen() {
         searchMatchIndex?: number;
         switchHighlightWordIndex?: number;
       },
+      capturedAnchorOverride?: CanonicalAnchor | null,
     ) => {
+      if (rotationInProgress.current && targetMode === activeTabRef.current) {
+        return true;
+      }
       const sourceLayout = fromLayout ?? useAnchorStore.getState().activeLayout;
       const from = { mode: activeTabRef.current, layout: sourceLayout };
       const target = { mode: targetMode, layout: targetLayout };
@@ -1190,6 +1310,11 @@ export default function ReaderScreen() {
         },
         restore: (anchor: CanonicalAnchor, transitionId: number) => {
           if (!transitionController.isCurrent(transitionId)) return;
+          const resetOriginalZoomIfLeaving = () => {
+            if (activeTabRef.current !== "original") return;
+            originalContentReadyRef.current = false;
+            setOriginalZoomResetNonce((current) => current + 1);
+          };
           if (targetMode === "translated" && translationLanguage) {
             setTranslatedDestination(
               translatedDestinationForAnchor(
@@ -1200,6 +1325,7 @@ export default function ReaderScreen() {
               ),
             );
             setTranslatedSwitchHighlight(null);
+            resetOriginalZoomIfLeaving();
             setActiveTab("translated");
             return;
           }
@@ -1209,6 +1335,7 @@ export default function ReaderScreen() {
             nonce: transitionId,
           });
           setReaderSwitchHighlight(null);
+          resetOriginalZoomIfLeaving();
           setActiveTab("reader");
         },
         actual: () =>
@@ -1294,7 +1421,7 @@ export default function ReaderScreen() {
       const succeeded = await transitionController.run({
         from,
         target,
-        capture: captureCanonicalAnchor,
+        capture: () => capturedAnchorOverride ?? captureCanonicalAnchor(),
         prepare: async (anchor, transitionId) => {
           if (targetMode === "original") {
             return waitForCurrentTransition(
@@ -1414,17 +1541,6 @@ export default function ReaderScreen() {
             setActiveTab("translated");
           }
         }
-      } else if (
-        targetLayout === "vertical" &&
-        (targetMode === "reader" || targetMode === "translated")
-      ) {
-        // The vertical renderer consumed the destination (verification only
-        // passes once the target anchor is actually visible). Release it so the
-        // append window recenters on the reader's real position instead of
-        // holding the whole DOM around a stale target. The pager is left alone:
-        // it consumes destinations one-time and would re-render if we null it.
-        if (targetMode === "reader") setReaderDestination(null);
-        else setTranslatedDestination(null);
       }
       return succeeded;
     },
@@ -1454,27 +1570,57 @@ export default function ReaderScreen() {
     runAnchorTransition,
   ]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const nextLayout: AnchorReaderLayout =
       readerTransition === "pager" ? "horizontal" : "vertical";
     const previousLayout: AnchorReaderLayout =
       previousReaderTransition.current === "pager" ? "horizontal" : "vertical";
     if (nextLayout === previousLayout) return;
+    const capturedAnchor = pendingLayoutAnchor.current;
+    pendingLayoutAnchor.current = null;
     previousReaderTransition.current = readerTransition;
-    if (activeTabRef.current === "reader")
-      readerContentReadyRef.current = false;
-    if (activeTabRef.current === "translated")
-      translatedContentReadyRef.current = false;
-    void runAnchorTransition(activeTabRef.current, nextLayout, previousLayout);
-  }, [readerTransition, runAnchorTransition]);
+    previousPresentationKey.current =
+      readerTransition === "pager"
+        ? `${readerPresentationKey}:${isLandscape ? "landscape" : "portrait"}`
+        : `${readerPresentationKey}:vertical`;
+    // Both renderers use the same already-loaded block model. Do not reset the
+    // content-ready flag for a layout-only switch; readiness is verified by the
+    // destination adapter after the horizontal pager consumes this anchor.
+    void runAnchorTransition(
+      activeTabRef.current,
+      nextLayout,
+      previousLayout,
+      undefined,
+      capturedAnchor,
+    ).finally(() => {
+      layoutHandoffInProgress.current = false;
+    });
+  }, [
+    isLandscape,
+    readerPresentationKey,
+    readerTransition,
+    runAnchorTransition,
+  ]);
 
   useEffect(() => {
-    const nextKey = `${readerPresentationKey}:${isLandscape ? "landscape" : "portrait"}`;
+    // Vertical mode preserves its word directly inside the WebView. Starting a
+    // second canonical transition here races that restore and publishes words
+    // from intermediate reflow frames. The pager still needs a full restore
+    // because its generated pages change with orientation.
+    const nextKey =
+      readerTransition === "pager"
+        ? `${readerPresentationKey}:${isLandscape ? "landscape" : "portrait"}`
+        : `${readerPresentationKey}:vertical`;
     if (previousPresentationKey.current === nextKey) return;
     previousPresentationKey.current = nextKey;
     if (!positionRestoreApplied.current) return;
     void runAnchorTransition(activeTabRef.current);
-  }, [isLandscape, readerPresentationKey, runAnchorTransition]);
+  }, [
+    isLandscape,
+    readerPresentationKey,
+    readerTransition,
+    runAnchorTransition,
+  ]);
 
   const handleTabChange = useCallback(
     (value: ReaderMode) => {
@@ -1724,27 +1870,27 @@ export default function ReaderScreen() {
   const visiblePage =
     activeTab === "original"
       ? originalCurrentPage
-      : activeTab === "translated"
-        ? readerTransition === "pager"
+      : readerTransition === "pager"
+        ? activeTab === "translated"
           ? translatedDisplayCurrentPage
-          : readerCurrentPage
-        : readerDisplayCurrentPage;
+          : readerDisplayCurrentPage
+        : readerCurrentPage;
   const visiblePageCount =
     activeTab === "original"
       ? originalPageCount || pdf?.totalPages || readerPageCount
-      : activeTab === "translated"
-        ? readerTransition === "pager"
+      : readerTransition === "pager"
+        ? activeTab === "translated"
           ? translatedDisplayPageCount
-          : readerPageCount || pdf?.totalPages || 0
-        : readerDisplayPageCount || readerPageCount;
+          : readerDisplayPageCount
+        : readerPageCount || pdf?.totalPages || 0;
   const navigationCurrentPage =
     activeTab === "original"
       ? originalCurrentPage
-      : activeTab === "translated"
-        ? readerTransition === "pager"
+      : readerTransition === "pager"
+        ? activeTab === "translated"
           ? translatedDisplayCurrentPage
-          : readerCurrentPage
-        : readerDisplayCurrentPage;
+          : readerDisplayCurrentPage
+        : readerCurrentPage;
   const displayPdfName = pdf?.name.replace(/\.pdf$/i, "") ?? "";
 
   const goToReaderPage = useCallback(
@@ -1836,42 +1982,31 @@ export default function ReaderScreen() {
         goToNavigationPage(page);
         return;
       }
-      if (activeTab === "translated") {
-        if (readerTransition === "pager") {
-          setTranslatedDestination(
-            generatedPageDestination(
-              page,
-              latestTranslatedAnchor.current?.sourcePage ?? readerCurrentPage,
-            ),
-          );
+      if (readerTransition === "pager") {
+        const destination = generatedPageDestination(
+          page,
+          anchorController.current()?.sourcePage ?? readerCurrentPage,
+        );
+        if (activeTab === "translated") {
+          setTranslatedDestination(destination);
           setTranslatedSwitchHighlight(null);
-          return;
+        } else {
+          setReaderDestination(destination);
+          setReaderSwitchHighlight(null);
         }
-        // The translated header shows source-document pages, including pages
-        // that are not translated yet. Route page-picker jumps through the
-        // priority translation path so any page in the full count is valid.
+        return;
+      }
+      if (activeTab === "translated") {
         goToNavigationPage(page);
         return;
       }
 
-      if (readerTransition !== "pager") {
-        setReaderDisplayCurrentPage(page);
-        goToReaderPage(page);
-        return;
-      }
-
-      setReaderDestination(
-        generatedPageDestination(
-          page,
-          anchorController.current()?.sourcePage ?? readerCurrentPage,
-        ),
-      );
+      goToReaderPage(page);
     },
     [
       activeTab,
       goToNavigationPage,
       goToReaderPage,
-      latestTranslatedAnchor,
       readerCurrentPage,
       readerTransition,
     ],
@@ -2033,6 +2168,7 @@ export default function ReaderScreen() {
                 : pdf.currentPage || 1
             }
             destination={originalDestination}
+            resetZoomNonce={originalZoomResetNonce}
             onReady={() => {
               originalContentReadyRef.current = true;
             }}
@@ -2078,11 +2214,12 @@ export default function ReaderScreen() {
               onExplicitPageResolved={handleTranslatedExplicitPageResolved}
               onSwitchAnchorChange={handleTranslatedSwitchAnchorChange}
               onUserInteraction={handleReaderUserInteraction}
-              onReady={() => {
+              onReady={(reason) => {
                 const recovered = translatedContentReadyRef.current;
                 translatedContentReadyRef.current = true;
                 if (
                   recovered &&
+                  reason === "recovery" &&
                   useAnchorStore.getState().transition.status !== "running"
                 ) {
                   void runAnchorTransition("translated");
@@ -2095,6 +2232,7 @@ export default function ReaderScreen() {
               useTranslatedTextDirection
               readerMode="translated"
               onFindWordInOtherTab={handleFindWordInOtherTab}
+              onVerticalRotationSettled={finishRotationMask}
             />
           ) : translationError ? (
             <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#10120F]">
@@ -2177,12 +2315,13 @@ export default function ReaderScreen() {
                 showSwitchHighlight={
                   activeTab === "reader" && Boolean(readerSwitchHighlight)
                 }
-                onReady={() => {
+                onReady={(reason) => {
                   const recovered = readerContentReadyRef.current;
                   readerContentReadyRef.current = true;
                   setReaderContentReady(true);
                   if (
                     recovered &&
+                    reason === "recovery" &&
                     useAnchorStore.getState().transition.status !== "running"
                   ) {
                     void runAnchorTransition("reader");
@@ -2193,6 +2332,7 @@ export default function ReaderScreen() {
                 onTranslationLanguageChange={handleTranslationLanguageChange}
                 readerMode="reader"
                 onFindWordInOtherTab={handleFindWordInOtherTab}
+                onVerticalRotationSettled={finishRotationMask}
               />
             </View>
           ) : readerLoading ? (
@@ -2244,15 +2384,26 @@ export default function ReaderScreen() {
       {anchorTransition.status === "running" &&
         anchorTransition.target &&
         anchorTransition.target.mode !== "original" && (
-          <View className="absolute inset-0 z-[100] items-center justify-center bg-[#F7F5EC]/95 px-8 dark:bg-[#10120F]/95">
-            <ActivityIndicator size="large" color="#4f936b" />
-            <Text className="mt-4 text-center font-lato-bold text-base text-black dark:text-[#F4F5F1]">
-              {anchorTransition.target.mode === "translated"
-                ? "Opening translation at your reading position…"
-                : "Returning to your reading position…"}
+          <View className="absolute inset-0 z-[1000] items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#151814]">
+            <ActivityIndicator size="large" color="#6F9B78" />
+            <Text className="mt-4 text-center font-lato-bold text-sm text-black/50 dark:text-white/55">
+              Keeping your place…
             </Text>
           </View>
         )}
+
+      {rotationMaskVisible && (
+        <View
+          accessibilityLabel="Keeping your reading place"
+          accessibilityLiveRegion="polite"
+          className="absolute inset-0 z-[1000] items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#151814]"
+        >
+          <ActivityIndicator size="large" color="#6F9B78" />
+          <Text className="mt-4 font-lato-bold text-sm text-black/50 dark:text-white/55">
+            Keeping your place…
+          </Text>
+        </View>
+      )}
     </Box>
   );
 }

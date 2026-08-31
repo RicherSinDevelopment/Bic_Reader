@@ -61,6 +61,7 @@ import {
   type FindWordAnchor,
   type FindWordTarget,
 } from "@/architecture/FindWordInOtherTab";
+import { VERTICAL_SCROLL_FLIP_SCRIPT } from "@/architecture/VerticalScroolFlip";
 import { useRevenueCat } from "@/providers/RevenueCatProvider";
 import {
   appleSpeech,
@@ -120,7 +121,7 @@ type ReaderViewProps = {
   ) => void;
   onUserInteraction?: () => void;
   showSwitchHighlight?: boolean;
-  onReady?: () => void;
+  onReady?: (reason: "initial" | "recovery" | "layout") => void;
   onToolbarVisibilityChange?: (visible: boolean) => void;
   translationLanguage?: TranslationLanguage;
   onTranslationLanguageChange?: (language?: TranslationLanguage) => void;
@@ -130,6 +131,7 @@ type ReaderViewProps = {
     target: FindWordTarget,
     anchor: FindWordAnchor,
   ) => void;
+  onVerticalRotationSettled?: () => void;
 };
 
 const baseReaderMenuItems = [
@@ -299,6 +301,7 @@ const ReaderView = ({
   useTranslatedTextDirection = false,
   readerMode = "reader",
   onFindWordInOtherTab,
+  onVerticalRotationSettled,
 }: ReaderViewProps) => {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const readerSafeAreaInsets = useSafeAreaInsets();
@@ -546,6 +549,7 @@ const ReaderView = ({
   }, [isLandscape]);
   // WebView reference
   const webViewRef = useRef<WebView>(null);
+  const hasCompletedInitialWebViewLoad = useRef(false);
   const acknowledgedSwitchDestinationRef = useRef<number | null>(null);
   const transition = useReaderSettingsStore((state) => state.transition);
   const { isPaged, syncPageTransition } = usePageTransition({
@@ -564,7 +568,8 @@ const ReaderView = ({
       easing: Easing.out(Easing.quad),
       useNativeDriver: true,
     }).start();
-  }, [readerResizeOpacity]);
+    onVerticalRotationSettled?.();
+  }, [onVerticalRotationSettled, readerResizeOpacity]);
 
   useLayoutEffect(() => {
     if (Math.abs(previousWindowWidth.current - windowWidth) < 1) return;
@@ -1170,8 +1175,10 @@ const ReaderView = ({
   }, [switchHighlightColor, webViewReady]);
 
   const handleReaderLoadEnd = useCallback(() => {
+    const isRecoveryLoad = hasCompletedInitialWebViewLoad.current;
+    hasCompletedInitialWebViewLoad.current = true;
     setWebViewReady(true);
-    onReady?.();
+    onReady?.(isRecoveryLoad ? "recovery" : "initial");
     sendReaderSettings();
     syncPageTransition();
     webViewRef.current?.postMessage(
@@ -1209,7 +1216,8 @@ const ReaderView = ({
     // A freshly opened reader must always start at the absolute top. Wait a
     // couple of frames for WebKit's post-load layout to settle, then reset the
     // document unless an explicit destination / recovery navigation took over.
-    webViewRef.current?.injectJavaScript(`
+    if (!isRecoveryLoad && !activeModeDestination)
+      webViewRef.current?.injectJavaScript(`
       (function() {
         if (window.__readerTransition === 'pager') return;
         if (window.__pendingSourceDestination) return;
@@ -1223,6 +1231,7 @@ const ReaderView = ({
       true;
     `);
   }, [
+    activeModeDestination,
     guideBackgroundDimming,
     guideColor,
     onReady,
@@ -2413,6 +2422,11 @@ const ReaderView = ({
         return;
       }
 
+      if (data.type === "verticalRotationSettled") {
+        onVerticalRotationSettled?.();
+        return;
+      }
+
       if (data.type === "readerTap") {
         if (readerGuideMode) return;
         if (toolbarHidden.current) showToolbar();
@@ -2982,7 +2996,7 @@ const ReaderView = ({
                     onReaderReveal={() => {
                       if (!readerGuideMode) showToolbar();
                     }}
-                    onReady={onReady}
+                    onReady={() => onReady?.("layout")}
                     onSwipeStart={hideToolbar}
                     onViewportSettled={handlePagerViewportSettled}
                   />
@@ -3285,6 +3299,7 @@ const ReaderView = ({
               }
 
               function reportPreciseSwitchAnchor(force) {
+                if (window.__verticalScrollFlipRestoring) return true;
                 if (!window.__readerTopBarVisible && window.__readerTransition === 'scroll') return false;
                 const isRtl = document.documentElement.dir === 'rtl';
                 const topBoundary = readerVisibleTopBoundary();
@@ -3362,6 +3377,7 @@ const ReaderView = ({
               }
 
               function reportSwitchAnchor(force) {
+                if (window.__verticalScrollFlipRestoring) return;
                 if (reportPreciseSwitchAnchor(force)) return;
                 let block = null;
                 const topBoundary = readerVisibleTopBoundary();
@@ -4149,26 +4165,12 @@ const ReaderView = ({
               };
               window.__applyReaderTransition = applyReaderTransition;
 
+              ${VERTICAL_SCROLL_FLIP_SCRIPT}
+
               window.addEventListener('resize', function() {
-                // Capture the position BEFORE the resize reflows the content.
-                // WebKit preserves the pixel scroll offset, so after reflow it
-                // points at a different paragraph; remap it proportionally.
-                const beforeY = lastScrollMetrics.y;
-                const beforeH = lastScrollMetrics.height;
                 setTimeout(function() {
                   refreshReaderPages();
                   pruneDistantSections();
-                  const afterH = document.documentElement.scrollHeight;
-                  if (
-                    window.__readerTransition === 'scroll' &&
-                    afterH > 0 && beforeH > 0 && beforeY > 0
-                  ) {
-                    const targetY = beforeY * (afterH / beforeH);
-                    const delta = targetY - window.scrollY;
-                    if (Math.abs(delta) > 1) {
-                      window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
-                    }
-                  }
                   if (readerGuideMode) {
                     if (readerGuideMode === 'word') {
                       if (currentWordNode && currentWordStart >= 0) {
@@ -4586,6 +4588,7 @@ const ReaderView = ({
             </Pressable>
           </View>
         )}
+
         {/* ========================= */}
         {/* BOTTOM SHEET */}
         {/* ========================= */}

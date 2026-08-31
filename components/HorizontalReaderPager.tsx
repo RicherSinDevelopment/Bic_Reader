@@ -2,7 +2,11 @@ import {
   hyphenateText,
   type ExtractedPdfBlock,
 } from "@/modules/bic-pdf-reader";
-import { generatedPageForAnchor } from "@/architecture/anchor/HorizontalAnchorAdapter";
+import {
+  captureHorizontalFlipAnchor,
+  horizontalPageForFlipAnchor,
+  HORIZONTAL_FLIP_SETTLE_MS,
+} from "@/architecture/HorizontalSwipFlip";
 import {
   findTargetForMenuKey,
   type FindWordTarget,
@@ -727,8 +731,25 @@ function buildPages(
     );
   };
   let runningTitle = blocks.find(isRunningTitle)?.text.trim() ?? "";
+  let paginatedSourcePage: number | undefined;
 
   blocks.forEach((block, blockIndex) => {
+    // Horizontal mode is a discrete book, not one continuous text stream.
+    // Never place the end of one PDF source page and the beginning of the next
+    // on the same generated page. A source page may expand into several book
+    // pages as typography grows, but its first generated page always starts
+    // with content from that source page. This makes cross-layout restoration
+    // unambiguous and prevents page N from visibly landing on page N - 1.
+    if (
+      paginatedSourcePage !== undefined &&
+      block.page !== paginatedSourcePage &&
+      pages[pages.length - 1].length > 0
+    ) {
+      pages.push([]);
+      usedHeight = 0;
+    }
+    paginatedSourcePage = block.page;
+
     if (isRunningTitle(block)) {
       runningTitle = block.text.trim();
     }
@@ -842,7 +863,7 @@ function cachedBuildPages(
   paragraphSpacing: number,
 ) {
   const key = [
-    "framed-pages-v2",
+    "source-bounded-pages-v3",
     blocks.length,
     blocks[blocks.length - 1]?.id ?? "empty",
     blocks[blocks.length - 1]?.text.length ?? 0,
@@ -880,29 +901,11 @@ function pageAnchor(
   page: Segment[] | undefined,
   blocks: ExtractedPdfBlock[],
 ): PageAnchor | undefined {
-  const segment = page?.[0];
-  if (!segment) return undefined;
-  const block = blocks.find((item) => item.id === segment.blockId);
-  const firstWord = segment.text.match(/\S+/);
-  const blockOffset = segment.startOffset + (firstWord?.index ?? 0);
-  const prefix = block?.text.slice(0, blockOffset) ?? "";
-  return {
-    blockId: segment.blockId,
-    blockOffset,
-    wordIndex: prefix.match(/\S+/g)?.length ?? 0,
-  };
+  return captureHorizontalFlipAnchor(page, blocks);
 }
 
 function pageIndexForAnchor(pages: Segment[][], anchor?: PageAnchor) {
-  return generatedPageForAnchor(
-    pages,
-    anchor
-      ? {
-          sourceBlockId: anchor.blockId,
-          characterOffset: anchor.blockOffset,
-        }
-      : undefined,
-  );
+  return horizontalPageForFlipAnchor(pages, anchor);
 }
 
 export default function HorizontalReaderPager({
@@ -955,6 +958,11 @@ export default function HorizontalReaderPager({
   const visiblePageAnchorRef = useRef<PageAnchor | undefined>(undefined);
   const readyReportedRef = useRef(false);
   const navigatedDestinationKeyRef = useRef<string | null>(null);
+  const programmaticDestinationPageRef = useRef<number | null>(null);
+  const programmaticDestinationAnchorRef = useRef<PageAnchor | undefined>(
+    undefined,
+  );
+  const settledDestinationAnchorRef = useRef<PageAnchor | undefined>(undefined);
   const [paginationAnchor, setPaginationAnchor] = useState<PageAnchor>();
   const viewportFrameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingViewportRestoreRef = useRef(false);
@@ -1146,7 +1154,12 @@ export default function HorizontalReaderPager({
     (pageIndex: number, anchorOverride?: PageAnchor) => {
       if (!pages.length) return;
       const safeIndex = Math.max(0, Math.min(pages.length - 1, pageIndex));
-      const anchor = anchorOverride ?? pageAnchor(pages[safeIndex], blocks);
+      const anchor =
+        anchorOverride ??
+        (safeIndex === currentPageRef.current
+          ? settledDestinationAnchorRef.current
+          : undefined) ??
+        pageAnchor(pages[safeIndex], blocks);
       visiblePageAnchorRef.current = anchor;
       onPageChange?.(
         safeIndex + 1,
@@ -1157,6 +1170,19 @@ export default function HorizontalReaderPager({
     },
     [blocks, onPageChange, pages],
   );
+
+  useEffect(() => {
+    if (programmaticDestinationPageRef.current !== viewablePageIndex) return;
+    const confirmedAnchor = programmaticDestinationAnchorRef.current;
+    // Becoming viewable does not mean an iOS horizontal pager has finished
+    // settling.  In particular, a generated page can begin with the tail of
+    // the preceding source page.  Releasing the lock here lets the remaining
+    // native scroll events replace the explicit destination with that tail.
+    // Keep the discrete destination locked until the reader actually starts
+    // a drag; programmatic/layout scroll events must never change its anchor.
+    settledDestinationAnchorRef.current = confirmedAnchor;
+    reportPageChange(viewablePageIndex, confirmedAnchor);
+  }, [reportPageChange, viewablePageIndex]);
   const guideWords = useMemo(() => {
     if (guideMode !== "word") return [];
     return pages.flatMap((page, pageIndex) =>
@@ -1313,12 +1339,6 @@ export default function HorizontalReaderPager({
     ) {
       onExplicitPageResolved?.(resolvedSourcePage, resolvedAnchor);
     }
-    pagerRef.current?.scrollToOffset({
-      animated: false,
-      offset: destinationPage * width,
-    });
-    currentPageRef.current = destinationPage;
-    navigatedDestinationKeyRef.current = destinationNavigationKey;
     const exactOffset =
       destination.searchMatchIndex ?? destination.switchHighlightOffset;
     const exactBlock = destination.blockId
@@ -1333,7 +1353,23 @@ export default function HorizontalReaderPager({
               exactBlock?.text.slice(0, exactOffset).match(/\S+/g)?.length ?? 0,
           }
         : undefined;
+    programmaticDestinationPageRef.current = destinationPage;
+    programmaticDestinationAnchorRef.current = exactAnchor ?? resolvedAnchor;
+    settledDestinationAnchorRef.current = undefined;
+    pagerRef.current?.scrollToIndex({
+      animated: false,
+      index: destinationPage,
+    });
+    const settleFrame = requestAnimationFrame(() => {
+      pagerRef.current?.scrollToIndex({
+        animated: false,
+        index: destinationPage,
+      });
+    });
+    currentPageRef.current = destinationPage;
+    navigatedDestinationKeyRef.current = destinationNavigationKey;
     reportPageChange(destinationPage, exactAnchor);
+    return () => cancelAnimationFrame(settleFrame);
   }, [
     destination,
     destinationIsPending,
@@ -2187,7 +2223,7 @@ export default function HorizontalReaderPager({
         viewportFrameRef.current = setTimeout(() => {
           viewportFrameRef.current = null;
           setViewport({ width: nextWidth, height: nextHeight });
-        }, 80);
+        }, HORIZONTAL_FLIP_SETTLE_MS);
       }}
       onTouchStart={(event) => {
         touchStart.current = {
@@ -2232,6 +2268,9 @@ export default function HorizontalReaderPager({
           offset: width * pageIndex,
         })}
         onScrollBeginDrag={() => {
+          programmaticDestinationPageRef.current = null;
+          programmaticDestinationAnchorRef.current = undefined;
+          settledDestinationAnchorRef.current = undefined;
           onSwipeStart?.();
           if (activeSwitchHighlight) {
             setDismissedSwitchNonce(activeSwitchHighlight.nonce);
@@ -2253,6 +2292,7 @@ export default function HorizontalReaderPager({
               Math.round(event.nativeEvent.contentOffset.x / width),
             ),
           );
+          if (programmaticDestinationPageRef.current !== null) return;
           if (position === currentPageRef.current) return;
           currentPageRef.current = position;
           reportPageChange(position);
@@ -2270,6 +2310,7 @@ export default function HorizontalReaderPager({
               Math.round(event.nativeEvent.contentOffset.x / width),
             ),
           );
+          if (programmaticDestinationPageRef.current !== null) return;
           currentPageRef.current = position;
           if (destination?.searchQuery && position !== destinationPage) {
             setDismissedSearchNonce(destination.nonce);

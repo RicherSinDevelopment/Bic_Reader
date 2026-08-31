@@ -16,6 +16,7 @@ type OriginalPdfProps = {
   highlightTarget?: SwitchHighlightTarget | null;
   outlineOnly?: boolean;
   destination?: { page: number; nonce: number } | null;
+  resetZoomNonce?: number;
 };
 
 export type PdfOutlineItem = {
@@ -51,6 +52,7 @@ export default function OriginalPDF({
   highlightTarget,
   outlineOnly = false,
   destination,
+  resetZoomNonce = 0,
 }: OriginalPdfProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,7 +70,7 @@ export default function OriginalPDF({
   useEffect(() => {
     setErrorMessage(null);
     setLoading(true);
-  }, [pdfUri]);
+  }, [pdfUri, resetZoomNonce]);
 
   useEffect(() => {
     if (loading || !destination) return;
@@ -116,6 +118,7 @@ export default function OriginalPDF({
       )}
 
       <Pdf
+        key={`original-pdf-${resetZoomNonce}`}
         ref={pdfRef}
         source={source}
         page={Math.max(1, destination?.page ?? initialPage)}
@@ -123,6 +126,7 @@ export default function OriginalPDF({
         enablePaging={false}
         fitPolicy={0}
         minScale={1}
+        scale={1}
         maxScale={5}
         spacing={8}
         trustAllCerts={false}

@@ -1558,9 +1558,18 @@ export default function ReaderScreen() {
       return;
     if (!canonicalAnchor || canonicalAnchor.documentId !== pdfId) return;
     positionRestoreApplied.current = true;
+    // Reopening is not a live renderer-to-renderer transition. The freshly
+    // mounted reader briefly reports its default page-one viewport before its
+    // destination is applied, so recapturing here can replace the hydrated
+    // database position with that transient report. Keep the loaded anchor
+    // immutable for this one initial restore. Layout rotation and tab changes
+    // continue to use their own live capture paths.
     void runAnchorTransition(
       "reader",
       readerTransition === "pager" ? "horizontal" : "vertical",
+      undefined,
+      undefined,
+      canonicalAnchor,
     ).finally(() => setInitialRestoreCompleteFor(pdfId));
   }, [
     canonicalAnchor,

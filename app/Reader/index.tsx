@@ -46,7 +46,15 @@ import {
   type ExtractedPdfDocument,
 } from "@/modules/bic-pdf-reader";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Animated, AppState, StyleSheet, useColorScheme, useWindowDimensions, View } from "react-native";
+import {
+  ActivityIndicator,
+  Animated,
+  AppState,
+  StyleSheet,
+  useColorScheme,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import Reanimated, {
   Easing,
   ReduceMotion,
@@ -62,6 +70,10 @@ import {
 import { normalizeReaderBlocks } from "@/services/readerTypography";
 import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
 import { anchorController } from "@/architecture/anchor/AnchorController";
+import type {
+  FindWordAnchor,
+  FindWordTarget,
+} from "@/architecture/FindWordInOtherTab";
 import { useAnchorStore } from "@/architecture/anchor/AnchorStore";
 import {
   createVerticalAnchorAdapter,
@@ -81,7 +93,10 @@ import type {
   CanonicalAnchor,
   ReaderLayout as AnchorReaderLayout,
 } from "@/architecture/anchor/AnchorTypes";
-import { loadReaderPosition, saveReaderPosition } from "@/database/readerPositionRepository";
+import {
+  loadReaderPosition,
+  saveReaderPosition,
+} from "@/database/readerPositionRepository";
 import {
   translatedDestinationForAnchor,
   useTabSwitchTranslate,
@@ -263,18 +278,20 @@ export default function ReaderScreen() {
   const db = useSQLiteContext();
   const initiallyCachedPdf = pdfId ? peekCachedPdfById(pdfId) : null;
   const readerTransition = useReaderSettingsStore((state) => state.transition);
-  const readerPresentationKey = useReaderSettingsStore((state) => [
-    state.fontFamily,
-    state.fontSize,
-    state.lineHeight,
-    state.paragraphSpacing,
-    state.verticalMarginPreset,
-    state.horizontalMarginPreset,
-    state.letterSpacing,
-    state.wordSpacing,
-    state.bold ? 1 : 0,
-    state.automaticHyphenation ? 1 : 0,
-  ].join(":"));
+  const readerPresentationKey = useReaderSettingsStore((state) =>
+    [
+      state.fontFamily,
+      state.fontSize,
+      state.lineHeight,
+      state.paragraphSpacing,
+      state.verticalMarginPreset,
+      state.horizontalMarginPreset,
+      state.letterSpacing,
+      state.wordSpacing,
+      state.bold ? 1 : 0,
+      state.automaticHyphenation ? 1 : 0,
+    ].join(":"),
+  );
   const canonicalAnchor = useAnchorStore((state) => state.canonicalAnchor);
   const anchorTransition = useAnchorStore((state) => state.transition);
   const hideTopBarOnScroll = useReaderSettingsStore(
@@ -291,18 +308,28 @@ export default function ReaderScreen() {
   const isDark = useColorScheme() === "dark";
   const [pdf, setPdf] = useState<PdfDocument | null>(initiallyCachedPdf);
   const [isLoading, setIsLoading] = useState(!initiallyCachedPdf);
-  const [positionHydratedFor, setPositionHydratedFor] = useState<string | null>(null);
-  const [initialRestoreCompleteFor, setInitialRestoreCompleteFor] = useState<string | null>(null);
+  const [positionHydratedFor, setPositionHydratedFor] = useState<string | null>(
+    null,
+  );
+  const [initialRestoreCompleteFor, setInitialRestoreCompleteFor] = useState<
+    string | null
+  >(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [headerVisibility] = useState(() => new Animated.Value(1));
   const [activeTab, setActiveTab] = useState<ReaderMode>("reader");
   const [translationLanguage, setTranslationLanguage] =
     useState<TranslationLanguage>();
-  const [translatedBlocks, setTranslatedBlocks] = useState<ExtractedPdfBlock[]>([]);
+  const [translatedBlocks, setTranslatedBlocks] = useState<ExtractedPdfBlock[]>(
+    [],
+  );
   const [translationError, setTranslationError] = useState<string | null>(null);
-  const [translationPriorityVersion, setTranslationPriorityVersion] = useState(0);
-  const [translationCacheReadyFor, setTranslationCacheReadyFor] = useState<string | null>(null);
-  const [translatedReaderActivated, setTranslatedReaderActivated] = useState(false);
+  const [translationPriorityVersion, setTranslationPriorityVersion] =
+    useState(0);
+  const [translationCacheReadyFor, setTranslationCacheReadyFor] = useState<
+    string | null
+  >(null);
+  const [translatedReaderActivated, setTranslatedReaderActivated] =
+    useState(false);
   const [translatedChapterRequest, setTranslatedChapterRequest] = useState<{
     sourcePage: number;
     targetBlockId?: string;
@@ -331,8 +358,10 @@ export default function ReaderScreen() {
   const [readerCurrentPage, setReaderCurrentPage] = useState(1);
   const [readerDisplayCurrentPage, setReaderDisplayCurrentPage] = useState(1);
   const [readerDisplayPageCount, setReaderDisplayPageCount] = useState(0);
-  const [translatedDisplayCurrentPage, setTranslatedDisplayCurrentPage] = useState(1);
-  const [translatedDisplayPageCount, setTranslatedDisplayPageCount] = useState(0);
+  const [translatedDisplayCurrentPage, setTranslatedDisplayCurrentPage] =
+    useState(1);
+  const [translatedDisplayPageCount, setTranslatedDisplayPageCount] =
+    useState(0);
   const [readerChapterPageMap, setReaderChapterPageMap] = useState<
     Record<number, number>
   >({});
@@ -388,10 +417,12 @@ export default function ReaderScreen() {
     new Map<string, ExtractedPdfBlock>(),
   );
   const translationQueue = React.useRef<Promise<void>>(Promise.resolve());
-  const translationPersistenceQueue = React.useRef<Promise<void>>(Promise.resolve());
-  const translationPublishTimer = React.useRef<ReturnType<typeof setTimeout> | null>(
-    null,
+  const translationPersistenceQueue = React.useRef<Promise<void>>(
+    Promise.resolve(),
   );
+  const translationPublishTimer = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const scheduledTranslationLanguage = React.useRef<string | null>(null);
   const activeTranslationLanguage = React.useRef<string | null>(null);
   const activeTabRef = React.useRef<ReaderMode>("reader");
@@ -409,7 +440,9 @@ export default function ReaderScreen() {
   const previousPresentationKey = React.useRef(
     `${readerPresentationKey}:${isLandscape ? "landscape" : "portrait"}`,
   );
-  const positionPersistenceTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const positionPersistenceTimer = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const {
     actualReaderAnchor,
     actualTranslatedAnchor,
@@ -424,17 +457,21 @@ export default function ReaderScreen() {
     translatedBlocks,
   });
   const canonicalOriginalHighlight = useMemo(
-    () => originalHighlightTarget(canonicalAnchor, readerBlocks, readerPageSizes),
+    () =>
+      originalHighlightTarget(canonicalAnchor, readerBlocks, readerPageSizes),
     [canonicalAnchor, readerBlocks, readerPageSizes],
   );
 
-  const handleOrientationChange = useCallback((landscape: boolean) => {
-    // Restore portrait chrome in the same React batch as orientation. A
-    // separate follow-up effect produced a visible hidden-then-shown frame.
-    headerVisibility.stopAnimation();
-    headerVisibility.setValue(landscape ? 0 : 1);
-    if (!landscape) setReaderChromeHidden(false);
-  }, [headerVisibility]);
+  const handleOrientationChange = useCallback(
+    (landscape: boolean) => {
+      // Restore portrait chrome in the same React batch as orientation. A
+      // separate follow-up effect produced a visible hidden-then-shown frame.
+      headerVisibility.stopAnimation();
+      headerVisibility.setValue(landscape ? 0 : 1);
+      if (!landscape) setReaderChromeHidden(false);
+    },
+    [headerVisibility],
+  );
   useScreenRotation(handleOrientationChange);
 
   activeTranslationLanguage.current = translationLanguage?.code ?? null;
@@ -455,30 +492,38 @@ export default function ReaderScreen() {
     positionRestoreApplied.current = false;
     useAnchorStore.getState().resetForDocument(pdfId);
     useAnchorStore.getState().setActiveMode("reader");
-    useAnchorStore.getState().setActiveLayout(
-      useReaderSettingsStore.getState().transition === "pager"
-        ? "horizontal"
-        : "vertical",
-    );
+    useAnchorStore
+      .getState()
+      .setActiveLayout(
+        useReaderSettingsStore.getState().transition === "pager"
+          ? "horizontal"
+          : "vertical",
+      );
     let cancelled = false;
-    void loadReaderPosition(db, pdfId).then((anchor) => {
-      if (cancelled) return;
-      anchorController.initialize(anchor ?? {
-        documentId: pdfId,
-        sourcePage: Math.max(1, peekCachedPdfById(pdfId)?.currentPage || 1),
+    void loadReaderPosition(db, pdfId)
+      .then((anchor) => {
+        if (cancelled) return;
+        anchorController.initialize(
+          anchor ?? {
+            documentId: pdfId,
+            sourcePage: Math.max(1, peekCachedPdfById(pdfId)?.currentPage || 1),
+          },
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        anchorController.initialize({
+          documentId: pdfId,
+          sourcePage: Math.max(1, peekCachedPdfById(pdfId)?.currentPage || 1),
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setPositionHydratedFor(pdfId);
       });
-    }).catch(() => {
-      if (cancelled) return;
-      anchorController.initialize({
-        documentId: pdfId,
-        sourcePage: Math.max(1, peekCachedPdfById(pdfId)?.currentPage || 1),
-      });
-    }).finally(() => {
-      if (!cancelled) setPositionHydratedFor(pdfId);
-    });
     anchorController.setPersistenceScheduler((anchor) => {
       if (anchor.documentId !== pdfId) return;
-      if (positionPersistenceTimer.current) clearTimeout(positionPersistenceTimer.current);
+      if (positionPersistenceTimer.current)
+        clearTimeout(positionPersistenceTimer.current);
       positionPersistenceTimer.current = setTimeout(() => {
         positionPersistenceTimer.current = null;
         void saveReaderPosition(db, anchor);
@@ -486,7 +531,9 @@ export default function ReaderScreen() {
           db,
           anchor.documentId,
           anchor.sourcePage,
-          latestReaderPageCount.current || latestPdf.current?.totalPages || anchor.sourcePage,
+          latestReaderPageCount.current ||
+            latestPdf.current?.totalPages ||
+            anchor.sourcePage,
         );
       }, 750);
     });
@@ -532,16 +579,21 @@ export default function ReaderScreen() {
     const cacheKey = `${pdfId}:${languageCode}`;
     let cancelled = false;
     setTranslationCacheReadyFor(null);
-    void getCachedPdfTranslations(db, pdfId, languageCode).then((blocks) => {
-      if (cancelled) return;
-      blocks.forEach((block) => {
-        const sourceId = block.id.replace(`translated-${languageCode}-`, "");
-        translatedBlockCache.current.set(`${languageCode}:${sourceId}`, block);
+    void getCachedPdfTranslations(db, pdfId, languageCode)
+      .then((blocks) => {
+        if (cancelled) return;
+        blocks.forEach((block) => {
+          const sourceId = block.id.replace(`translated-${languageCode}-`, "");
+          translatedBlockCache.current.set(
+            `${languageCode}:${sourceId}`,
+            block,
+          );
+        });
+        setTranslationCacheReadyFor(cacheKey);
+      })
+      .catch(() => {
+        if (!cancelled) setTranslationCacheReadyFor(cacheKey);
       });
-      setTranslationCacheReadyFor(cacheKey);
-    }).catch(() => {
-      if (!cancelled) setTranslationCacheReadyFor(cacheKey);
-    });
     return () => {
       cancelled = true;
     };
@@ -643,11 +695,12 @@ export default function ReaderScreen() {
           }
           const latestContentBlocks = latestReaderBlocks.current;
           const firstContentPage = latestContentBlocks[0]?.page;
-          const warmContentBlocks = firstContentPage === undefined
-            ? []
-            : latestContentBlocks.filter(
-                (block) => block.page <= firstContentPage + 1,
-              );
+          const warmContentBlocks =
+            firstContentPage === undefined
+              ? []
+              : latestContentBlocks.filter(
+                  (block) => block.page <= firstContentPage + 1,
+                );
           const warmContentIds = new Set(
             warmContentBlocks.map((block) => block.id),
           );
@@ -669,11 +722,13 @@ export default function ReaderScreen() {
           );
 
           const hasTranslatedContent = latestContentBlocks.some((block) =>
-            Boolean(currentCachedTranslation(
-              translatedBlockCache.current,
-              languageCode,
-              block,
-            )),
+            Boolean(
+              currentCachedTranslation(
+                translatedBlockCache.current,
+                languageCode,
+                block,
+              ),
+            ),
           );
           if (
             !hasTranslatedContent &&
@@ -682,8 +737,7 @@ export default function ReaderScreen() {
           ) {
             missingBlocks = missingBlocks.filter(
               (block) =>
-                !block.id.startsWith("toc-") &&
-                block.page === firstContentPage,
+                !block.id.startsWith("toc-") && block.page === firstContentPage,
             );
           }
 
@@ -717,7 +771,6 @@ export default function ReaderScreen() {
               ...missingBlocks.filter((block) => block.id.startsWith("toc-")),
             ];
             missingBlocks = [...nearbyBlocks, ...sequentialBlocks];
-
           }
           // Bound the sweep to a window around the reader's position (plus the
           // opening pages) so the Translated tab becomes usable quickly and the
@@ -730,9 +783,11 @@ export default function ReaderScreen() {
             (block) =>
               block.page <= 2 ||
               (block.page >=
-                Math.max(1, translationAnchorPage - TRANSLATION_WINDOW_BEHIND) &&
-                block.page <=
-                  translationAnchorPage + TRANSLATION_WINDOW_AHEAD),
+                Math.max(
+                  1,
+                  translationAnchorPage - TRANSLATION_WINDOW_BEHIND,
+                ) &&
+                block.page <= translationAnchorPage + TRANSLATION_WINDOW_AHEAD),
           );
           missingBlocks = missingBlocks.slice(0, TRANSLATION_WORK_CHUNK);
 
@@ -757,10 +812,13 @@ export default function ReaderScreen() {
                   block,
                 );
               });
-              translationPersistenceQueue.current = translationPersistenceQueue.current
-                .catch(() => undefined)
-                .then(() => savePdfTranslations(db, pdfId, languageCode, batch))
-                .catch(() => undefined);
+              translationPersistenceQueue.current =
+                translationPersistenceQueue.current
+                  .catch(() => undefined)
+                  .then(() =>
+                    savePdfTranslations(db, pdfId, languageCode, batch),
+                  )
+                  .catch(() => undefined);
 
               if (activeTranslationLanguage.current === languageCode) {
                 scheduleTranslatedPublish();
@@ -786,9 +844,7 @@ export default function ReaderScreen() {
       })
       .catch((error) => {
         if (activeTranslationLanguage.current !== languageCode) return;
-        if (
-          isBookTranslationCancellation(error)
-        ) {
+        if (isBookTranslationCancellation(error)) {
           return;
         }
         setTranslationError(
@@ -897,7 +953,9 @@ export default function ReaderScreen() {
           .then((savedLanguageCode) => {
             if (cancelled || !savedLanguageCode) return;
             setTranslationLanguage(
-              translationLanguages.find(({ code }) => code === savedLanguageCode),
+              translationLanguages.find(
+                ({ code }) => code === savedLanguageCode,
+              ),
             );
           })
           .catch(() => undefined);
@@ -929,103 +987,101 @@ export default function ReaderScreen() {
       try {
         let document: ExtractedPdfDocument | null = null;
 
-          const publish = (value: ExtractedPdfDocument) => {
-            if (!cancelled) {
-              const snapshot = readerSnapshot(value);
-              setReaderBlocks(snapshot.blocks);
-              setReaderPageCount(value.pageCount);
-              setReaderPageSizes(snapshot.pageSizes);
-              // Decorative/blank opening pages should not leave Reader Mode
-              // looking empty while later batches continue toward real text.
-              setReaderLoading(
-                snapshot.blocks.length === 0 && value.pages.length < value.pageCount,
-              );
-              return snapshot.blocks.length > 0;
-            }
-            return false;
-          };
-
-          const preview = await getCachedPdfExtractionPreview(db, pdfId);
-          if (preview?.pages.length) {
-            const previewHasContent = publish(preview);
-            if (previewHasContent) {
-              // Let the first cached page paint before parsing and normalizing
-              // a potentially very large full-book JSON cache.
-              for (
-                let frame = 0;
-                frame < 32 && !cancelled && !readerContentReadyRef.current;
-                frame += 1
-              ) {
-                await new Promise<void>((resolve) => setTimeout(resolve, 16));
-              }
-            }
-            document = await getCachedPdfExtraction(db, pdfId) ?? preview;
-            if (document !== preview) publish(document);
+        const publish = (value: ExtractedPdfDocument) => {
+          if (!cancelled) {
+            const snapshot = readerSnapshot(value);
+            setReaderBlocks(snapshot.blocks);
+            setReaderPageCount(value.pageCount);
+            setReaderPageSizes(snapshot.pageSizes);
+            // Decorative/blank opening pages should not leave Reader Mode
+            // looking empty while later batches continue toward real text.
+            setReaderLoading(
+              snapshot.blocks.length === 0 &&
+                value.pages.length < value.pageCount,
+            );
+            return snapshot.blocks.length > 0;
           }
+          return false;
+        };
 
-          let nextPage = firstMissingPageIndex(document);
-          let pageCount = document?.pageCount ?? Number.MAX_SAFE_INTEGER;
-          let lastSavedPageCount = document?.pages.length ?? 0;
-
-          while (!cancelled && nextPage < pageCount) {
-            let requestedPage: number | null = null;
-            while (
-              requestedPage === null &&
-              requestedExtractionPages.current.length > 0
+        const preview = await getCachedPdfExtractionPreview(db, pdfId);
+        if (preview?.pages.length) {
+          const previewHasContent = publish(preview);
+          if (previewHasContent) {
+            // Let the first cached page paint before parsing and normalizing
+            // a potentially very large full-book JSON cache.
+            for (
+              let frame = 0;
+              frame < 32 && !cancelled && !readerContentReadyRef.current;
+              frame += 1
             ) {
-              const candidate = requestedExtractionPages.current.shift()!;
-              if (!document?.pages.some((page) => page.page === candidate)) {
-                requestedPage = candidate;
-              }
+              await new Promise<void>((resolve) => setTimeout(resolve, 16));
             }
-            const requestIsMissing = requestedPage !== null;
-            const firstPage = requestedPage !== null
-              ? Math.max(
-                  0,
-                  requestedPage - 1 - CHAPTER_EXTRACTION_PAGES_ABOVE,
-                )
+          }
+          document = (await getCachedPdfExtraction(db, pdfId)) ?? preview;
+          if (document !== preview) publish(document);
+        }
+
+        let nextPage = firstMissingPageIndex(document);
+        let pageCount = document?.pageCount ?? Number.MAX_SAFE_INTEGER;
+        let lastSavedPageCount = document?.pages.length ?? 0;
+
+        while (!cancelled && nextPage < pageCount) {
+          let requestedPage: number | null = null;
+          while (
+            requestedPage === null &&
+            requestedExtractionPages.current.length > 0
+          ) {
+            const candidate = requestedExtractionPages.current.shift()!;
+            if (!document?.pages.some((page) => page.page === candidate)) {
+              requestedPage = candidate;
+            }
+          }
+          const requestIsMissing = requestedPage !== null;
+          const firstPage =
+            requestedPage !== null
+              ? Math.max(0, requestedPage - 1 - CHAPTER_EXTRACTION_PAGES_ABOVE)
               : nextPage;
 
-            const extractedPageCount = document?.pages.length ?? 0;
-            const batchSize =
-              requestIsMissing
-                ? CHAPTER_EXTRACTION_PAGE_COUNT
-                : extractedPageCount === 0 && firstPage === 0
-                ? FIRST_READER_PAGE_BATCH
-                : firstPage < WARM_READER_PAGE_COUNT
-                  ? WARM_READER_PAGE_COUNT - firstPage
-                  : BACKGROUND_READER_PAGE_BATCH;
-            const chunk = await extractPdfDocumentRange(
-              pdf.uri,
-              firstPage,
-              batchSize,
-            );
-            const pagesByNumber = new Map(
-              document?.pages.map((page) => [page.page, page]) ?? [],
-            );
-            chunk.pages.forEach((page) => pagesByNumber.set(page.page, page));
-            document = {
-              pageCount: chunk.pageCount,
-              pages: Array.from(pagesByNumber.values()).sort(
-                (a, b) => a.page - b.page,
-              ),
-            };
-            pageCount = document.pageCount;
-            nextPage = firstMissingPageIndex(document);
-            publish(document);
-            const shouldSaveExtraction =
-              (lastSavedPageCount === 0 && document.pages.length > 0) ||
-              document.pages.length - lastSavedPageCount >=
-                EXTRACTION_CACHE_PAGE_INTERVAL ||
-              nextPage >= pageCount;
-            if (shouldSaveExtraction) {
-              await savePdfExtraction(db, pdfId, document);
-              lastSavedPageCount = document.pages.length;
-            }
-
-            if (chunk.pages.length === 0) break;
-            await new Promise<void>((resolve) => setTimeout(resolve, 16));
+          const extractedPageCount = document?.pages.length ?? 0;
+          const batchSize = requestIsMissing
+            ? CHAPTER_EXTRACTION_PAGE_COUNT
+            : extractedPageCount === 0 && firstPage === 0
+              ? FIRST_READER_PAGE_BATCH
+              : firstPage < WARM_READER_PAGE_COUNT
+                ? WARM_READER_PAGE_COUNT - firstPage
+                : BACKGROUND_READER_PAGE_BATCH;
+          const chunk = await extractPdfDocumentRange(
+            pdf.uri,
+            firstPage,
+            batchSize,
+          );
+          const pagesByNumber = new Map(
+            document?.pages.map((page) => [page.page, page]) ?? [],
+          );
+          chunk.pages.forEach((page) => pagesByNumber.set(page.page, page));
+          document = {
+            pageCount: chunk.pageCount,
+            pages: Array.from(pagesByNumber.values()).sort(
+              (a, b) => a.page - b.page,
+            ),
+          };
+          pageCount = document.pageCount;
+          nextPage = firstMissingPageIndex(document);
+          publish(document);
+          const shouldSaveExtraction =
+            (lastSavedPageCount === 0 && document.pages.length > 0) ||
+            document.pages.length - lastSavedPageCount >=
+              EXTRACTION_CACHE_PAGE_INTERVAL ||
+            nextPage >= pageCount;
+          if (shouldSaveExtraction) {
+            await savePdfExtraction(db, pdfId, document);
+            lastSavedPageCount = document.pages.length;
           }
+
+          if (chunk.pages.length === 0) break;
+          await new Promise<void>((resolve) => setTimeout(resolve, 16));
+        }
       } catch (error) {
         if (!cancelled) {
           setReaderError(
@@ -1062,17 +1118,23 @@ export default function ReaderScreen() {
 
   const captureCanonicalAnchor = useCallback((): CanonicalAnchor | null => {
     const current = anchorController.current();
-    const live = activeTabRef.current === "reader"
-      ? actualReaderAnchor.current
-      : activeTabRef.current === "translated"
-        ? actualTranslatedAnchor.current
-        : null;
+    const live =
+      activeTabRef.current === "reader"
+        ? actualReaderAnchor.current
+        : activeTabRef.current === "translated"
+          ? actualTranslatedAnchor.current
+          : null;
     // Explicit navigation (TOC/search/page picker) commits a newer revision
     // immediately before starting its transition. It must outrank the old live
     // viewport. For ordinary tab switches revisions are equal, so the precise
     // live word remains the preferred capture.
-    if (live && live.documentId === pdfId && live.sourceBlockId &&
-        (!current || live.revision >= current.revision)) return live;
+    if (
+      live &&
+      live.documentId === pdfId &&
+      live.sourceBlockId &&
+      (!current || live.revision >= current.revision)
+    )
+      return live;
     if (!current || current.documentId !== pdfId) return null;
     if (current.sourceBlockId) return current;
     const nearestBlock = latestReaderBlocks.current.find(
@@ -1090,279 +1152,319 @@ export default function ReaderScreen() {
       : current;
   }, [actualReaderAnchor, actualTranslatedAnchor, pdfId]);
 
-  const runAnchorTransition = useCallback(async (
-    targetMode: ReaderMode,
-    targetLayout: AnchorReaderLayout = readerTransition === "pager"
-      ? "horizontal"
-      : "vertical",
-    fromLayout?: AnchorReaderLayout,
-    readerDestinationOverride?: {
-      searchQuery?: string;
-      searchMatchIndex?: number;
-      switchHighlightWordIndex?: number;
-    },
-  ) => {
-    const sourceLayout = fromLayout ?? useAnchorStore.getState().activeLayout;
-    const from = { mode: activeTabRef.current, layout: sourceLayout };
-    const target = { mode: targetMode, layout: targetLayout };
-    const readerPorts = {
-      isReady: (anchor: CanonicalAnchor) => {
-        const blocks = targetMode === "translated"
-          ? latestTranslatedBlocks.current
-          : latestReaderBlocks.current;
-        const expectedBlockId = targetMode === "translated" && translationLanguage
-          ? anchor.sourceBlockId
-            ? `translated-${translationLanguage.code}-${anchor.sourceBlockId}`
-            : undefined
-          : anchor.sourceBlockId;
-        return (targetMode === "translated"
-          ? translatedContentReadyRef.current
-          : readerContentReadyRef.current) &&
-          (!expectedBlockId || blocks.some((block) => block.id === expectedBlockId));
+  const runAnchorTransition = useCallback(
+    async (
+      targetMode: ReaderMode,
+      targetLayout: AnchorReaderLayout = readerTransition === "pager"
+        ? "horizontal"
+        : "vertical",
+      fromLayout?: AnchorReaderLayout,
+      readerDestinationOverride?: {
+        searchQuery?: string;
+        searchMatchIndex?: number;
+        switchHighlightWordIndex?: number;
       },
-      restore: (anchor: CanonicalAnchor, transitionId: number) => {
-        if (!transitionController.isCurrent(transitionId)) return;
-        if (targetMode === "translated" && translationLanguage) {
-          setTranslatedDestination(translatedDestinationForAnchor(
-            anchor,
-            translationLanguage.code,
-            latestTranslatedBlocks.current,
-            transitionId,
-          ));
-          setTranslatedSwitchHighlight(null);
-          setActiveTab("translated");
-          return;
-        }
-        setReaderDestination({
-          ...verticalDestination(anchor, transitionId),
-          ...readerDestinationOverride,
-          nonce: transitionId,
-        });
-        setReaderSwitchHighlight(null);
-        setActiveTab("reader");
-      },
-      actual: () => targetMode === "translated"
-        ? actualTranslatedAnchor.current
-        : actualReaderAnchor.current,
-      isTransitionCurrent: (id: number) => transitionController.isCurrent(id),
-    };
-    const adapter = targetMode === "original"
-      ? createOriginalAnchorAdapter({
-          isReady: () => originalContentReadyRef.current,
-          restore: (destination, transitionId) => {
-            if (!transitionController.isCurrent(transitionId)) return;
-            pendingOriginalPageRef.current = destination.page;
-            setOriginalCurrentPage(destination.page);
-            setOriginalDestination(destination);
-            setReaderChromeHidden(false);
-            setActiveTab("original");
-          },
-          currentPage: () => originalCurrentPageRef.current,
-        })
-      : targetLayout === "horizontal"
-        ? createHorizontalAnchorAdapter(
-            readerPorts,
-            {
-              verifyTimeoutMs: targetMode === "translated" ? 4_000 : 2_500,
-              verificationAnchor: (anchor) => {
-                const targetBlock = targetMode === "translated" && translationLanguage
-                  ? latestTranslatedBlocks.current.find((block) => block.id ===
-                      `translated-${translationLanguage.code}-${anchor.sourceBlockId}`)
-                  : latestReaderBlocks.current.find((block) =>
-                      block.id === anchor.sourceBlockId,
-                    );
-                const words = targetBlock
-                  ? Array.from(targetBlock.text.matchAll(/\S+/g))
-                  : [];
-                const wordIndex = proportionalWordIndex(anchor.blockProgress, words.length);
-                return {
-                  ...anchor,
-                  wordIndex,
-                  characterOffset: words[wordIndex]?.index,
-                  blockProgress: words.length > 1
-                    ? wordIndex / (words.length - 1)
-                    : 0,
-                };
-              },
-            },
-          )
-        : createVerticalAnchorAdapter(
-            readerPorts,
-            {
-              verifyTimeoutMs: targetMode === "translated" ? 4_000 : 2_500,
-              verificationAnchor: (anchor) => {
-                const targetBlock = targetMode === "translated" && translationLanguage
-                  ? latestTranslatedBlocks.current.find((block) => block.id ===
-                      `translated-${translationLanguage.code}-${anchor.sourceBlockId}`)
-                  : latestReaderBlocks.current.find((block) =>
-                      block.id === anchor.sourceBlockId,
-                    );
-                const words = targetBlock
-                  ? Array.from(targetBlock.text.matchAll(/\S+/g))
-                  : [];
-                const wordIndex = proportionalWordIndex(anchor.blockProgress, words.length);
-                return {
-                  ...anchor,
-                  wordIndex,
-                  characterOffset: words[wordIndex]?.index,
-                  blockProgress: words.length > 1
-                    ? wordIndex / (words.length - 1)
-                    : 0,
-                };
-              },
-            },
+    ) => {
+      const sourceLayout = fromLayout ?? useAnchorStore.getState().activeLayout;
+      const from = { mode: activeTabRef.current, layout: sourceLayout };
+      const target = { mode: targetMode, layout: targetLayout };
+      const readerPorts = {
+        isReady: (anchor: CanonicalAnchor) => {
+          const blocks =
+            targetMode === "translated"
+              ? latestTranslatedBlocks.current
+              : latestReaderBlocks.current;
+          const expectedBlockId =
+            targetMode === "translated" && translationLanguage
+              ? anchor.sourceBlockId
+                ? `translated-${translationLanguage.code}-${anchor.sourceBlockId}`
+                : undefined
+              : anchor.sourceBlockId;
+          return (
+            (targetMode === "translated"
+              ? translatedContentReadyRef.current
+              : readerContentReadyRef.current) &&
+            (!expectedBlockId ||
+              blocks.some((block) => block.id === expectedBlockId))
           );
-
-    const succeeded = await transitionController.run({
-      from,
-      target,
-      capture: captureCanonicalAnchor,
-      prepare: async (anchor, transitionId) => {
-        if (targetMode === "original") {
-          return waitForCurrentTransition(
-            transitionId,
-            () => originalContentReadyRef.current,
-          );
-        }
-        if (targetMode === "reader") {
-          const targetAvailable = anchor.sourceBlockId
-            ? latestReaderBlocks.current.some((block) => block.id === anchor.sourceBlockId)
-            : Boolean(latestReaderPageSizes.current[anchor.sourcePage]);
-          if (readerContentReadyRef.current && targetAvailable) return true;
-          if (!targetAvailable) requestedExtractionPages.current.unshift(anchor.sourcePage);
-          return waitForCurrentTransition(
-            transitionId,
-            () => readerContentReadyRef.current && (
-              latestReaderBlocks.current.some((block) => anchor.sourceBlockId
-                ? block.id === anchor.sourceBlockId
-                : block.page === anchor.sourcePage) ||
-              (!anchor.sourceBlockId && Boolean(
-                latestReaderPageSizes.current[anchor.sourcePage],
-              ))
-            ),
-          );
-        }
-        if (!translationLanguage) return false;
-        const translatedTargetId = anchor.sourceBlockId
-          ? `translated-${translationLanguage.code}-${anchor.sourceBlockId}`
-          : undefined;
-        latestTranslationError.current = null;
-        setTranslationError(null);
-        setTranslatedReaderActivated(true);
-        setActiveTab("translated");
-        requestedTranslationPage.current = anchor.sourcePage;
-        requestedTranslationBlockId.current = anchor.sourceBlockId ?? null;
-        requestedExtractionPages.current.unshift(anchor.sourcePage);
-        setTranslatedChapterRequest({
-          sourcePage: anchor.sourcePage,
-          targetBlockId: translatedTargetId,
-          targetWordProgress: anchor.blockProgress,
-          nonce: transitionId,
-        });
-        // Deliver the destination before waiting for the translation to land so
-        // the translated reader immediately centers its append window on the
-        // target page. As on-demand translation completes, the blocks append and
-        // the renderer scrolls to the destination the moment it exists instead
-        // of floating on stale cached pages.
-        setTranslatedDestination(translatedDestinationForAnchor(
-          anchor,
-          translationLanguage.code,
-          latestTranslatedBlocks.current,
-          transitionId,
-        ));
-        setTranslationPriorityVersion((version) => version + 1);
-        const ready = await waitForCurrentTransition(
-          transitionId,
-          () => {
-            const sourcePageBlocks = latestReaderBlocks.current.filter(
-              (block) => block.page === anchor.sourcePage && block.text.trim(),
-            );
-            if (sourcePageBlocks.length === 0) return false;
-            const pageIsComplete = sourcePageBlocks.every((sourceBlock) =>
-              latestTranslatedBlocks.current.some(
-                (translatedBlock) => translatedBlock.id ===
-                  `translated-${translationLanguage.code}-${sourceBlock.id}`,
+        },
+        restore: (anchor: CanonicalAnchor, transitionId: number) => {
+          if (!transitionController.isCurrent(transitionId)) return;
+          if (targetMode === "translated" && translationLanguage) {
+            setTranslatedDestination(
+              translatedDestinationForAnchor(
+                anchor,
+                translationLanguage.code,
+                latestTranslatedBlocks.current,
+                transitionId,
               ),
             );
-            return pageIsComplete && (!translatedTargetId ||
-              latestTranslatedBlocks.current.some(
-                (block) => block.id === translatedTargetId,
-              ));
-          },
-          60_000,
-          () => Boolean(latestTranslationError.current),
-        );
-        if (transitionController.isCurrent(transitionId)) {
-          setTranslatedChapterRequest((current) =>
-            current?.nonce === transitionId ? null : current,
-          );
-        }
-        return ready;
-      },
-      adapter,
-    });
-    if (!succeeded) {
-      const transition = useAnchorStore.getState().transition;
-      if (transition.status === "failed" && transition.target?.mode === targetMode) {
-        if (targetMode === "original") pendingOriginalPageRef.current = null;
-        if (targetMode === "reader") {
-          // Do not keep re-delivering an unreachable destination: the renderer
-          // would keep re-scrolling against the user instead of settling.
-          setReaderDestination(null);
-        }
-        if (targetMode === "translated") {
-          setTranslatedDestination(null);
-          setTranslatedChapterRequest(null);
-          setTranslationError((current) =>
-            current ?? "Unable to restore the translated reading position.",
-          );
-          // Translation content remains usable even if exact verification
-          // fails. Never eject the user back to the source tab.
+            setTranslatedSwitchHighlight(null);
+            setActiveTab("translated");
+            return;
+          }
+          setReaderDestination({
+            ...verticalDestination(anchor, transitionId),
+            ...readerDestinationOverride,
+            nonce: transitionId,
+          });
+          setReaderSwitchHighlight(null);
+          setActiveTab("reader");
+        },
+        actual: () =>
+          targetMode === "translated"
+            ? actualTranslatedAnchor.current
+            : actualReaderAnchor.current,
+        isTransitionCurrent: (id: number) => transitionController.isCurrent(id),
+      };
+      const adapter =
+        targetMode === "original"
+          ? createOriginalAnchorAdapter({
+              isReady: () => originalContentReadyRef.current,
+              restore: (destination, transitionId) => {
+                if (!transitionController.isCurrent(transitionId)) return;
+                pendingOriginalPageRef.current = destination.page;
+                setOriginalCurrentPage(destination.page);
+                setOriginalDestination(destination);
+                setReaderChromeHidden(false);
+                setActiveTab("original");
+              },
+              currentPage: () => originalCurrentPageRef.current,
+            })
+          : targetLayout === "horizontal"
+            ? createHorizontalAnchorAdapter(readerPorts, {
+                verifyTimeoutMs: targetMode === "translated" ? 4_000 : 2_500,
+                verificationAnchor: (anchor) => {
+                  const targetBlock =
+                    targetMode === "translated" && translationLanguage
+                      ? latestTranslatedBlocks.current.find(
+                          (block) =>
+                            block.id ===
+                            `translated-${translationLanguage.code}-${anchor.sourceBlockId}`,
+                        )
+                      : latestReaderBlocks.current.find(
+                          (block) => block.id === anchor.sourceBlockId,
+                        );
+                  const words = targetBlock
+                    ? Array.from(targetBlock.text.matchAll(/\S+/g))
+                    : [];
+                  const wordIndex = proportionalWordIndex(
+                    anchor.blockProgress,
+                    words.length,
+                  );
+                  return {
+                    ...anchor,
+                    wordIndex,
+                    characterOffset: words[wordIndex]?.index,
+                    blockProgress:
+                      words.length > 1 ? wordIndex / (words.length - 1) : 0,
+                  };
+                },
+              })
+            : createVerticalAnchorAdapter(readerPorts, {
+                verifyTimeoutMs: targetMode === "translated" ? 4_000 : 2_500,
+                verificationAnchor: (anchor) => {
+                  const targetBlock =
+                    targetMode === "translated" && translationLanguage
+                      ? latestTranslatedBlocks.current.find(
+                          (block) =>
+                            block.id ===
+                            `translated-${translationLanguage.code}-${anchor.sourceBlockId}`,
+                        )
+                      : latestReaderBlocks.current.find(
+                          (block) => block.id === anchor.sourceBlockId,
+                        );
+                  const words = targetBlock
+                    ? Array.from(targetBlock.text.matchAll(/\S+/g))
+                    : [];
+                  const wordIndex = proportionalWordIndex(
+                    anchor.blockProgress,
+                    words.length,
+                  );
+                  return {
+                    ...anchor,
+                    wordIndex,
+                    characterOffset: words[wordIndex]?.index,
+                    blockProgress:
+                      words.length > 1 ? wordIndex / (words.length - 1) : 0,
+                  };
+                },
+              });
+
+      const succeeded = await transitionController.run({
+        from,
+        target,
+        capture: captureCanonicalAnchor,
+        prepare: async (anchor, transitionId) => {
+          if (targetMode === "original") {
+            return waitForCurrentTransition(
+              transitionId,
+              () => originalContentReadyRef.current,
+            );
+          }
+          if (targetMode === "reader") {
+            const targetAvailable = anchor.sourceBlockId
+              ? latestReaderBlocks.current.some(
+                  (block) => block.id === anchor.sourceBlockId,
+                )
+              : Boolean(latestReaderPageSizes.current[anchor.sourcePage]);
+            if (readerContentReadyRef.current && targetAvailable) return true;
+            if (!targetAvailable)
+              requestedExtractionPages.current.unshift(anchor.sourcePage);
+            return waitForCurrentTransition(
+              transitionId,
+              () =>
+                readerContentReadyRef.current &&
+                (latestReaderBlocks.current.some((block) =>
+                  anchor.sourceBlockId
+                    ? block.id === anchor.sourceBlockId
+                    : block.page === anchor.sourcePage,
+                ) ||
+                  (!anchor.sourceBlockId &&
+                    Boolean(latestReaderPageSizes.current[anchor.sourcePage]))),
+            );
+          }
+          if (!translationLanguage) return false;
+          const translatedTargetId = anchor.sourceBlockId
+            ? `translated-${translationLanguage.code}-${anchor.sourceBlockId}`
+            : undefined;
+          latestTranslationError.current = null;
+          setTranslationError(null);
+          setTranslatedReaderActivated(true);
           setActiveTab("translated");
+          requestedTranslationPage.current = anchor.sourcePage;
+          requestedTranslationBlockId.current = anchor.sourceBlockId ?? null;
+          requestedExtractionPages.current.unshift(anchor.sourcePage);
+          setTranslatedChapterRequest({
+            sourcePage: anchor.sourcePage,
+            targetBlockId: translatedTargetId,
+            targetWordProgress: anchor.blockProgress,
+            nonce: transitionId,
+          });
+          // Deliver the destination before waiting for the translation to land so
+          // the translated reader immediately centers its append window on the
+          // target page. As on-demand translation completes, the blocks append and
+          // the renderer scrolls to the destination the moment it exists instead
+          // of floating on stale cached pages.
+          setTranslatedDestination(
+            translatedDestinationForAnchor(
+              anchor,
+              translationLanguage.code,
+              latestTranslatedBlocks.current,
+              transitionId,
+            ),
+          );
+          setTranslationPriorityVersion((version) => version + 1);
+          const ready = await waitForCurrentTransition(
+            transitionId,
+            () => {
+              const sourcePageBlocks = latestReaderBlocks.current.filter(
+                (block) =>
+                  block.page === anchor.sourcePage && block.text.trim(),
+              );
+              if (sourcePageBlocks.length === 0) return false;
+              const pageIsComplete = sourcePageBlocks.every((sourceBlock) =>
+                latestTranslatedBlocks.current.some(
+                  (translatedBlock) =>
+                    translatedBlock.id ===
+                    `translated-${translationLanguage.code}-${sourceBlock.id}`,
+                ),
+              );
+              return (
+                pageIsComplete &&
+                (!translatedTargetId ||
+                  latestTranslatedBlocks.current.some(
+                    (block) => block.id === translatedTargetId,
+                  ))
+              );
+            },
+            60_000,
+            () => Boolean(latestTranslationError.current),
+          );
+          if (transitionController.isCurrent(transitionId)) {
+            setTranslatedChapterRequest((current) =>
+              current?.nonce === transitionId ? null : current,
+            );
+          }
+          return ready;
+        },
+        adapter,
+      });
+      if (!succeeded) {
+        const transition = useAnchorStore.getState().transition;
+        if (
+          transition.status === "failed" &&
+          transition.target?.mode === targetMode
+        ) {
+          if (targetMode === "original") pendingOriginalPageRef.current = null;
+          if (targetMode === "reader") {
+            // Do not keep re-delivering an unreachable destination: the renderer
+            // would keep re-scrolling against the user instead of settling.
+            setReaderDestination(null);
+          }
+          if (targetMode === "translated") {
+            setTranslatedDestination(null);
+            setTranslatedChapterRequest(null);
+            setTranslationError(
+              (current) =>
+                current ?? "Unable to restore the translated reading position.",
+            );
+            // Translation content remains usable even if exact verification
+            // fails. Never eject the user back to the source tab.
+            setActiveTab("translated");
+          }
         }
+      } else if (
+        targetLayout === "vertical" &&
+        (targetMode === "reader" || targetMode === "translated")
+      ) {
+        // The vertical renderer consumed the destination (verification only
+        // passes once the target anchor is actually visible). Release it so the
+        // append window recenters on the reader's real position instead of
+        // holding the whole DOM around a stale target. The pager is left alone:
+        // it consumes destinations one-time and would re-render if we null it.
+        if (targetMode === "reader") setReaderDestination(null);
+        else setTranslatedDestination(null);
       }
-    } else if (
-      targetLayout === "vertical" &&
-      (targetMode === "reader" || targetMode === "translated")
-    ) {
-      // The vertical renderer consumed the destination (verification only
-      // passes once the target anchor is actually visible). Release it so the
-      // append window recenters on the reader's real position instead of
-      // holding the whole DOM around a stale target. The pager is left alone:
-      // it consumes destinations one-time and would re-render if we null it.
-      if (targetMode === "reader") setReaderDestination(null);
-      else setTranslatedDestination(null);
-    }
-    return succeeded;
-  }, [
-    actualReaderAnchor,
-    actualTranslatedAnchor,
-    captureCanonicalAnchor,
-    readerTransition,
-    translationLanguage,
-  ]);
+      return succeeded;
+    },
+    [
+      actualReaderAnchor,
+      actualTranslatedAnchor,
+      captureCanonicalAnchor,
+      readerTransition,
+      translationLanguage,
+    ],
+  );
 
   useEffect(() => {
-    if (!pdfId || positionRestoreApplied.current || readerBlocks.length === 0) return;
+    if (!pdfId || positionRestoreApplied.current || readerBlocks.length === 0)
+      return;
     if (!canonicalAnchor || canonicalAnchor.documentId !== pdfId) return;
     positionRestoreApplied.current = true;
     void runAnchorTransition(
       "reader",
       readerTransition === "pager" ? "horizontal" : "vertical",
     ).finally(() => setInitialRestoreCompleteFor(pdfId));
-  }, [canonicalAnchor, pdfId, readerBlocks.length, readerTransition, runAnchorTransition]);
+  }, [
+    canonicalAnchor,
+    pdfId,
+    readerBlocks.length,
+    readerTransition,
+    runAnchorTransition,
+  ]);
 
   useEffect(() => {
-    const nextLayout: AnchorReaderLayout = readerTransition === "pager"
-      ? "horizontal"
-      : "vertical";
-    const previousLayout: AnchorReaderLayout = previousReaderTransition.current === "pager"
-      ? "horizontal"
-      : "vertical";
+    const nextLayout: AnchorReaderLayout =
+      readerTransition === "pager" ? "horizontal" : "vertical";
+    const previousLayout: AnchorReaderLayout =
+      previousReaderTransition.current === "pager" ? "horizontal" : "vertical";
     if (nextLayout === previousLayout) return;
     previousReaderTransition.current = readerTransition;
-    if (activeTabRef.current === "reader") readerContentReadyRef.current = false;
-    if (activeTabRef.current === "translated") translatedContentReadyRef.current = false;
+    if (activeTabRef.current === "reader")
+      readerContentReadyRef.current = false;
+    if (activeTabRef.current === "translated")
+      translatedContentReadyRef.current = false;
     void runAnchorTransition(activeTabRef.current, nextLayout, previousLayout);
   }, [readerTransition, runAnchorTransition]);
 
@@ -1374,11 +1476,46 @@ export default function ReaderScreen() {
     void runAnchorTransition(activeTabRef.current);
   }, [isLandscape, readerPresentationKey, runAnchorTransition]);
 
-  const handleTabChange = useCallback((value: ReaderMode) => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (value !== "reader") setReaderChromeHidden(false);
-    void runAnchorTransition(value);
-  }, [runAnchorTransition]);
+  const handleTabChange = useCallback(
+    (value: ReaderMode) => {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (value !== "reader") setReaderChromeHidden(false);
+      void runAnchorTransition(value);
+    },
+    [runAnchorTransition],
+  );
+
+  const handleFindWordInOtherTab = useCallback(
+    (target: FindWordTarget, selected: FindWordAnchor) => {
+      if (!pdfId || target === activeTabRef.current) return;
+      const sourceBlock = latestReaderBlocks.current.find(
+        (block) => block.id === selected.sourceBlockId,
+      );
+      const sourceWords = sourceBlock
+        ? Array.from(sourceBlock.text.matchAll(/\S+/g))
+        : [];
+      const sourceWordIndex = proportionalWordIndex(
+        selected.blockProgress,
+        sourceWords.length,
+      );
+      anchorController.navigate(
+        {
+          documentId: pdfId,
+          sourcePage: selected.sourcePage,
+          sourceBlockId: selected.sourceBlockId,
+          wordIndex: sourceWordIndex,
+          characterOffset:
+            sourceWords[sourceWordIndex]?.index ?? selected.characterOffset,
+          blockProgress: selected.blockProgress,
+        },
+        "explicit-navigation",
+      );
+      setReaderChromeHidden(false);
+      void Haptics.selectionAsync();
+      void runAnchorTransition(target);
+    },
+    [pdfId, runAnchorTransition],
+  );
 
   const handleReaderUserInteraction = useCallback(() => {
     if (useAnchorStore.getState().transition.status === "running") {
@@ -1389,15 +1526,12 @@ export default function ReaderScreen() {
     setTranslatedChapterRequest(null);
   }, []);
   useEffect(() => {
-    const guideOwnsReader = readerGuideEnabled && readerTransition === "pager" &&
+    const guideOwnsReader =
+      readerGuideEnabled &&
+      readerTransition === "pager" &&
       (activeTab === "reader" || activeTab === "translated");
     setReaderChromeHidden(guideOwnsReader);
-  }, [
-    activeTab,
-    hideTopBarOnScroll,
-    readerGuideEnabled,
-    readerTransition,
-  ]);
+  }, [activeTab, hideTopBarOnScroll, readerGuideEnabled, readerTransition]);
 
   useEffect(() => {
     if (translationLanguage) {
@@ -1408,7 +1542,8 @@ export default function ReaderScreen() {
   const handleReaderToolbarVisibilityChange = useCallback(
     (visible: boolean) => {
       if (
-        readerGuideEnabled && readerTransition === "pager" &&
+        readerGuideEnabled &&
+        readerTransition === "pager" &&
         (activeTab === "reader" || activeTab === "translated")
       ) {
         setReaderChromeHidden(true);
@@ -1436,24 +1571,22 @@ export default function ReaderScreen() {
     }
   };
 
-  const handlePageChanged = useCallback(
-    (page: number, totalPages: number) => {
-      const pendingPage = pendingOriginalPageRef.current;
-      if (pendingPage !== null && page !== pendingPage) return;
-      if (page === pendingPage) pendingOriginalPageRef.current = null;
-      originalCurrentPageRef.current = page;
-      setOriginalCurrentPage(page);
-      setOriginalPageCount(totalPages);
-    },
-    [],
-  );
+  const handlePageChanged = useCallback((page: number, totalPages: number) => {
+    const pendingPage = pendingOriginalPageRef.current;
+    if (pendingPage !== null && page !== pendingPage) return;
+    if (page === pendingPage) pendingOriginalPageRef.current = null;
+    originalCurrentPageRef.current = page;
+    setOriginalCurrentPage(page);
+    setOriginalPageCount(totalPages);
+  }, []);
 
   const readerChapters = useMemo<ReaderChapter[]>(() => {
-    const pageMap = activeTab === "reader"
-      ? readerChapterPageMap
-      : activeTab === "translated"
-        ? translatedChapterPageMap
-        : null;
+    const pageMap =
+      activeTab === "reader"
+        ? readerChapterPageMap
+        : activeTab === "translated"
+          ? translatedChapterPageMap
+          : null;
     const convert = (
       items: PdfOutlineItem[],
       path = "outline",
@@ -1466,10 +1599,11 @@ export default function ReaderScreen() {
                 `${translationLanguage.code}:toc-${chapterId}`,
               )
             : undefined;
-        const translatedTitle = translatedTitleCandidate?.sourceContentHash ===
-            translationSourceHash(item.title)
-          ? translatedTitleCandidate.text
-          : undefined;
+        const translatedTitle =
+          translatedTitleCandidate?.sourceContentHash ===
+          translationSourceHash(item.title)
+            ? translatedTitleCandidate.text
+            : undefined;
         return {
           id: chapterId,
           title: translatedTitle || item.title,
@@ -1489,7 +1623,9 @@ export default function ReaderScreen() {
   ]);
 
   const updateReaderChapterPageMap = useCallback(
-    (setPageMap: React.Dispatch<React.SetStateAction<Record<number, number>>>) =>
+    (
+      setPageMap: React.Dispatch<React.SetStateAction<Record<number, number>>>,
+    ) =>
       (next: Record<number, number>) => {
         setPageMap((current) => {
           const currentKeys = Object.keys(current);
@@ -1497,7 +1633,8 @@ export default function ReaderScreen() {
           if (
             currentKeys.length === nextKeys.length &&
             nextKeys.every((key) => current[Number(key)] === next[Number(key)])
-          ) return current;
+          )
+            return current;
           return next;
         });
       },
@@ -1530,43 +1667,59 @@ export default function ReaderScreen() {
     },
     [],
   );
-  const handleReaderExplicitPageResolved = useCallback((
-    sourcePage: number,
-    anchor: { blockId: string; blockOffset: number; wordIndex: number },
-  ) => {
-    if (!pdfId) return;
-    const block = latestReaderBlocks.current.find((candidate) => candidate.id === anchor.blockId);
-    const wordCount = block ? Array.from(block.text.matchAll(/\S+/g)).length : 0;
-    anchorController.navigate({
-      documentId: pdfId,
-      sourcePage,
-      sourceBlockId: anchor.blockId,
-      wordIndex: anchor.wordIndex,
-      characterOffset: anchor.blockOffset,
-      blockProgress: wordCount > 1 ? anchor.wordIndex / (wordCount - 1) : 0,
-    }, "explicit-navigation");
-  }, [pdfId]);
-  const handleTranslatedExplicitPageResolved = useCallback((
-    sourcePage: number,
-    anchor: { blockId: string; blockOffset: number; wordIndex: number },
-  ) => {
-    if (!pdfId || !translationLanguage) return;
-    const translatedBlock = latestTranslatedBlocks.current.find(
-      (candidate) => candidate.id === anchor.blockId,
-    );
-    const wordCount = translatedBlock
-      ? Array.from(translatedBlock.text.matchAll(/\S+/g)).length
-      : 0;
-    const prefix = `translated-${translationLanguage.code}-`;
-    anchorController.navigate({
-      documentId: pdfId,
-      sourcePage,
-      sourceBlockId: anchor.blockId.startsWith(prefix)
-        ? anchor.blockId.slice(prefix.length)
-        : anchor.blockId,
-      blockProgress: wordCount > 1 ? anchor.wordIndex / (wordCount - 1) : 0,
-    }, "explicit-navigation");
-  }, [pdfId, translationLanguage]);
+  const handleReaderExplicitPageResolved = useCallback(
+    (
+      sourcePage: number,
+      anchor: { blockId: string; blockOffset: number; wordIndex: number },
+    ) => {
+      if (!pdfId) return;
+      const block = latestReaderBlocks.current.find(
+        (candidate) => candidate.id === anchor.blockId,
+      );
+      const wordCount = block
+        ? Array.from(block.text.matchAll(/\S+/g)).length
+        : 0;
+      anchorController.navigate(
+        {
+          documentId: pdfId,
+          sourcePage,
+          sourceBlockId: anchor.blockId,
+          wordIndex: anchor.wordIndex,
+          characterOffset: anchor.blockOffset,
+          blockProgress: wordCount > 1 ? anchor.wordIndex / (wordCount - 1) : 0,
+        },
+        "explicit-navigation",
+      );
+    },
+    [pdfId],
+  );
+  const handleTranslatedExplicitPageResolved = useCallback(
+    (
+      sourcePage: number,
+      anchor: { blockId: string; blockOffset: number; wordIndex: number },
+    ) => {
+      if (!pdfId || !translationLanguage) return;
+      const translatedBlock = latestTranslatedBlocks.current.find(
+        (candidate) => candidate.id === anchor.blockId,
+      );
+      const wordCount = translatedBlock
+        ? Array.from(translatedBlock.text.matchAll(/\S+/g)).length
+        : 0;
+      const prefix = `translated-${translationLanguage.code}-`;
+      anchorController.navigate(
+        {
+          documentId: pdfId,
+          sourcePage,
+          sourceBlockId: anchor.blockId.startsWith(prefix)
+            ? anchor.blockId.slice(prefix.length)
+            : anchor.blockId,
+          blockProgress: wordCount > 1 ? anchor.wordIndex / (wordCount - 1) : 0,
+        },
+        "explicit-navigation",
+      );
+    },
+    [pdfId, translationLanguage],
+  );
 
   const visiblePage =
     activeTab === "original"
@@ -1604,28 +1757,40 @@ export default function ReaderScreen() {
       if (!pdfId) return;
       const targetBlock = blockId
         ? latestReaderBlocks.current.find((block) => block.id === blockId)
-        : latestReaderBlocks.current.find((block) => block.page >= page && block.text.trim());
+        : latestReaderBlocks.current.find(
+            (block) => block.page >= page && block.text.trim(),
+          );
       const words = targetBlock
         ? Array.from(targetBlock.text.matchAll(/\S+/g))
         : [];
       const characterOffset = targetBlock
         ? Math.max(0, searchMatchIndex ?? 0)
         : undefined;
-      const wordIndex = characterOffset === undefined
-        ? undefined
-        : Math.max(0, words.findIndex((word) =>
-            (word.index ?? 0) + word[0].length > characterOffset
-          ));
-      anchorController.navigate({
-        documentId: pdfId,
-        sourcePage: targetBlock?.page ?? page,
-        sourceBlockId: targetBlock?.id,
-        wordIndex,
-        characterOffset,
-        blockProgress: words.length > 1 && wordIndex !== undefined
-          ? wordIndex / (words.length - 1)
-          : targetBlock ? 0 : undefined,
-      }, searchQuery ? "search" : "explicit-navigation");
+      const wordIndex =
+        characterOffset === undefined
+          ? undefined
+          : Math.max(
+              0,
+              words.findIndex(
+                (word) => (word.index ?? 0) + word[0].length > characterOffset,
+              ),
+            );
+      anchorController.navigate(
+        {
+          documentId: pdfId,
+          sourcePage: targetBlock?.page ?? page,
+          sourceBlockId: targetBlock?.id,
+          wordIndex,
+          characterOffset,
+          blockProgress:
+            words.length > 1 && wordIndex !== undefined
+              ? wordIndex / (words.length - 1)
+              : targetBlock
+                ? 0
+                : undefined,
+        },
+        searchQuery ? "search" : "explicit-navigation",
+      );
       requestedExtractionPages.current.push(page);
       void runAnchorTransition(
         "reader",
@@ -1645,15 +1810,20 @@ export default function ReaderScreen() {
       if (!pdfId) return;
       const targetBlock = blockId
         ? latestReaderBlocks.current.find((block) => block.id === blockId)
-        : latestReaderBlocks.current.find((block) => block.page >= page && block.text.trim());
-      anchorController.navigate({
-        documentId: pdfId,
-        sourcePage: targetBlock?.page ?? page,
-        sourceBlockId: targetBlock?.id,
-        wordIndex: targetBlock ? 0 : undefined,
-        characterOffset: targetBlock ? 0 : undefined,
-        blockProgress: targetBlock ? 0 : undefined,
-      }, "toc");
+        : latestReaderBlocks.current.find(
+            (block) => block.page >= page && block.text.trim(),
+          );
+      anchorController.navigate(
+        {
+          documentId: pdfId,
+          sourcePage: targetBlock?.page ?? page,
+          sourceBlockId: targetBlock?.id,
+          wordIndex: targetBlock ? 0 : undefined,
+          characterOffset: targetBlock ? 0 : undefined,
+          blockProgress: targetBlock ? 0 : undefined,
+        },
+        "toc",
+      );
       requestedExtractionPages.current.unshift(page);
       void runAnchorTransition(activeTabRef.current);
     },
@@ -1668,10 +1838,12 @@ export default function ReaderScreen() {
       }
       if (activeTab === "translated") {
         if (readerTransition === "pager") {
-          setTranslatedDestination(generatedPageDestination(
-            page,
-            latestTranslatedAnchor.current?.sourcePage ?? readerCurrentPage,
-          ));
+          setTranslatedDestination(
+            generatedPageDestination(
+              page,
+              latestTranslatedAnchor.current?.sourcePage ?? readerCurrentPage,
+            ),
+          );
           setTranslatedSwitchHighlight(null);
           return;
         }
@@ -1688,10 +1860,12 @@ export default function ReaderScreen() {
         return;
       }
 
-      setReaderDestination(generatedPageDestination(
-        page,
-        anchorController.current()?.sourcePage ?? readerCurrentPage,
-      ));
+      setReaderDestination(
+        generatedPageDestination(
+          page,
+          anchorController.current()?.sourcePage ?? readerCurrentPage,
+        ),
+      );
     },
     [
       activeTab,
@@ -1751,12 +1925,14 @@ export default function ReaderScreen() {
           overflow: "hidden",
           backgroundColor: isDark ? "#151814" : "#ffffff",
           borderBottomWidth: 0,
-          transform: [{
-            translateY: headerVisibility.interpolate({
-              inputRange: [0, 1],
-              outputRange: [-Math.max(headerHeight, 120), 0],
-            }),
-          }],
+          transform: [
+            {
+              translateY: headerVisibility.interpolate({
+                inputRange: [0, 1],
+                outputRange: [-Math.max(headerHeight, 120), 0],
+              }),
+            },
+          ],
         }}
       >
         <Animated.View
@@ -1777,32 +1953,34 @@ export default function ReaderScreen() {
 
             <View
               className="absolute top-1/2 -translate-y-1/2 flex-row"
-              style={{ right: translationLanguage ? translatedActionInset : 16 }}
+              style={{
+                right: translationLanguage ? translatedActionInset : 16,
+              }}
             >
-                <ReaderSearchButton
-                  blocks={readerBlocks}
-                  compact={Boolean(translationLanguage)}
-                  compactWidth={translatedActionWidth}
-                  grouped
-                  onSelectResult={(page, blockId, query, matchIndex) =>
-                    goToReaderPage(page, blockId, query, matchIndex)
-                  }
-                />
-                <ThreeLinesButton
-                  chapters={readerChapters}
-                  compact={Boolean(translationLanguage)}
-                  compactWidth={translatedActionWidth}
-                  currentPage={navigationCurrentPage}
-                  grouped
-                  totalPages={visiblePageCount}
-                  onGoToPage={goToDisplayedPage}
-                  onGoToChapter={(chapter) =>
-                    goToNavigationPage(
-                      chapter.sourcePage ?? chapter.page,
-                      chapter.blockId,
-                    )
-                  }
-                />
+              <ReaderSearchButton
+                blocks={readerBlocks}
+                compact={Boolean(translationLanguage)}
+                compactWidth={translatedActionWidth}
+                grouped
+                onSelectResult={(page, blockId, query, matchIndex) =>
+                  goToReaderPage(page, blockId, query, matchIndex)
+                }
+              />
+              <ThreeLinesButton
+                chapters={readerChapters}
+                compact={Boolean(translationLanguage)}
+                compactWidth={translatedActionWidth}
+                currentPage={navigationCurrentPage}
+                grouped
+                totalPages={visiblePageCount}
+                onGoToPage={goToDisplayedPage}
+                onGoToChapter={(chapter) =>
+                  goToNavigationPage(
+                    chapter.sourcePage ?? chapter.page,
+                    chapter.blockId,
+                  )
+                }
+              />
             </View>
 
             <View>
@@ -1849,9 +2027,11 @@ export default function ReaderScreen() {
           <OriginalPDF
             pdfUri={pdf.uri}
             fileSize={pdf.size}
-            initialPage={canonicalAnchor && canonicalAnchor.documentId === pdfId
-              ? canonicalAnchor.sourcePage
-              : pdf.currentPage || 1}
+            initialPage={
+              canonicalAnchor && canonicalAnchor.documentId === pdfId
+                ? canonicalAnchor.sourcePage
+                : pdf.currentPage || 1
+            }
             destination={originalDestination}
             onReady={() => {
               originalContentReadyRef.current = true;
@@ -1901,7 +2081,10 @@ export default function ReaderScreen() {
               onReady={() => {
                 const recovered = translatedContentReadyRef.current;
                 translatedContentReadyRef.current = true;
-                if (recovered && useAnchorStore.getState().transition.status !== "running") {
+                if (
+                  recovered &&
+                  useAnchorStore.getState().transition.status !== "running"
+                ) {
                   void runAnchorTransition("translated");
                 }
               }}
@@ -1910,6 +2093,8 @@ export default function ReaderScreen() {
               translationLanguage={translationLanguage}
               onTranslationLanguageChange={handleTranslationLanguageChange}
               useTranslatedTextDirection
+              readerMode="translated"
+              onFindWordInOtherTab={handleFindWordInOtherTab}
             />
           ) : translationError ? (
             <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#10120F]">
@@ -1924,7 +2109,8 @@ export default function ReaderScreen() {
             <View className="flex-1 items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#10120F]">
               <ActivityIndicator size="large" color="#8fb996" />
               <Text className="mt-4 text-center font-lato-bold text-base text-black dark:text-[#F4F5F1]">
-                Translating this reading location to {translationLanguage?.label}…
+                Translating this reading location to{" "}
+                {translationLanguage?.label}…
               </Text>
               <Text className="mt-2 text-center text-sm text-black/50 dark:text-white/50">
                 iOS may ask to download the required language models.
@@ -1958,10 +2144,12 @@ export default function ReaderScreen() {
             bottom: 0,
             left: 0,
             zIndex: activeTab === "reader" ? 2 : 0,
-            opacity: activeTab === "reader" && readerBlocks.length > 0 &&
+            opacity:
+              activeTab === "reader" &&
+              readerBlocks.length > 0 &&
               initialRestoreCompleteFor !== pdfId
-              ? 0
-              : 1,
+                ? 0
+                : 1,
           }}
         >
           {readerBlocks.length > 0 ? (
@@ -1993,13 +2181,18 @@ export default function ReaderScreen() {
                   const recovered = readerContentReadyRef.current;
                   readerContentReadyRef.current = true;
                   setReaderContentReady(true);
-                  if (recovered && useAnchorStore.getState().transition.status !== "running") {
+                  if (
+                    recovered &&
+                    useAnchorStore.getState().transition.status !== "running"
+                  ) {
                     void runAnchorTransition("reader");
                   }
                 }}
                 onToolbarVisibilityChange={handleReaderToolbarVisibilityChange}
                 translationLanguage={translationLanguage}
                 onTranslationLanguageChange={handleTranslationLanguageChange}
+                readerMode="reader"
+                onFindWordInOtherTab={handleFindWordInOtherTab}
               />
             </View>
           ) : readerLoading ? (
@@ -2036,15 +2229,16 @@ export default function ReaderScreen() {
           )}
         </Animated.View>
 
-        {activeTab === "reader" && readerBlocks.length > 0 &&
+        {activeTab === "reader" &&
+          readerBlocks.length > 0 &&
           initialRestoreCompleteFor !== pdfId && (
-          <View
-            pointerEvents="none"
-            className="absolute inset-0 z-[3] items-center justify-center bg-[#F7F5EC] dark:bg-[#10120F]"
-          >
-            <ActivityIndicator size="large" color="#8fb996" />
-          </View>
-        )}
+            <View
+              pointerEvents="none"
+              className="absolute inset-0 z-[3] items-center justify-center bg-[#F7F5EC] dark:bg-[#10120F]"
+            >
+              <ActivityIndicator size="large" color="#8fb996" />
+            </View>
+          )}
       </View>
 
       {anchorTransition.status === "running" &&

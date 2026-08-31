@@ -54,6 +54,13 @@ import {
   type AIConversation,
 } from "@/database/aiConversationRepository";
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
+import {
+  anchorForSelectedWord,
+  findTargetForMenuKey,
+  findWordMenuItems,
+  type FindWordAnchor,
+  type FindWordTarget,
+} from "@/architecture/FindWordInOtherTab";
 import { useRevenueCat } from "@/providers/RevenueCatProvider";
 import {
   appleSpeech,
@@ -118,15 +125,20 @@ type ReaderViewProps = {
   translationLanguage?: TranslationLanguage;
   onTranslationLanguageChange?: (language?: TranslationLanguage) => void;
   useTranslatedTextDirection?: boolean;
+  readerMode?: "reader" | "translated";
+  onFindWordInOtherTab?: (
+    target: FindWordTarget,
+    anchor: FindWordAnchor,
+  ) => void;
 };
 
-const readerMenuItems = [
+const baseReaderMenuItems = [
   { key: "highlight", label: "Highlight" },
   { key: "addNote", label: "Add Note" },
   { key: "removeHighlight", label: "Remove Highlight" },
   { key: "askAI", label: "Ask AI" },
 ];
-const readerMenuItemsWithoutRemove = readerMenuItems.filter(
+const baseReaderMenuItemsWithoutRemove = baseReaderMenuItems.filter(
   (item) => item.key !== "removeHighlight",
 );
 
@@ -285,6 +297,8 @@ const ReaderView = ({
   translationLanguage,
   onTranslationLanguageChange,
   useTranslatedTextDirection = false,
+  readerMode = "reader",
+  onFindWordInOtherTab,
 }: ReaderViewProps) => {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const readerSafeAreaInsets = useSafeAreaInsets();
@@ -294,6 +308,18 @@ const ReaderView = ({
   const isDark = useColorScheme() === "dark";
   const { isPremium } = useRevenueCat();
   const router = useRouter();
+  const findMenuItems = useMemo(
+    () => findWordMenuItems(readerMode, Boolean(translationLanguage)),
+    [readerMode, translationLanguage],
+  );
+  const readerMenuItems = useMemo(
+    () => [...baseReaderMenuItems, ...findMenuItems],
+    [findMenuItems],
+  );
+  const readerMenuItemsWithoutRemove = useMemo(
+    () => [...baseReaderMenuItemsWithoutRemove, ...findMenuItems],
+    [findMenuItems],
+  );
   const [fontAssets] = useAssets([Lato_700Bold, SourceSans3_400Regular]);
 
   const [latoBoldBase64, setLatoBoldBase64] = useState<string | null>(null);
@@ -403,11 +429,7 @@ const ReaderView = ({
 
   useEffect(() => {
     if (aiConversationLoadedIdRef.current !== documentId) return;
-    void saveAIConversation(
-      db,
-      documentId,
-      aiConversations,
-    ).catch((error) =>
+    void saveAIConversation(db, documentId, aiConversations).catch((error) =>
       console.error("Failed to save AI conversation:", error),
     );
   }, [aiConversations, db, documentId]);
@@ -718,6 +740,18 @@ const ReaderView = ({
 
   const handleCustomMenuSelection = useCallback(
     (event: { nativeEvent: { key: string; selectedText?: string } }) => {
+      const findTarget = findTargetForMenuKey(event.nativeEvent.key);
+      if (findTarget) {
+        const anchor = anchorForSelectedWord({
+          range: scrollSelectionRangesRef.current[0],
+          selectedText: event.nativeEvent.selectedText,
+          blocks,
+          mode: readerMode ?? "reader",
+          languageCode: translationLanguage?.code,
+        });
+        if (anchor) onFindWordInOtherTab?.(findTarget, anchor);
+        return;
+      }
       if (event.nativeEvent.key === "highlight") {
         pendingPagerHighlightRef.current = null;
         setHighlightPickerVisible(true);
@@ -760,7 +794,14 @@ const ReaderView = ({
         openBottomSheet("ai");
       }
     },
-    [isPremium, openBottomSheet],
+    [
+      blocks,
+      isPremium,
+      onFindWordInOtherTab,
+      openBottomSheet,
+      readerMode,
+      translationLanguage?.code,
+    ],
   );
 
   const openReaderNote = useCallback(
@@ -1023,9 +1064,11 @@ const ReaderView = ({
 
   useEffect(() => {
     if (!webViewReady || isPaged || activeModeDestination) return;
-    webViewRef.current?.postMessage(JSON.stringify({
-      type: "releaseSourceDestination",
-    }));
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: "releaseSourceDestination",
+      }),
+    );
   }, [activeModeDestination, isPaged, webViewReady]);
 
   const sendReaderSettings = useCallback(() => {
@@ -2880,6 +2923,17 @@ const ReaderView = ({
                     onSelectionAddNote={(ranges, selectedText) => {
                       setNoteDraft("");
                       setNoteEditor({ ranges, selectedText, source: "paged" });
+                    }}
+                    findWordItems={findMenuItems}
+                    onFindWord={(target, range, selectedText) => {
+                      const anchor = anchorForSelectedWord({
+                        range,
+                        selectedText,
+                        blocks,
+                        mode: readerMode,
+                        languageCode: translationLanguage?.code,
+                      });
+                      if (anchor) onFindWordInOtherTab?.(target, anchor);
                     }}
                     onOpenNote={openReaderNote}
                     onSelectionAskAI={(text) => {

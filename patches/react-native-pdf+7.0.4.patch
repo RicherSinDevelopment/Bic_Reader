@@ -1,10 +1,10 @@
 diff --git a/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js
-index 43fea3b..8c52bcd 100644
+index 43fea3b..d3bf976 100644
 --- a/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js
 +++ b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js
-@@ -35,14 +35,25 @@
+@@ -35,14 +35,28 @@
   |}>;
- 
+
   interface NativeCommands {
 -  +setNativePage: (
 + +setNativePage: (
@@ -26,36 +26,144 @@ index 43fea3b..8c52bcd 100644
 +  ) => void;
 +  +clearNativeHighlight: (viewRef: React.ElementRef<ComponentType>) => void;
  }
- 
+
  export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
 -  supportedCommands: ['setNativePage'],
 +  supportedCommands: ['setNativePage', 'setNativeHighlight', 'clearNativeHighlight'],
  });
- 
+
   export default codegenNativeComponent<NativeProps>('RNPDFPdfView');
+diff --git a/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js.rej b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js.rej
+new file mode 100644
+index 0000000..cebbf6e
+--- /dev/null
++++ b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js.rej
+@@ -0,0 +1,31 @@
++@@ -35,14 +35,28 @@
++  |}>;
++
++  interface NativeCommands {
++-  +setNativePage: (
+++ +setNativePage: (
++     viewRef: React.ElementRef<ComponentType>,
++     page: Int32,
++   ) => void;
+++  +setNativeHighlight: (
+++    viewRef: React.ElementRef<ComponentType>,
+++    page: Int32,
+++    left: Float,
+++    top: Float,
+++    right: Float,
+++    bottom: Float,
+++    pageWidth: Float,
+++    pageHeight: Float,
+++    red: Float,
+++    green: Float,
+++    blue: Float,
+++  ) => void;
+++  +clearNativeHighlight: (viewRef: React.ElementRef<ComponentType>) => void;
++ }
++
++ export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
++-  supportedCommands: ['setNativePage'],
+++  supportedCommands: ['setNativePage', 'setNativeHighlight', 'clearNativeHighlight'],
++ });
++
++  export default codegenNativeComponent<NativeProps>('RNPDFPdfView');
+diff --git a/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js.rej.orig b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js.rej.orig
+new file mode 100644
+index 0000000..cebbf6e
+--- /dev/null
++++ b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js.rej.orig
+@@ -0,0 +1,31 @@
++@@ -35,14 +35,28 @@
++  |}>;
++
++  interface NativeCommands {
++-  +setNativePage: (
+++ +setNativePage: (
++     viewRef: React.ElementRef<ComponentType>,
++     page: Int32,
++   ) => void;
+++  +setNativeHighlight: (
+++    viewRef: React.ElementRef<ComponentType>,
+++    page: Int32,
+++    left: Float,
+++    top: Float,
+++    right: Float,
+++    bottom: Float,
+++    pageWidth: Float,
+++    pageHeight: Float,
+++    red: Float,
+++    green: Float,
+++    blue: Float,
+++  ) => void;
+++  +clearNativeHighlight: (viewRef: React.ElementRef<ComponentType>) => void;
++ }
++
++ export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
++-  supportedCommands: ['setNativePage'],
+++  supportedCommands: ['setNativePage', 'setNativeHighlight', 'clearNativeHighlight'],
++ });
++
++  export default codegenNativeComponent<NativeProps>('RNPDFPdfView');
 diff --git a/node_modules/react-native-pdf/index.d.ts b/node_modules/react-native-pdf/index.d.ts
-index cfcea72..c84509f 100644
+index cfcea72..fc79079 100644
 --- a/node_modules/react-native-pdf/index.d.ts
 +++ b/node_modules/react-native-pdf/index.d.ts
 @@ -66,7 +66,9 @@ export interface PdfProps {
  }
- 
+
  export interface PdfRef {
 -    setPage(pageNumber: number): void
 +    setPage(pageNumber: number): void;
 +    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number, pageWidth: number, pageHeight: number, red: number, green: number, blue: number): void;
 +    clearHighlight(): void;
  }
- 
+
  declare const Pdf: React.ForwardRefExoticComponent<PdfProps & React.RefAttributes<PdfRef>>
+diff --git a/node_modules/react-native-pdf/index.d.ts.rej b/node_modules/react-native-pdf/index.d.ts.rej
+new file mode 100644
+index 0000000..3812dc5
+--- /dev/null
++++ b/node_modules/react-native-pdf/index.d.ts.rej
+@@ -0,0 +1,11 @@
++@@ -66,7 +66,9 @@
++ }
++
++ export interface PdfRef {
++-    setPage(pageNumber: number): void
+++    setPage(pageNumber: number): void;
+++    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number, pageWidth: number, pageHeight: number, red: number, green: number, blue: number): void;
+++    clearHighlight(): void;
++ }
++
++ declare const Pdf: React.ForwardRefExoticComponent<PdfProps & React.RefAttributes<PdfRef>>
+diff --git a/node_modules/react-native-pdf/index.d.ts.rej.orig b/node_modules/react-native-pdf/index.d.ts.rej.orig
+new file mode 100644
+index 0000000..3812dc5
+--- /dev/null
++++ b/node_modules/react-native-pdf/index.d.ts.rej.orig
+@@ -0,0 +1,11 @@
++@@ -66,7 +66,9 @@
++ }
++
++ export interface PdfRef {
++-    setPage(pageNumber: number): void
+++    setPage(pageNumber: number): void;
+++    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number, pageWidth: number, pageHeight: number, red: number, green: number, blue: number): void;
+++    clearHighlight(): void;
++ }
++
++ declare const Pdf: React.ForwardRefExoticComponent<PdfProps & React.RefAttributes<PdfRef>>
 diff --git a/node_modules/react-native-pdf/index.js b/node_modules/react-native-pdf/index.js
-index f807178..4284c01 100644
+index f807178..069f182 100644
 --- a/node_modules/react-native-pdf/index.js
 +++ b/node_modules/react-native-pdf/index.js
 @@ -368,6 +368,18 @@ export default class Pdf extends Component {
-         
+
      }
- 
+
 +    setHighlight(pageNumber, left, top, right, bottom, pageWidth, pageHeight, red, green, blue) {
 +        if (!this._root) return;
 +        PdfViewCommands.setNativeHighlight(
@@ -71,14 +179,64 @@ index f807178..4284c01 100644
      _onChange = (event) => {
          // Handle direct events for text selection/highlight
          if (event.nativeEvent.type) {
+diff --git a/node_modules/react-native-pdf/index.js.rej b/node_modules/react-native-pdf/index.js.rej
+new file mode 100644
+index 0000000..7ab04a6
+--- /dev/null
++++ b/node_modules/react-native-pdf/index.js.rej
+@@ -0,0 +1,19 @@
++@@ -368,6 +368,18 @@
++
++     }
++
+++    setHighlight(pageNumber, left, top, right, bottom, pageWidth, pageHeight, red, green, blue) {
+++        if (!this._root) return;
+++        PdfViewCommands.setNativeHighlight(
+++            this._root, pageNumber, left, top, right, bottom, pageWidth, pageHeight, red, green, blue,
+++        );
+++    }
+++
+++    clearHighlight() {
+++        if (!this._root) return;
+++        PdfViewCommands.clearNativeHighlight(this._root);
+++    }
+++
++     _onChange = (event) => {
++         // Handle direct events for text selection/highlight
++         if (event.nativeEvent.type) {
+diff --git a/node_modules/react-native-pdf/index.js.rej.orig b/node_modules/react-native-pdf/index.js.rej.orig
+new file mode 100644
+index 0000000..7ab04a6
+--- /dev/null
++++ b/node_modules/react-native-pdf/index.js.rej.orig
+@@ -0,0 +1,19 @@
++@@ -368,6 +368,18 @@
++
++     }
++
+++    setHighlight(pageNumber, left, top, right, bottom, pageWidth, pageHeight, red, green, blue) {
+++        if (!this._root) return;
+++        PdfViewCommands.setNativeHighlight(
+++            this._root, pageNumber, left, top, right, bottom, pageWidth, pageHeight, red, green, blue,
+++        );
+++    }
+++
+++    clearHighlight() {
+++        if (!this._root) return;
+++        PdfViewCommands.clearNativeHighlight(this._root);
+++    }
+++
++     _onChange = (event) => {
++         // Handle direct events for text selection/highlight
++         if (event.nativeEvent.type) {
 diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
-index 723ca7b..9ec3941 100644
+index 723ca7b..a9e09c9 100644
 --- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
 +++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
-@@ -60,6 +60,15 @@ UIView
- 
+@@ -60,6 +60,18 @@ UIView
+
  @property(nonatomic, copy) RCTBubblingEventBlock onTextSelectionChange;
- 
+
 +- (void)setNativeHighlight:(NSInteger)page
 +                      left:(float)left
 +                       top:(float)top
@@ -92,13 +250,38 @@ index 723ca7b..9ec3941 100644
 +- (void)clearNativeHighlight;
 +
  @end
- 
+
  #endif /* RNPDFPdfView_h */
+diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h.rej b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h.rej
+new file mode 100644
+index 0000000..af8531b
+--- /dev/null
++++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h.rej
+@@ -0,0 +1,19 @@
++@@ -60,6 +60,18 @@
++
++ @property(nonatomic, copy) RCTBubblingEventBlock onTextSelectionChange;
++
+++- (void)setNativeHighlight:(NSInteger)page
+++                      left:(float)left
+++                       top:(float)top
+++                     right:(float)right
+++                    bottom:(float)bottom
+++                 pageWidth:(float)pageWidth
+++                pageHeight:(float)pageHeight
+++                       red:(float)red
+++                     green:(float)green
+++                      blue:(float)blue;
+++- (void)clearNativeHighlight;
+++
++ @end
++
++ #endif /* RNPDFPdfView_h */
 diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
-index de46c98..37cdf89 100644
+index de46c98..d098055 100644
 --- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
 +++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
-@@ -75,6 +75,11 @@ @implementation RNPDFPdfView
+@@ -75,6 +75,12 @@ @implementation RNPDFPdfView
      UIPinchGestureRecognizer *_pinchRecognizer;
      UILongPressGestureRecognizer *_longPressRecognizer;
      UITapGestureRecognizer *_doubleTapEmptyRecognizer;
@@ -109,12 +292,12 @@ index de46c98..37cdf89 100644
 +    CFTimeInterval _switchHighlightPulseStart;
 +    UIColor *_switchHighlightColor;
  }
- 
+
  #ifdef RCT_NEW_ARCH_ENABLED
-@@ -234,6 +239,173 @@ - (void)setNativePage:(NSInteger)page
+@@ -234,6 +240,187 @@ - (void)setNativePage:(NSInteger)page
      [self didSetProps:[NSArray arrayWithObject:@"page"]];
  }
- 
+
 +- (void)setNativeHighlight:(NSInteger)page
 +                      left:(float)left
 +                       top:(float)top
@@ -297,9 +480,13 @@ index de46c98..37cdf89 100644
 +}
 +
  #endif
- 
+
  - (instancetype)initWithBridge:(RCTBridge *)bridge
-@@ -603,2 +775,3 @@ - (void)dealloc{
+@@ -600,6 +787,7 @@ - (void)notifyOnChangeWithMessage:(NSString *)message
+
+ - (void)dealloc{
+
 +    [self clearNativeHighlight];
      _pdfDocument = Nil;
      _pdfView = Nil;
+

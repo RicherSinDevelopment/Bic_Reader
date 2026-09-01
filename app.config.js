@@ -1,5 +1,3 @@
-const appJson = require('./app.json');
-
 const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
 const googlePlugin = iosClientId
   ? [
@@ -13,11 +11,14 @@ const googlePlugin = iosClientId
     ]
   : null;
 
-module.exports = {
-  ...appJson.expo,
+// Expo supplies the normalized app.json contents as `config`. Extending that
+// object keeps app.json authoritative while allowing the environment-specific
+// Google URL scheme to be added for native builds.
+module.exports = ({ config }) => ({
+  ...config,
   android: {
-    ...appJson.expo.android,
-    package: appJson.expo.android.package ?? 'com.bicreader.app',
+    ...config.android,
+    package: config.android?.package ?? 'com.bicreader.app',
   },
-  plugins: [...appJson.expo.plugins, ...(googlePlugin ? [googlePlugin] : [])],
-};
+  plugins: [...(config.plugins ?? []), ...(googlePlugin ? [googlePlugin] : [])],
+});

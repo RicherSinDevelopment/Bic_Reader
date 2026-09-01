@@ -16,10 +16,12 @@ import {
   Moon,
   RefreshCw,
   Sparkles,
+  Trash2,
 } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   Pressable,
   ScrollView,
@@ -30,6 +32,10 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSQLiteContext } from 'expo-sqlite';
+import { deleteCurrentAccount } from '@/services/accountDeletionService';
+
+const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 
 export default function Profile() {
   const { signOut } = useAuth();
@@ -40,9 +46,11 @@ export default function Profile() {
     restorePurchases,
   } = useRevenueCat();
   const { pdfs, isLoading: isLibraryLoading } = usePdfLibrary();
+  const db = useSQLiteContext();
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
   const preference = useAppearanceStore((state) => state.preference);
   const setPreference = useAppearanceStore((state) => state.setPreference);
@@ -97,6 +105,52 @@ export default function Profile() {
     } catch {
       setErrorMessage(fallbackMessage);
     }
+  };
+
+  const deleteAccount = async () => {
+    if (isDeletingAccount) return;
+    setErrorMessage(null);
+    setIsDeletingAccount(true);
+    try {
+      await deleteCurrentAccount(db);
+      resetOnboarding();
+      router.replace('/onboarding');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to delete your account. Please try again.');
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
+  const confirmPermanentDeletion = () => {
+    Alert.alert(
+      'Permanently delete account?',
+      'This cannot be undone. Your account, cloud PDFs, cloud annotations, settings, subscription profile, and local annotations and AI conversations will be deleted. PDFs saved on this device will remain available offline.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete permanently', style: 'destructive', onPress: () => void deleteAccount() },
+      ],
+    );
+  };
+
+  const requestAccountDeletion = () => {
+    const message = isPremium
+      ? 'Deleting your Bic Reader account does not cancel billing through Apple. Manage or cancel your subscription first if you do not want it to renew.'
+      : 'Deleting your account permanently removes your Bic Reader cloud data. PDFs stored locally on this device will remain available offline.';
+    const buttons = isPremium
+      ? [
+          { text: 'Cancel', style: 'cancel' as const },
+          {
+            text: 'Manage Subscription',
+            onPress: () => void openExternalLink(APPLE_SUBSCRIPTIONS_URL, 'Unable to open Apple subscription settings.'),
+          },
+          { text: 'Continue', style: 'destructive' as const, onPress: confirmPermanentDeletion },
+        ]
+      : [
+          { text: 'Cancel', style: 'cancel' as const },
+          { text: 'Continue', style: 'destructive' as const, onPress: confirmPermanentDeletion },
+        ];
+    Alert.alert('Delete account', message, buttons);
   };
 
   return (
@@ -308,6 +362,39 @@ export default function Profile() {
                   <Text style={styles.supportCaption}>bicreader.com</Text>
                 </View>
                 <ChevronRight color={isDark ? '#7F897A' : '#9A9D95'} size={19} />
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Account</Text>
+            <View style={styles.dangerCard}>
+              <Text style={styles.dangerTitle}>Delete account</Text>
+              <Text style={styles.dangerCaption}>
+                Permanently remove your account and associated cloud data. Your offline PDF files will remain on this device.
+              </Text>
+              {isPremium ? (
+                <Pressable
+                  accessibilityRole="link"
+                  onPress={() => void openExternalLink(APPLE_SUBSCRIPTIONS_URL, 'Unable to open Apple subscription settings.')}
+                  style={styles.manageSubscriptionButton}
+                >
+                  <Text style={styles.manageSubscriptionText}>Manage Apple subscription</Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                accessibilityHint="Permanently deletes your account and associated data"
+                accessibilityRole="button"
+                disabled={isDeletingAccount}
+                onPress={requestAccountDeletion}
+                style={({ pressed }) => [
+                  styles.deleteAccountButton,
+                  isDeletingAccount && styles.deleteAccountButtonDisabled,
+                  pressed && !isDeletingAccount && styles.deleteAccountButtonPressed,
+                ]}
+              >
+                {isDeletingAccount ? <ActivityIndicator color="#B42318" size="small" /> : <Trash2 color="#B42318" size={18} />}
+                <Text style={styles.deleteAccountText}>{isDeletingAccount ? 'Deleting account…' : 'Delete account'}</Text>
               </Pressable>
             </View>
           </View>
@@ -541,6 +628,32 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
   supportCaption: { marginTop: 3, color: isDark ? '#A6ADA1' : '#737270', fontFamily: 'Lato_400Regular', fontSize: 12 },
   supportDivider: { height: StyleSheet.hairlineWidth, marginLeft: 70, backgroundColor: isDark ? '#343A31' : '#E5E2D8' },
   errorText: { marginTop: 18, color: '#B42318', fontFamily: 'Lato_400Regular', fontSize: 13, textAlign: 'center' },
+  dangerCard: {
+    marginTop: 12,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: isDark ? '#673631' : '#F1B8B3',
+    borderRadius: 20,
+    backgroundColor: isDark ? '#241716' : '#FFF8F7',
+  },
+  dangerTitle: { color: isDark ? '#FFD7D3' : '#8F1D16', fontFamily: 'Lato_700Bold', fontSize: 16 },
+  dangerCaption: { marginTop: 5, color: isDark ? '#D7B5B1' : '#76514E', fontFamily: 'Lato_400Regular', fontSize: 13, lineHeight: 19 },
+  manageSubscriptionButton: { alignSelf: 'flex-start', paddingVertical: 12 },
+  manageSubscriptionText: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 14 },
+  deleteAccountButton: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: isDark ? '#8B4A43' : '#E69B94',
+    borderRadius: 14,
+  },
+  deleteAccountButtonDisabled: { opacity: 0.55 },
+  deleteAccountButtonPressed: { backgroundColor: isDark ? '#321E1C' : '#FEECEB' },
+  deleteAccountText: { color: '#B42318', fontFamily: 'Lato_700Bold', fontSize: 14 },
   signOutButton: {
     height: 54,
     flexDirection: 'row',

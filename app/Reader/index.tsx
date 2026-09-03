@@ -1,4 +1,5 @@
 import BackButton from "@/components/Backbutton";
+import { AppErrorBoundary } from "@/components/errors/AppErrorBoundary";
 import OriginalPDF, { type PdfOutlineItem } from "@/components/OriginalPDF";
 import ReaderView from "@/components/ReaderView";
 import {
@@ -37,7 +38,7 @@ import { useScreenRotation } from "@/hooks/screenRotation";
 import type { PdfPageSize } from "@/hooks/switchhighlight";
 import * as Haptics from "expo-haptics";
 import { StatusBar } from "expo-status-bar";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import {
   extractPdfDocumentRange,
@@ -273,7 +274,7 @@ function BookPageSkeleton() {
   );
 }
 
-export default function ReaderScreen() {
+function ReaderScreenContent() {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const translatedActionWidth = Math.min(
     36,
@@ -1517,6 +1518,30 @@ export default function ReaderScreen() {
         },
         adapter,
       });
+      if (succeeded && targetLayout === "vertical") {
+        // A destination is only a handoff instruction. Leaving it mounted after
+        // verification keeps the vertical WebView's programmatic anchor pinned;
+        // every translated-block append can then re-scroll to that old word and
+        // fight the user's next drag. Clear only this completed transition so a
+        // newer navigation cannot be accidentally released.
+        const completedTransition = useAnchorStore.getState().transition;
+        if (
+          completedTransition.status === "complete" &&
+          completedTransition.target?.mode === targetMode
+        ) {
+          const completedId = completedTransition.id;
+          if (targetMode === "reader") {
+            setReaderDestination((current) =>
+              current?.nonce === completedId ? null : current,
+            );
+          }
+          if (targetMode === "translated") {
+            setTranslatedDestination((current) =>
+              current?.nonce === completedId ? null : current,
+            );
+          }
+        }
+      }
       if (!succeeded) {
         const transition = useAnchorStore.getState().transition;
         if (
@@ -2414,5 +2439,19 @@ export default function ReaderScreen() {
         </View>
       )}
     </Box>
+  );
+}
+
+export default function ReaderScreen() {
+  const router = useRouter();
+  return (
+    <AppErrorBoundary
+      area="reader"
+      fallbackTitle="This PDF couldn't be displayed"
+      fallbackMessage="Your library is safe. Try reopening the reader or return to your library."
+      onExit={() => router.replace("/HomePage")}
+    >
+      <ReaderScreenContent />
+    </AppErrorBoundary>
   );
 }

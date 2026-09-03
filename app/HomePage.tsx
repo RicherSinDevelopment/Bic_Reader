@@ -11,6 +11,7 @@ import type { PickedPdf } from "@/hooks/useDocumentPicker";
 import { usePdfLibrary } from "@/hooks/usePdfLibrary";
 import { FREE_PDF_LIMIT } from "@/lib/premiumFeatures";
 import { useRevenueCat } from "@/providers/RevenueCatProvider";
+import { addSafeBreadcrumb } from "@/services/errorReporting";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { Modal, Pressable, Text, View } from "react-native";
@@ -49,6 +50,10 @@ const HomePage = () => {
       return;
     }
     const result = await importPdf(pdf);
+
+    addSafeBreadcrumb("bic.pdf.import", "completed", {
+      result: result.status,
+    });
 
     if (result.status === "duplicate") {
       setDuplicatePdfName(pdf.name);

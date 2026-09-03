@@ -20,6 +20,10 @@ import {
   type BottomSheetRef,
 } from "@/components/ui/bottomsheet";
 import { usePageTransition } from "@/hooks/pagetransition";
+import {
+  addSafeBreadcrumb,
+  captureOperationalMessage,
+} from "@/services/errorReporting";
 
 import React, {
   useCallback,
@@ -3014,6 +3018,16 @@ const ReaderView = ({
                     }}
                     onLoadEnd={handleReaderLoadEnd}
                     onContentProcessDidTerminate={() => {
+                      addSafeBreadcrumb(
+                        "bic.webview",
+                        "content-process-terminated",
+                        { surface: "vertical-reader", recovery: "reload" },
+                        "warning",
+                      );
+                      captureOperationalMessage("webview.process-terminated", {
+                        surface: "vertical-reader",
+                        recovery: "reload",
+                      });
                       appendedBlockCount.current = initialBlocks.length;
                       sentBlockIds.current = new Set(
                         initialBlocks.map((block) => block.id),

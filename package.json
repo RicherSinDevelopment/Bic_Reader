@@ -23,6 +23,7 @@
     "@gluestack-ui/utils": "^5.0.6",
     "@gorhom/bottom-sheet": "^5.2.14",
     "@legendapp/motion": "^2.4.0",
+    "@sentry/react-native": "~7.2.0",
     "@supabase/supabase-js": "^2.109.0",
     "babel-preset-expo": "~54.0.10",
     "expo": "~54.0.37",

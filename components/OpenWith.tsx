@@ -10,6 +10,10 @@ import {
 } from "@/services/incomingPdfService";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import {
+  addSafeBreadcrumb,
+  captureHandledError,
+} from "@/services/errorReporting";
 
 type OpenWithProps = {
   onPdfReceived: (pdf: PickedPdf) => Promise<string | null>;
@@ -60,6 +64,7 @@ export default function OpenWith({ onPdfReceived }: OpenWithProps) {
     importInProgress.current = incomingUrl;
 
     const openPdf = async () => {
+      addSafeBreadcrumb("bic.pdf.import", "open-with-started");
       // Metro reloads can replay the URL that originally launched the native
       // app. Ignore that replay, while allowing non-initial Open With events.
       if (incomingPdf.initial && (await wasIncomingPdfHandled(incomingUrl))) {
@@ -82,16 +87,23 @@ export default function OpenWith({ onPdfReceived }: OpenWithProps) {
       importInProgress.current = null;
 
       if (pdfId) {
+        addSafeBreadcrumb("bic.pdf.import", "open-with-completed", {
+          imported: true,
+        });
         router.replace({
           pathname: "/Reader/[pdfId]",
           params: { pdfId },
         });
       } else {
+        addSafeBreadcrumb("bic.pdf.import", "open-with-completed", {
+          imported: false,
+        });
         router.replace("/HomePage");
       }
     };
 
     void openPdf().catch((error: unknown) => {
+        captureHandledError(error, "pdf.import.open-with");
         console.error("Failed to import a PDF opened with Bic Reader:", error);
         clearIncomingPdfUrl(incomingUrl);
         releaseIncomingPdfUrl(incomingUrl);

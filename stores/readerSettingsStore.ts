@@ -1,4 +1,12 @@
 import { create } from 'zustand';
+import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
+import Storage from 'expo-sqlite/kv-store';
+
+const readerSettingsStorage: StateStorage = {
+  getItem: (name) => Storage.getItemSync(name),
+  setItem: (name, value) => Storage.setItemSync(name, value),
+  removeItem: (name) => Storage.removeItemSync(name),
+};
 
 export type ReaderTransition = "scroll" | "pager";
 export type ReaderSpacingPreset =
@@ -72,8 +80,8 @@ type ReaderSettingsState = {
   setColorPreset: (backgroundColor: string, textColor: string) => void;
 };
 
-export const useReaderSettingsStore =
-  create<ReaderSettingsState>((set) => ({
+export const useReaderSettingsStore = create<ReaderSettingsState>()(
+  persist((set) => ({
     fontFamily: 'SourceSans3_400Regular',
     fontSize: 22,
     lineHeight: 1.5,
@@ -230,4 +238,9 @@ export const useReaderSettingsStore =
           ? state
           : { backgroundColor, textColor, colorsCustomized: true }
       ),
-  }));
+  }), {
+    name: 'bic-reader-settings',
+    storage: createJSONStorage(() => readerSettingsStorage),
+    version: 1,
+  }),
+);

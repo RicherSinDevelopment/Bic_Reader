@@ -1,5 +1,9 @@
 import { useAnchorStore } from "./AnchorStore";
 import type { AnchorAdapter, CanonicalAnchor, TransitionPhase, TransitionTarget } from "./AnchorTypes";
+import {
+  addSafeBreadcrumb,
+  captureOperationalMessage,
+} from "@/services/errorReporting";
 
 const MAX_RESTORE_ATTEMPTS = 2;
 const RESTORE_SETTLE_MS = 220;
@@ -16,6 +20,12 @@ export class TransitionController {
     const current = useAnchorStore.getState().transition;
     if (current.status !== "running") return;
     useAnchorStore.getState().setTransition({ ...current, status: "cancelled", error: reason });
+    addSafeBreadcrumb("bic.reader.transition", "cancelled", {
+      fromLayout: current.from?.layout,
+      fromMode: current.from?.mode,
+      toLayout: current.target?.layout,
+      toMode: current.target?.mode,
+    });
     if (__DEV__) console.info(`[Transition ${current.id}] aborted: ${reason}`);
   }
 
@@ -23,6 +33,12 @@ export class TransitionController {
     if (!this.isCurrent(id)) return false;
     const current = useAnchorStore.getState().transition;
     useAnchorStore.getState().setTransition({ ...current, phase });
+    addSafeBreadcrumb("bic.reader.transition", phase, {
+      fromLayout: current.from?.layout,
+      fromMode: current.from?.mode,
+      toLayout: current.target?.layout,
+      toMode: current.target?.mode,
+    });
     if (__DEV__) console.info(`[Transition ${id}] ${phase}`);
     return true;
   }
@@ -60,8 +76,22 @@ export class TransitionController {
           useAnchorStore.getState().setActiveMode(input.target.mode);
           useAnchorStore.getState().setActiveLayout(input.target.layout);
           useAnchorStore.getState().setTransition({ id, phase: "idle", status: "complete", from: input.from, target: input.target });
+          addSafeBreadcrumb("bic.reader.transition", "completed", {
+            fromLayout: input.from.layout,
+            fromMode: input.from.mode,
+            toLayout: input.target.layout,
+            toMode: input.target.mode,
+            attempt: attempt + 1,
+          });
           return true;
         }
+        addSafeBreadcrumb("bic.reader.transition", "verification-retry", {
+          fromLayout: input.from.layout,
+          fromMode: input.from.mode,
+          toLayout: input.target.layout,
+          toMode: input.target.mode,
+          attempt: attempt + 1,
+        }, "warning");
         if (__DEV__) {
           console.warn(`[Transition ${id}] verification retry`, {
             attempt,
@@ -76,6 +106,14 @@ export class TransitionController {
       if (!this.isCurrent(id)) return false;
       const message = error instanceof Error ? error.message : String(error);
       useAnchorStore.getState().setTransition({ id, phase: "idle", status: message === "superseded" ? "cancelled" : "failed", from: input.from, target: input.target, error: message });
+      if (message !== "superseded") {
+        captureOperationalMessage("reader.transition.failed", {
+          fromLayout: input.from.layout,
+          fromMode: input.from.mode,
+          toLayout: input.target.layout,
+          toMode: input.target.mode,
+        });
+      }
       if (__DEV__) console.warn(`[Transition ${id}] ${message}`);
       return false;
     }

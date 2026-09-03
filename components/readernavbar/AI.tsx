@@ -264,7 +264,15 @@ export default function AI({
         body: { question, context, contextLabel },
       });
 
-      if (error) throw error;
+      if (error) {
+        const response = (error as { context?: Response }).context;
+        const payload = response
+          ? await response.clone().json().catch(() => null) as { error?: unknown } | null
+          : null;
+        throw new Error(
+          typeof payload?.error === "string" ? payload.error : error.message,
+        );
+      }
       if (!data || typeof data.answer !== "string") {
         throw new Error("The AI returned an invalid response.");
       }

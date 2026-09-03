@@ -5,6 +5,10 @@ import {
 import { requireNativeModule } from "expo-modules-core";
 import { Platform } from "react-native";
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
+import {
+  addSafeBreadcrumb,
+  captureHandledError,
+} from "@/services/errorReporting";
 
 // Native progress events make the first results immediate, so every session
 // can stay alive long enough to process a substantial section of the book.
@@ -145,6 +149,11 @@ export async function translatePdfBlocks(
   sourceLanguage?: string,
   onSourceLanguageDetected?: (language: string) => void,
 ) {
+  addSafeBreadcrumb("bic.translation", "started", {
+    targetLanguage,
+    hasKnownSourceLanguage: Boolean(sourceLanguage),
+    blockCountBucket: blocks.length < 25 ? "small" : blocks.length < 100 ? "medium" : "large",
+  });
   if (!isOnDeviceTranslationSupported) {
     throw new Error(
       "On-device document translation requires iOS 18 or later.",
@@ -155,7 +164,8 @@ export async function translatePdfBlocks(
   let resolvedSourceLanguage = sourceLanguage;
   const batches = createBatches(blocks);
 
-  for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+  try {
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
     const batch = batches[batchIndex];
     const pendingProgress = new Map<number, ExtractedPdfBlock>();
     let progressPublishTimer: ReturnType<typeof setTimeout> | null = null;
@@ -230,7 +240,21 @@ export async function translatePdfBlocks(
     // Completed results are authoritative. Always publish them so a partial or
     // empty progress event cannot remain in memory/SQLite indefinitely.
     onBatch?.(translatedBatch);
+    }
+  } catch (error) {
+    if (!isBookTranslationCancellation(error)) {
+      captureHandledError(error, "translation", {
+        targetLanguage,
+        hasKnownSourceLanguage: Boolean(sourceLanguage),
+      });
+    }
+    throw error;
   }
+
+  addSafeBreadcrumb("bic.translation", "completed", {
+    targetLanguage,
+    batchCount: batches.length,
+  });
 
   return translatedBlocks;
 }

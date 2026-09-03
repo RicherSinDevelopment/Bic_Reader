@@ -31,6 +31,10 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
+import {
+  addSafeBreadcrumb,
+  captureOperationalMessage,
+} from "@/services/errorReporting";
 
 type Destination = {
   page: number;
@@ -576,7 +580,19 @@ function HorizontalSelectablePage({
       `);
         onReady?.();
       }}
-      onContentProcessDidTerminate={() => webViewRef.current?.reload()}
+      onContentProcessDidTerminate={() => {
+        addSafeBreadcrumb(
+          "bic.webview",
+          "content-process-terminated",
+          { surface: "horizontal-reader", recovery: "reload" },
+          "warning",
+        );
+        captureOperationalMessage("webview.process-terminated", {
+          surface: "horizontal-reader",
+          recovery: "reload",
+        });
+        webViewRef.current?.reload();
+      }}
       onMessage={(event) => {
         try {
           const message = JSON.parse(event.nativeEvent.data);

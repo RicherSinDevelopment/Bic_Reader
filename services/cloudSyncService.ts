@@ -44,6 +44,17 @@ type AnnotationRow = {
   created_at: string;
 };
 
+type ReaderPositionRow = {
+  pdf_id: string;
+  source_page: number;
+  source_block_id: string | null;
+  word_index: number | null;
+  character_offset: number | null;
+  block_progress: number | null;
+  revision: number;
+  updated_at: string;
+};
+
 function pdfDirectory() {
   if (!FileSystem.documentDirectory)
     throw new Error("Document storage is unavailable.");
@@ -247,6 +258,48 @@ export async function syncPremiumLibrary(
     "SELECT * FROM pdf_documents WHERE cloud_owner_id = ?",
     userId,
   );
+
+  // Reconcile positions on every sync, not just first login. This prevents a
+  // stale second device from overwriting a newer cloud position.
+  const localDocumentIds = new Set(localDocuments.map((row) => row.id));
+  const { data: cloudPositions, error: positionError } = await supabase
+    .from("cloud_reader_positions")
+    .select(
+      "pdf_id, source_page, source_block_id, word_index, character_offset, block_progress, revision, updated_at",
+    );
+  throwIfError(positionError);
+  for (const position of (cloudPositions ?? []) as ReaderPositionRow[]) {
+    if (!localDocumentIds.has(position.pdf_id)) continue;
+    const local = await db.getFirstAsync<{ updated_at: string }>(
+      "SELECT updated_at FROM reader_positions WHERE pdf_id = ? LIMIT 1",
+      position.pdf_id,
+    );
+    if (local && Date.parse(local.updated_at) >= Date.parse(position.updated_at)) {
+      continue;
+    }
+    await withSerializedWrite(db, (database) => database.runAsync(
+      `INSERT INTO reader_positions (
+        pdf_id, source_page, source_block_id, word_index, character_offset,
+        block_progress, revision, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(pdf_id) DO UPDATE SET
+        source_page = excluded.source_page,
+        source_block_id = excluded.source_block_id,
+        word_index = excluded.word_index,
+        character_offset = excluded.character_offset,
+        block_progress = excluded.block_progress,
+        revision = excluded.revision,
+        updated_at = excluded.updated_at`,
+      position.pdf_id,
+      position.source_page,
+      position.source_block_id,
+      position.word_index,
+      position.character_offset,
+      position.block_progress,
+      position.revision,
+      position.updated_at,
+    ));
+  }
   if (!restoreFirst) {
     const localIds = new Set(localDocuments.map((row) => row.id));
     const removedCloudRows = cloudRows.filter((row) => !localIds.has(row.id));
@@ -312,6 +365,24 @@ export async function syncPremiumLibrary(
     const { error } = await supabase
       .from("cloud_reader_annotations")
       .insert(localAnnotations.map((row) => ({ ...row, user_id: userId })));
+    throwIfError(error);
+  }
+
+
+  const localPositions = await db.getAllAsync<ReaderPositionRow>(
+    `SELECT position.pdf_id, position.source_page, position.source_block_id,
+            position.word_index, position.character_offset,
+            position.block_progress, position.revision, position.updated_at
+     FROM reader_positions AS position
+     INNER JOIN pdf_documents AS document ON document.id = position.pdf_id
+     WHERE document.cloud_owner_id = ?`,
+    userId,
+  );
+  if (localPositions.length) {
+    const { error } = await supabase.from("cloud_reader_positions").upsert(
+      localPositions.map((position) => ({ ...position, user_id: userId })),
+      { onConflict: "user_id,pdf_id" },
+    );
     throwIfError(error);
   }
 

@@ -10,7 +10,14 @@
   "credentialsSource": "local"
 },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "credentialsSource": "local"
+    },
+    "preview-simulator": {
+      "extends": "preview",
+      "ios": {
+        "simulator": true
+      }
     },
     "production": {
       "autoIncrement": true

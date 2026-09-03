@@ -1,4 +1,5 @@
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
+import { AppErrorBoundary } from '@/components/errors/AppErrorBoundary';
 import { migrateDatabase } from "@/database/migrations";
 import { AuthProvider, useAuth } from '@/providers/AuthProvider';
 import { RevenueCatProvider } from '@/providers/RevenueCatProvider';
@@ -17,7 +18,10 @@ import {
 } from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useAppearanceStore } from "@/stores/appearanceStore";
+import { initializeErrorReporting, Sentry } from "@/services/errorReporting";
 import './global.css';
+
+initializeErrorReporting();
 
 // Gorhom Bottom Sheet still performs a few compatibility reads that trigger
 // Reanimated's strict diagnostic even though its animations run as worklets.
@@ -26,7 +30,7 @@ configureReanimatedLogger({
   strict: false,
 });
 
-export default function RootLayout() {
+function RootLayout() {
   const appearancePreference = useAppearanceStore((state) => state.preference);
   // Start loading fonts without blocking the auth provider and router. Waiting
   // here previously delayed session restoration and left the app empty during
@@ -38,31 +42,39 @@ export default function RootLayout() {
   });
   
  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <GluestackUIProvider mode={appearancePreference}>
-          <StatusBar style="auto" />
-          <AuthProvider>
-            <RevenueCatProvider>
-              <Suspense fallback={<StartupLoadingScreen />}>
-                <SQLiteProvider
-                  databaseName="bic_reader.db"
-                  onInit={migrateDatabase}
-                  useSuspense
-                >
-                  <CloudSyncProvider>
-                    <RootNavigator />
-                  </CloudSyncProvider>
-                </SQLiteProvider>
-              </Suspense>
-            </RevenueCatProvider>
-          </AuthProvider>
-        </GluestackUIProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <AppErrorBoundary
+      area="application-root"
+      fallbackTitle="Bic Reader couldn't start"
+      fallbackMessage="Something unexpected happened. Try starting the app again."
+    >
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <GluestackUIProvider mode={appearancePreference}>
+            <StatusBar style="auto" />
+            <AuthProvider>
+              <RevenueCatProvider>
+                <Suspense fallback={<StartupLoadingScreen />}>
+                  <SQLiteProvider
+                    databaseName="bic_reader.db"
+                    onInit={migrateDatabase}
+                    useSuspense
+                  >
+                    <CloudSyncProvider>
+                      <RootNavigator />
+                    </CloudSyncProvider>
+                  </SQLiteProvider>
+                </Suspense>
+              </RevenueCatProvider>
+            </AuthProvider>
+          </GluestackUIProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </AppErrorBoundary>
   );
    
 }
+
+export default Sentry.wrap(RootLayout);
 
 function StartupLoadingScreen() {
   const isDark = useColorScheme() === "dark";

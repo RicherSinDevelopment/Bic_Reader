@@ -1,8 +1,8 @@
 module.exports = function (api) {
-  api.cache(true);
+  const isTest = api.env('test');
 
   return {
-    presets: [['babel-preset-expo'], 'nativewind/babel'],
+    presets: [['babel-preset-expo'], ...(isTest ? [] : ['nativewind/babel'])],
 
     plugins: [
       [
@@ -16,7 +16,7 @@ module.exports = function (api) {
           },
         },
       ],
-      'react-native-worklets/plugin',
+      ...(isTest ? [] : ['react-native-worklets/plugin']),
     ],
   };
 };

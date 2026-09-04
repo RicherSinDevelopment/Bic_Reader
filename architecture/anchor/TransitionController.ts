@@ -4,9 +4,12 @@ import {
   addSafeBreadcrumb,
   captureOperationalMessage,
 } from "@/services/errorReporting";
+import { anchorAccuracyScore, recordTransitionMetric } from "./AnchorMetrics";
 
 const MAX_RESTORE_ATTEMPTS = 2;
-const RESTORE_SETTLE_MS = 220;
+// Verification already polls the renderer until it observes a stable anchor.
+// A long unconditional pause only adds latency to every cached tab switch.
+const RESTORE_SETTLE_MS = 40;
 
 export class TransitionController {
   private nextId = Date.now();
@@ -50,6 +53,7 @@ export class TransitionController {
     prepare?: (anchor: CanonicalAnchor, id: number) => boolean | Promise<boolean>;
     adapter: AnchorAdapter;
   }) {
+    const startedAt = Date.now();
     this.cancel();
     const id = ++this.nextId;
     useAnchorStore.getState().setTransition({ id, phase: "capture", status: "running", from: input.from, target: input.target });
@@ -73,6 +77,11 @@ export class TransitionController {
         const verified = input.adapter.verify ? await input.adapter.verify(anchor, id) : { ok: restored.ok };
         if (!this.isCurrent(id)) return false;
         if (verified.ok) {
+          const durationMs = Date.now() - startedAt;
+          const accuracyScore = anchorAccuracyScore(
+            "expected" in verified ? verified.expected : anchor,
+            "actual" in verified ? verified.actual : undefined,
+          );
           useAnchorStore.getState().setActiveMode(input.target.mode);
           useAnchorStore.getState().setActiveLayout(input.target.layout);
           useAnchorStore.getState().setTransition({ id, phase: "idle", status: "complete", from: input.from, target: input.target });
@@ -82,7 +91,36 @@ export class TransitionController {
             toLayout: input.target.layout,
             toMode: input.target.mode,
             attempt: attempt + 1,
+            durationMs,
+            accuracyScore,
           });
+          recordTransitionMetric({
+            id,
+            from: input.from,
+            target: input.target,
+            durationMs,
+            accuracyScore,
+            attempt: attempt + 1,
+            status: "complete",
+          });
+          if (accuracyScore < 90) {
+            captureOperationalMessage("reader.transition.low_accuracy", {
+              fromLayout: input.from.layout,
+              fromMode: input.from.mode,
+              toLayout: input.target.layout,
+              toMode: input.target.mode,
+              accuracyScore,
+            });
+          }
+          if (durationMs > 2_500) {
+            captureOperationalMessage("reader.transition.slow", {
+              fromLayout: input.from.layout,
+              fromMode: input.from.mode,
+              toLayout: input.target.layout,
+              toMode: input.target.mode,
+              durationMs,
+            });
+          }
           return true;
         }
         addSafeBreadcrumb("bic.reader.transition", "verification-retry", {
@@ -114,6 +152,13 @@ export class TransitionController {
           toMode: input.target.mode,
         });
       }
+      recordTransitionMetric({
+        id,
+        from: input.from,
+        target: input.target,
+        durationMs: Date.now() - startedAt,
+        status: message === "superseded" ? "cancelled" : "failed",
+      });
       if (__DEV__) console.warn(`[Transition ${id}] ${message}`);
       return false;
     }

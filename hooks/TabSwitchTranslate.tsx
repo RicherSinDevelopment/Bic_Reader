@@ -20,6 +20,7 @@ export type LatestTranslatedAnchor = {
 
 export type TabSwitchDestination = {
   page: number;
+  documentStart?: boolean;
   blockId?: string;
   searchMatchIndex?: number;
   switchHighlightOffset?: number;

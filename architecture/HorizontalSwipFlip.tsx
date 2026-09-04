@@ -15,7 +15,7 @@ export type HorizontalFlipSegment = {
 /** Generated page numbers are not retained because layout changes invalidate them. */
 export function captureHorizontalFlipAnchor(
   page: HorizontalFlipSegment[] | undefined,
-  blocks: ReadonlyArray<{ id: string; text: string }>,
+  blocks: readonly { id: string; text: string }[],
 ): HorizontalFlipAnchor | undefined {
   const segment = page?.[0];
   if (!segment) return undefined;

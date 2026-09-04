@@ -56,13 +56,18 @@ function anchorsMatch(
       // though the requested block is visible immediately below it. Treat the
       // same source page as a valid vertical landing; exact word placement is
       // still handled by the destination highlight.
-      return expected.sourcePage === actual.sourcePage;
+      return (
+        expected.sourcePage === actual.sourcePage &&
+        (expected.blockProgress ?? 0) >= 0.92
+      );
     }
     if (
       expected.blockProgress !== undefined &&
       actual.blockProgress !== undefined
     ) {
-      return Math.abs(expected.blockProgress - actual.blockProgress) <= 0.08;
+      // Tiny floating-point representation differences must not turn an exact
+      // eight-percent boundary into a false verification failure.
+      return Math.abs(expected.blockProgress - actual.blockProgress) <= 0.0800001;
     }
     return true;
   }

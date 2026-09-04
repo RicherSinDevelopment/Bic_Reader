@@ -87,6 +87,7 @@ import { WebView } from "react-native-webview";
 
 type ReaderDestination = {
   page: number;
+  documentStart?: boolean;
   readerPage?: number;
   blockId?: string;
   searchQuery?: string;
@@ -261,7 +262,7 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
       ${pageBlocks
         .map((block) => {
           const tag = blockTag(block);
-          return `<${tag} data-reader-block data-block-id="${escapeHtml(block.id)}" data-source-page="${block.page}">${escapeHtml(block.text)}</${tag}>`;
+          return `<${tag} data-reader-block data-block-id="${escapeHtml(block.id)}" data-source-page="${block.page}" data-reading-order="${block.readingOrder}">${escapeHtml(block.text)}</${tag}>`;
         })
         .join("\n")}
       <div class="page-divider"><span>Page ${page}</span></div>
@@ -1036,9 +1037,10 @@ const ReaderView = ({
     if (!activeModeDestination) return;
     const destinationNonce = activeModeDestination.nonce;
     const requiresDrawAcknowledgement =
-      activeModeDestination.switchHighlightWordIndex !== undefined ||
-      activeModeDestination.switchHighlightWordProgress !== undefined ||
-      Boolean(activeModeDestination.switchHighlightQuery);
+      !activeModeDestination.documentStart &&
+      (activeModeDestination.switchHighlightWordIndex !== undefined ||
+        activeModeDestination.switchHighlightWordProgress !== undefined ||
+        Boolean(activeModeDestination.switchHighlightQuery));
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let attempts = 0;
@@ -1700,6 +1702,36 @@ const ReaderView = ({
           template.innerHTML = message.html;
           Array.from(template.content.children).forEach(function(section) {
             const page = Number(section.dataset.sourcePageSection);
+            const existingSection = Array.from(container.children).find(
+              function(candidate) {
+                return Number(candidate.dataset.sourcePageSection) === page;
+              }
+            );
+            if (existingSection) {
+              const divider = existingSection.querySelector('.page-divider');
+              Array.from(
+                section.querySelectorAll('[data-reader-block]')
+              ).forEach(function(incomingBlock) {
+                const blockId = incomingBlock.dataset.blockId;
+                if (
+                  blockId &&
+                  existingSection.querySelector(
+                    '[data-block-id="' + CSS.escape(blockId) + '"]'
+                  )
+                ) return;
+                const incomingOrder = Number(incomingBlock.dataset.readingOrder);
+                const insertionPoint = Array.from(
+                  existingSection.querySelectorAll('[data-reader-block]')
+                ).find(function(existingBlock) {
+                  return Number(existingBlock.dataset.readingOrder) > incomingOrder;
+                });
+                existingSection.insertBefore(
+                  incomingBlock,
+                  insertionPoint || divider
+                );
+              });
+              return;
+            }
             const next = Array.from(container.children).find(function(candidate) {
               return Number(candidate.dataset.sourcePageSection) > page;
             });
@@ -1889,6 +1921,12 @@ const ReaderView = ({
           pending.searchMatchIndex
         );
         const destinationTarget = searchHighlight || resolvedTarget;
+        const isDocumentStart = pending.documentStart === true;
+        const hasSwitchTarget = !isDocumentStart && (
+          pending.switchHighlightWordIndex !== undefined ||
+          pending.switchHighlightWordProgress !== undefined ||
+          Boolean(pending.switchHighlightQuery)
+        );
         if (window.__readerTransition === 'scroll') {
           window.__pinnedSourcePage = Number(pending.page);
           // Keep a handle on the element we scrolled to. Content for the pages
@@ -1896,26 +1934,42 @@ const ReaderView = ({
           // after each append so the destination cannot silently drift to an
           // earlier page (which is what made far TOC/search jumps land 100-200
           // pages off and then "reset to the top").
-          window.__activeProgrammaticTarget = destinationTarget;
+          window.__activeProgrammaticTarget = isDocumentStart
+            ? null
+            : destinationTarget;
           window.__activeProgrammaticTargetNonce = pending.nonce;
-          destinationTarget.scrollIntoView({ behavior: 'auto', block: 'start' });
-          requestAnimationFrame(function() {
-            window.__reportSourcePage?.(pending.page);
-          });
+          // An exact word destination owns vertical positioning. Scrolling the
+          // containing block first (and again on every native retry) races the
+          // word alignment and leaves the block's first word at the viewport
+          // edge. Only use the coarse block scroll when no word is available.
+          if (isDocumentStart) {
+            // The first document block cannot be aligned like an ordinary
+            // word: WebKit's native content inset otherwise clamps the offset
+            // after the first lines. Absolute zero is the only true book top.
+            window.__activeProgrammaticRange = null;
+            window.__activeProgrammaticWord = null;
+            window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+            requestAnimationFrame(function() {
+              window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+              window.__reportSourcePage?.(1);
+            });
+          } else if (!hasSwitchTarget) {
+            destinationTarget.scrollIntoView({ behavior: 'auto', block: 'start' });
+            requestAnimationFrame(function() {
+              window.__reportSourcePage?.(pending.page);
+            });
+          }
         } else if (window.__goToElementPage) {
           window.__goToElementPage(destinationTarget);
         }
-        requestAnimationFrame(function() {
+        if (!hasSwitchTarget) {
           requestAnimationFrame(function() {
-            window.__reportSwitchAnchor?.();
+            requestAnimationFrame(function() {
+              window.__reportSwitchAnchor?.();
+            });
           });
-        });
+        }
         setTimeout(function() {
-          window.__reportSwitchAnchor?.();
-          const hasSwitchTarget =
-            pending.switchHighlightWordIndex !== undefined ||
-            pending.switchHighlightWordProgress !== undefined ||
-            Boolean(pending.switchHighlightQuery);
           if (hasSwitchTarget) {
             let highlightAttempt = 0;
             const drawDestinationHighlight = function() {
@@ -1938,6 +1992,7 @@ const ReaderView = ({
             };
             drawDestinationHighlight();
           } else {
+            window.__reportSwitchAnchor?.();
             window.__clearReaderSwitchHighlight?.();
           }
         }, 100);

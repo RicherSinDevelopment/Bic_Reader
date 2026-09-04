@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import {
-  Animated,
   Platform,
   Pressable,
   StyleSheet,
@@ -8,6 +7,11 @@ import {
   useColorScheme,
   View,
 } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 
 export type ReaderMode = "reader" | "translated" | "original";
 
@@ -54,31 +58,32 @@ export default function ReaderModeTabs({
     .slice(0, selectedIndex)
     .reduce((total, width) => total + width, 0);
   const selectedWidth = modeWidths[selectedIndex] ?? SEGMENT_WIDTH;
-  const [indicatorX] = useState(
-    () => new Animated.Value(selectedOffset),
-  );
+  const indicatorX = useSharedValue(selectedOffset);
+  const indicatorWidth = useSharedValue(selectedWidth);
 
   useEffect(() => {
-    const animation = Animated.spring(indicatorX, {
-      toValue: selectedOffset,
-      damping: 25,
-      stiffness: 300,
-      mass: 0.75,
-      useNativeDriver: true,
-    });
+    // Translate and resize the pill as one animation. Updating width as a
+    // plain style made the Reader/Translated/Original control visibly snap
+    // halfway through its movement because Translated has a wider segment.
+    const spring = {
+      damping: 28,
+      stiffness: 340,
+      mass: 0.72,
+    };
+    indicatorX.value = withSpring(selectedOffset, spring);
+    indicatorWidth.value = withSpring(selectedWidth, spring);
+  }, [indicatorWidth, indicatorX, selectedOffset, selectedWidth]);
 
-    animation.start();
-    return () => animation.stop();
-  }, [indicatorX, selectedOffset]);
+  const indicatorStyle = useAnimatedStyle(() => ({
+    width: indicatorWidth.value,
+    transform: [{ translateX: indicatorX.value }],
+  }));
 
   return (
     <View style={[styles.surface, { width: controlWidth }]}>
       <Animated.View
         pointerEvents="none"
-        style={[
-          styles.indicator,
-          { width: selectedWidth, transform: [{ translateX: indicatorX }] },
-        ]}
+        style={[styles.indicator, indicatorStyle]}
       />
 
       <View style={styles.buttons}>
@@ -102,10 +107,7 @@ export default function ReaderModeTabs({
             >
               <Text
                 numberOfLines={1}
-                style={[
-                  styles.label,
-                  isSelected && styles.selectedLabel,
-                ]}
+                style={[styles.label, isSelected && styles.selectedLabel]}
               >
                 {mode.label}
               </Text>
@@ -117,49 +119,50 @@ export default function ReaderModeTabs({
   );
 }
 
-const createStyles = (isDark: boolean) => StyleSheet.create({
-  surface: {
-    height: CONTROL_HEIGHT,
-    borderRadius: 15,
-    backgroundColor: isDark ? "#262B24" : "#eeece3",
-    overflow: "hidden",
-  },
-  indicator: {
-    position: "absolute",
-    top: CONTROL_PADDING,
-    left: CONTROL_PADDING,
-    height: SEGMENT_HEIGHT,
-    borderRadius: 12,
-    backgroundColor: "#639922",
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  buttons: {
-    position: "absolute",
-    top: CONTROL_PADDING,
-    left: CONTROL_PADDING,
-    flexDirection: "row",
-  },
-  button: {
-    height: SEGMENT_HEIGHT,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pressedButton: {
-    transform: [{ scale: 0.97 }],
-  },
-  label: {
-    color: isDark ? "#A6ADA1" : "#77786f",
-    fontFamily: Platform.OS === "ios" ? undefined : "Lato_700Bold",
-    fontSize: 14,
-    fontWeight: "500",
-    letterSpacing: -0.15,
-  },
-  selectedLabel: {
-    color: "#ffffff",
-    fontWeight: "700",
-  },
-});
+const createStyles = (isDark: boolean) =>
+  StyleSheet.create({
+    surface: {
+      height: CONTROL_HEIGHT,
+      borderRadius: 15,
+      backgroundColor: isDark ? "#262B24" : "#eeece3",
+      overflow: "hidden",
+    },
+    indicator: {
+      position: "absolute",
+      top: CONTROL_PADDING,
+      left: CONTROL_PADDING,
+      height: SEGMENT_HEIGHT,
+      borderRadius: 12,
+      backgroundColor: "#639922",
+      shadowColor: "#000000",
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.18,
+      shadowRadius: 4,
+      elevation: 3,
+    },
+    buttons: {
+      position: "absolute",
+      top: CONTROL_PADDING,
+      left: CONTROL_PADDING,
+      flexDirection: "row",
+    },
+    button: {
+      height: SEGMENT_HEIGHT,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    pressedButton: {
+      transform: [{ scale: 0.97 }],
+    },
+    label: {
+      color: isDark ? "#A6ADA1" : "#77786f",
+      fontFamily: Platform.OS === "ios" ? undefined : "Lato_700Bold",
+      fontSize: 14,
+      fontWeight: "500",
+      letterSpacing: -0.15,
+    },
+    selectedLabel: {
+      color: "#ffffff",
+      fontWeight: "700",
+    },
+  });

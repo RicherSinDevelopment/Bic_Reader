@@ -1,4 +1,5 @@
 import { Text } from "@/components/ui/text";
+import { hasExactOriginalDestination } from "@/architecture/anchor/OriginalNavigation";
 import type { SwitchHighlightTarget } from "@/hooks/switchhighlight";
 import { usePdfKitHighlight } from "@/hooks/usePdfKitHighlight";
 import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
@@ -74,8 +75,12 @@ export default function OriginalPDF({
 
   useEffect(() => {
     if (loading || !destination) return;
+    // setHighlight performs the precise PDFKit goToRect navigation. A setPage
+    // for the same destination can be committed afterward by React Native and
+    // reset the viewport to the page boundary, hiding the target above it.
+    if (hasExactOriginalDestination(destination, highlightTarget)) return;
     pdfRef.current?.setPage(Math.max(1, destination.page));
-  }, [destination, loading, pdfRef]);
+  }, [destination, highlightTarget, loading, pdfRef]);
 
   const handleLoadComplete = useCallback(
     (
@@ -121,7 +126,11 @@ export default function OriginalPDF({
         key={`original-pdf-${resetZoomNonce}`}
         ref={pdfRef}
         source={source}
-        page={Math.max(1, destination?.page ?? initialPage)}
+        // Subsequent destinations are imperative: exact targets use PDFKit's
+        // goToRect, and page-only targets use setPage in the effect above.
+        // Keeping this prop stable prevents a late prop commit from undoing an
+        // exact highlight position.
+        page={Math.max(1, initialPage)}
         horizontal={false}
         enablePaging={false}
         fitPolicy={0}

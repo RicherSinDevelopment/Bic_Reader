@@ -65,6 +65,7 @@ export type AnchorCandidate = Omit<CanonicalAnchor, "revision" | "updatedAt"> & 
 
 export type AnchorDestination = {
   page: number;
+  documentStart?: boolean;
   blockId?: string;
   searchMatchIndex?: number;
   switchHighlightOffset?: number;

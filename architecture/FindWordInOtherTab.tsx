@@ -1,5 +1,4 @@
 import type { ReaderMode } from "@/architecture/anchor/AnchorTypes";
-import { sourceBlockId } from "@/architecture/anchor/TranslationAnchorMapper";
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 
 export type SelectedTextRange = {
@@ -17,29 +16,14 @@ export type FindWordAnchor = {
   blockProgress: number;
 };
 
-export type FindWordTarget = Exclude<ReaderMode, "translated"> | "translated";
+export type FindWordTarget = ReaderMode;
 
-export function findWordMenuItems(
-  mode: "reader" | "translated",
-  hasTranslation: boolean,
-) {
-  if (mode === "translated") {
-    return [
-      { key: "findInReader", label: "Find in Reader" },
-      { key: "findInOriginal", label: "Find in Original" },
-    ];
-  }
-  return [
-    ...(hasTranslation
-      ? [{ key: "findInTranslated", label: "Find in Translation" }]
-      : []),
-    { key: "findInOriginal", label: "Find in Original" },
-  ];
+export function findWordMenuItems() {
+  return [{ key: "findInOriginal", label: "Find in Original" }];
 }
 
 export function findTargetForMenuKey(key: string): FindWordTarget | null {
   if (key === "findInReader") return "reader";
-  if (key === "findInTranslated") return "translated";
   if (key === "findInOriginal") return "original";
   return null;
 }
@@ -49,8 +33,7 @@ export function anchorForSelectedWord(input: {
   range: SelectedTextRange | undefined;
   selectedText?: string;
   blocks: ExtractedPdfBlock[];
-  mode: "reader" | "translated";
-  languageCode?: string;
+  mode: "reader";
 }): FindWordAnchor | null {
   const { range } = input;
   if (!range) return null;
@@ -70,13 +53,9 @@ export function anchorForSelectedWord(input: {
     }),
   );
   const match = words[wordIndex] ?? words[0];
-  const translated = input.mode === "translated" && input.languageCode;
-
   return {
     sourcePage: block.page,
-    sourceBlockId: translated
-      ? sourceBlockId(block.id, input.languageCode!)
-      : block.id,
+    sourceBlockId: block.id,
     word: input.selectedText?.trim().split(/\s+/, 1)[0] || match[0],
     wordIndex,
     characterOffset: match.index ?? 0,

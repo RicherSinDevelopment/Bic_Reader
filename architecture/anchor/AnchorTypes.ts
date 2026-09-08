@@ -1,9 +1,8 @@
-export type ReaderMode = "reader" | "translated" | "original";
+export type ReaderMode = "reader" | "original";
 export type ReaderLayout = "vertical" | "horizontal";
 
 export type AnchorAuthority =
   | "reader-user"
-  | "translated-user"
   | "toc"
   | "search"
   | "explicit-navigation"
@@ -12,7 +11,8 @@ export type AnchorAuthority =
   | "renderer"
   | "original-scroll";
 
-export type MovementSource = "user" | "programmatic" | "restore" | "toc" | "search";
+export type MovementSource =
+  "user" | "programmatic" | "restore" | "toc" | "search";
 
 export type CanonicalAnchor = {
   documentId: string;
@@ -25,19 +25,10 @@ export type CanonicalAnchor = {
   updatedAt: string;
 };
 
-export type TranslationAnchor = {
-  documentId: string;
-  languageCode: string;
-  sourcePage: number;
-  sourceBlockId?: string;
-  translatedBlockId?: string;
-  wordIndex?: number;
-  characterOffset?: number;
-  blockProgress?: number;
-};
-
-export type TransitionPhase = "idle" | "capture" | "prepare" | "layout" | "restore" | "verify";
-export type TransitionStatus = "idle" | "running" | "complete" | "cancelled" | "failed";
+export type TransitionPhase =
+  "idle" | "capture" | "prepare" | "layout" | "restore" | "verify";
+export type TransitionStatus =
+  "idle" | "running" | "complete" | "cancelled" | "failed";
 
 export type TransitionTarget = { mode: ReaderMode; layout: ReaderLayout };
 
@@ -50,7 +41,11 @@ export type TransitionState = {
   error?: string;
 };
 
-export type RestoreResult = { ok: boolean; reason?: string; retryable?: boolean };
+export type RestoreResult = {
+  ok: boolean;
+  reason?: string;
+  retryable?: boolean;
+};
 export type AnchorVerificationResult = {
   ok: boolean;
   expected: CanonicalAnchor;
@@ -58,7 +53,10 @@ export type AnchorVerificationResult = {
   reason?: string;
 };
 
-export type AnchorCandidate = Omit<CanonicalAnchor, "revision" | "updatedAt"> & {
+export type AnchorCandidate = Omit<
+  CanonicalAnchor,
+  "revision" | "updatedAt"
+> & {
   revision?: number;
   updatedAt?: string;
 };
@@ -75,10 +73,19 @@ export type AnchorDestination = {
 };
 
 export interface AnchorAdapter {
-  waitUntilReady(anchor: CanonicalAnchor, transitionId: number): Promise<boolean>;
-  restore(anchor: CanonicalAnchor, transitionId: number): Promise<RestoreResult>;
+  waitUntilReady(
+    anchor: CanonicalAnchor,
+    transitionId: number,
+  ): Promise<boolean>;
+  restore(
+    anchor: CanonicalAnchor,
+    transitionId: number,
+  ): Promise<RestoreResult>;
   capture?(): Promise<CanonicalAnchor | null> | CanonicalAnchor | null;
-  verify?(anchor: CanonicalAnchor, transitionId: number): Promise<AnchorVerificationResult>;
+  verify?(
+    anchor: CanonicalAnchor,
+    transitionId: number,
+  ): Promise<AnchorVerificationResult>;
 }
 
 export type AnchorAdapterPorts = {

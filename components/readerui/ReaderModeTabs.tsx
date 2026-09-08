@@ -13,12 +13,11 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 
-export type ReaderMode = "reader" | "translated" | "original";
+export type ReaderMode = "reader" | "original";
 
 type ReaderModeTabsProps = {
   value: ReaderMode;
   onValueChange: (value: ReaderMode) => void;
-  showTranslated?: boolean;
 };
 
 const TWO_TAB_WIDTH = 156;
@@ -26,30 +25,20 @@ const CONTROL_HEIGHT = 44;
 const CONTROL_PADDING = 3;
 const SEGMENT_HEIGHT = CONTROL_HEIGHT - CONTROL_PADDING * 2;
 const SEGMENT_WIDTH = (TWO_TAB_WIDTH - CONTROL_PADDING * 2) / 2;
-const TRANSLATED_SEGMENT_WIDTH = 100;
-const THREE_TAB_WIDTH =
-  SEGMENT_WIDTH * 2 + TRANSLATED_SEGMENT_WIDTH + CONTROL_PADDING * 2;
-
 const READER_MODES: { value: ReaderMode; label: string }[] = [
   { value: "reader", label: "Reader" },
-  { value: "translated", label: "Translated" },
   { value: "original", label: "Original" },
 ];
 
 export default function ReaderModeTabs({
   value,
   onValueChange,
-  showTranslated = false,
 }: ReaderModeTabsProps) {
   const isDark = useColorScheme() === "dark";
   const styles = React.useMemo(() => createStyles(isDark), [isDark]);
-  const modes = showTranslated
-    ? READER_MODES
-    : READER_MODES.filter((mode) => mode.value !== "translated");
-  const controlWidth = showTranslated ? THREE_TAB_WIDTH : TWO_TAB_WIDTH;
-  const modeWidths = modes.map((mode) =>
-    mode.value === "translated" ? TRANSLATED_SEGMENT_WIDTH : SEGMENT_WIDTH,
-  );
+  const modes = READER_MODES;
+  const controlWidth = TWO_TAB_WIDTH;
+  const modeWidths = modes.map(() => SEGMENT_WIDTH);
   const selectedIndex = Math.max(
     0,
     modes.findIndex((mode) => mode.value === value),
@@ -62,9 +51,6 @@ export default function ReaderModeTabs({
   const indicatorWidth = useSharedValue(selectedWidth);
 
   useEffect(() => {
-    // Translate and resize the pill as one animation. Updating width as a
-    // plain style made the Reader/Translated/Original control visibly snap
-    // halfway through its movement because Translated has a wider segment.
     const spring = {
       damping: 28,
       stiffness: 340,

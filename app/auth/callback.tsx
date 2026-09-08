@@ -6,6 +6,11 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, useColorScheme, View } 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createSessionFromAuthUrl } from '@/lib/auth-deep-link';
+import {
+  authReturnTarget,
+  authRoute,
+  destinationAfterAuth,
+} from '@/lib/authNavigation';
 
 type CallbackStatus = 'loading' | 'success' | 'error';
 
@@ -17,6 +22,11 @@ export default function AuthCallback() {
   const [message, setMessage] = useState('Confirming your email…');
   const isDark = useColorScheme() === 'dark';
   const styles = useMemo(() => createStyles(isDark), [isDark]);
+  const returnTo = authReturnTarget(
+    incomingUrl
+      ? Linking.parse(incomingUrl).queryParams?.returnTo as string | undefined
+      : undefined,
+  );
 
   useEffect(() => {
     if (!incomingUrl || handledUrl.current === incomingUrl) return;
@@ -31,13 +41,13 @@ export default function AuthCallback() {
 
         setStatus('success');
         setMessage('Your email is confirmed. Taking you to your library…');
-        router.replace('/HomePage');
+        router.replace(destinationAfterAuth(returnTo));
       })
       .catch((error: unknown) => {
         setStatus('error');
         setMessage(error instanceof Error ? error.message : 'Unable to confirm your email.');
       });
-  }, [incomingUrl, router]);
+  }, [incomingUrl, returnTo, router]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -60,7 +70,7 @@ export default function AuthCallback() {
         {status === 'error' ? (
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.replace('/(auth)/sign-in')}
+            onPress={() => router.replace(authRoute('/(auth)/sign-in', returnTo))}
             style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
           >
             <Text style={styles.buttonText}>Back to sign in</Text>

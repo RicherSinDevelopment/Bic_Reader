@@ -2,7 +2,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { useRevenueCat } from '@/providers/RevenueCatProvider';
 import { usePdfLibrary } from '@/hooks/usePdfLibrary';
 import { useAppearanceStore } from '@/stores/appearanceStore';
-import { resetOnboarding } from '@/lib/onboarding';
+import { authRoute } from '@/lib/authNavigation';
 import ProfileBackButton from '@/components/ProfileBackButton';
 import { useRouter } from 'expo-router';
 import {
@@ -38,7 +38,7 @@ import { deleteCurrentAccount } from '@/services/accountDeletionService';
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 
 export default function Profile() {
-  const { signOut } = useAuth();
+  const { session, signOut } = useAuth();
   const {
     error: purchaseError,
     isLoading: isSubscriptionLoading,
@@ -75,9 +75,8 @@ export default function Profile() {
     setErrorMessage(null);
 
     try {
-      resetOnboarding();
       await signOut();
-      router.replace('/onboarding');
+      router.replace('/HomePage');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unable to sign out.');
     }
@@ -85,6 +84,10 @@ export default function Profile() {
 
   const handleRestorePurchases = async () => {
     if (isRestoring) return;
+    if (!session) {
+      router.push(authRoute('/(auth)/sign-in', 'premium'));
+      return;
+    }
     setErrorMessage(null);
     setRestoreMessage(null);
     setIsRestoring(true);
@@ -113,8 +116,7 @@ export default function Profile() {
     setIsDeletingAccount(true);
     try {
       await deleteCurrentAccount(db);
-      resetOnboarding();
-      router.replace('/onboarding');
+      router.replace('/HomePage');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unable to delete your account. Please try again.');
     } finally {
@@ -220,12 +222,16 @@ export default function Profile() {
                       ? 'Checking membership…'
                       : isPremium
                         ? 'Premium'
-                        : 'Free plan'}
+                        : session
+                          ? 'Free plan'
+                          : 'Guest'}
                   </Text>
                   <Text style={styles.membershipCaption}>
                     {isPremium
                       ? 'Your premium features are unlocked.'
-                      : 'Upgrade to unlock premium features.'}
+                      : session
+                        ? 'Upgrade to unlock premium features.'
+                        : 'Your reading stays privately on this device.'}
                   </Text>
                 </View>
               </View>
@@ -368,7 +374,7 @@ export default function Profile() {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Account</Text>
-            <View style={styles.dangerCard}>
+            {session ? <View style={styles.dangerCard}>
               <Text style={styles.dangerTitle}>Delete account</Text>
               <Text style={styles.dangerCaption}>
                 Permanently remove your account and associated cloud data. Your offline PDF files will remain on this device.
@@ -396,7 +402,34 @@ export default function Profile() {
                 {isDeletingAccount ? <ActivityIndicator color="#B42318" size="small" /> : <Trash2 color="#B42318" size={18} />}
                 <Text style={styles.deleteAccountText}>{isDeletingAccount ? 'Deleting account…' : 'Delete account'}</Text>
               </Pressable>
-            </View>
+            </View> : (
+              <View style={styles.membershipCard}>
+                <Text style={styles.dangerTitle}>Reading as a guest</Text>
+                <Text style={styles.dangerCaption}>
+                  You can keep up to five PDFs on this device. Sign in to start Premium, use AI, and sync your library.
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => router.push(authRoute('/(auth)/sign-in'))}
+                  style={({ pressed }) => [
+                    styles.upgradeButton,
+                    pressed && styles.saveButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.saveButtonText}>Sign in</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => router.push(authRoute('/(auth)/sign-up'))}
+                  style={({ pressed }) => [
+                    styles.restoreButton,
+                    pressed && styles.restoreButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.restoreButtonText}>Create an account</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
 
           {errorMessage ? (
@@ -405,14 +438,14 @@ export default function Profile() {
             </Text>
           ) : null}
 
-          <Pressable
+          {session ? <Pressable
             accessibilityRole="button"
             onPress={() => void handleSignOut()}
             style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}
           >
             <LogOut color="#B42318" size={20} />
             <Text style={styles.signOutText}>Sign out</Text>
-          </Pressable>
+          </Pressable> : null}
       </ScrollView>
       <View pointerEvents="box-none" style={styles.persistentBackOverlay}>
         <View pointerEvents="box-none" style={styles.persistentBackContent}>

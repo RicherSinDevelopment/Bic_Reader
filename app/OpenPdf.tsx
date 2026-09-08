@@ -16,8 +16,10 @@ export default function OpenPdfScreen() {
       const allowNew = isPremium || pdfs.length < FREE_PDF_LIMIT;
       const result = await importPdf(pdf, { allowNew });
 
-      if (result.status === "limit") return null;
-      return result.status === "imported" ? result.pdf.id : result.pdfId;
+      if (result.status === "limit") return { reason: "limit" as const };
+      return {
+        pdfId: result.status === "imported" ? result.pdf.id : result.pdfId,
+      };
     },
     [importPdf, isPremium, pdfs.length],
   );

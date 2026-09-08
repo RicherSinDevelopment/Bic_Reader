@@ -1,3 +1,6 @@
+import { READER_GUIDE_DIMMING_SCRIPT } from "@/architecture/ReaderGuideDimming";
+import { VERTICAL_ANCHOR_PROBE } from "@/architecture/anchor/VerticalAnchorProbe";
+import { ANCHOR_DEBUG } from "@/architecture/anchor/AnchorDiagnostics";
 import HorizontalReaderPager, {
   type PageAnchor,
   type ReaderNote,
@@ -10,7 +13,7 @@ import AI from "@/components/readernavbar/AI";
 import BackgroundSettings from "@/components/readernavbar/BackgroundSettings";
 import FontSettings from "@/components/readernavbar/FontSettings";
 import Settings from "@/components/readernavbar/Settings";
-import TTS, { type TranslationLanguage } from "@/components/readernavbar/TTS";
+import TTS from "@/components/readernavbar/TTS";
 import {
   BottomSheet,
   BottomSheetBackdrop,
@@ -65,14 +68,18 @@ import {
   type FindWordAnchor,
   type FindWordTarget,
 } from "@/architecture/FindWordInOtherTab";
+import { VERTICAL_NAVIGATION_RUNTIME } from "@/architecture/anchor/VerticalNavigationRuntime";
 import { VERTICAL_SCROLL_FLIP_SCRIPT } from "@/architecture/VerticalScroolFlip";
 import { useRevenueCat } from "@/providers/RevenueCatProvider";
+import { useAuth } from "@/providers/AuthProvider";
+import { authRoute } from "@/lib/authNavigation";
 import {
   appleSpeech,
   clearAppleSpeechSleepTimer,
   isAppleSpeechAvailable,
 } from "@/services/appleSpeechService";
 import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
+import { typographyForReadingDirection } from "@/services/readerTypography";
 import { Lato_700Bold } from "@expo-google-fonts/lato";
 import { SourceSans3_400Regular } from "@expo-google-fonts/source-sans-3/400Regular";
 import { useAssets } from "expo-asset";
@@ -96,6 +103,8 @@ type ReaderDestination = {
   switchHighlightWordIndex?: number;
   switchHighlightWordProgress?: number;
   switchHighlightQuery?: string;
+  highlightDocumentStart?: boolean;
+  pageTop?: boolean;
   nonce: number;
 };
 
@@ -128,15 +137,12 @@ type ReaderViewProps = {
   showSwitchHighlight?: boolean;
   onReady?: (reason: "initial" | "recovery" | "layout") => void;
   onToolbarVisibilityChange?: (visible: boolean) => void;
-  translationLanguage?: TranslationLanguage;
-  onTranslationLanguageChange?: (language?: TranslationLanguage) => void;
-  useTranslatedTextDirection?: boolean;
-  readerMode?: "reader" | "translated";
   onFindWordInOtherTab?: (
     target: FindWordTarget,
     anchor: FindWordAnchor,
   ) => void;
-  onVerticalRotationSettled?: () => void;
+  onVerticalRotationSettled?: (ok?: boolean) => void;
+  onUnavailable?: () => void;
 };
 
 const baseReaderMenuItems = [
@@ -162,8 +168,6 @@ const highlightColors = [
   "#86efac",
   "#fdba74",
 ];
-
-const rightToLeftLanguageCodes = new Set(["ar", "fa", "he", "ur"]);
 
 function containsRightToLeftText(blocks: ExtractedPdfBlock[]) {
   const sample = blocks
@@ -271,14 +275,22 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
     .join("\n");
 }
 
-// The reader WebView keeps only a sliding window of the book in its DOM. A
-// 1000-page document otherwise balloons to tens of thousands of DOM elements,
-// which re-layouts on every rotation (and can kill the WKWebView content
-// process). These bounds control how far ahead content is appended and how far
-// behind the JS prunes it.
-const APPEND_AHEAD_PAGES = 220;
-const APPEND_BEHIND_PAGES = 100;
-const PRUNE_BEHIND_PAGES = 160;
+// The reader WebView keeps only a tight sliding window of the book in its DOM.
+// A wide window is especially dangerous after a deep TOC jump: rotating then
+// forces WKWebView to reflow hundreds of pages at once and can terminate its
+// content process. Nearby pages preserve ordinary scrolling while keeping a
+// rotation comfortably bounded.
+const APPEND_AHEAD_PAGES = 24;
+const APPEND_BEHIND_PAGES = 12;
+// Retain enough history that a normal reader does not repeatedly delete and
+// reinsert sections while moving a few pages backward. The previous tiny
+// threshold caused corrective scrolls often enough to feel like the viewport
+// was taking control from the user.
+const PRUNE_BEHIND_PAGES = 48;
+// Preserve the book's opening so native upward scrolling always has a real
+// document start. Without this, pruning after a deep jump makes the first
+// retained page become scroll offset zero and the title is unreachable.
+const PRESERVED_OPENING_PAGES = 5;
 
 const ReaderView = ({
   documentId,
@@ -301,12 +313,9 @@ const ReaderView = ({
   showSwitchHighlight = false,
   onReady,
   onToolbarVisibilityChange,
-  translationLanguage,
-  onTranslationLanguageChange,
-  useTranslatedTextDirection = false,
-  readerMode = "reader",
   onFindWordInOtherTab,
   onVerticalRotationSettled,
+  onUnavailable,
 }: ReaderViewProps) => {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const readerSafeAreaInsets = useSafeAreaInsets();
@@ -315,11 +324,9 @@ const ReaderView = ({
   const db = useSQLiteContext();
   const isDark = useColorScheme() === "dark";
   const { isPremium } = useRevenueCat();
+  const { session } = useAuth();
   const router = useRouter();
-  const findMenuItems = useMemo(
-    () => findWordMenuItems(readerMode, Boolean(translationLanguage)),
-    [readerMode, translationLanguage],
-  );
+  const findMenuItems = useMemo(() => findWordMenuItems(), []);
   const readerMenuItems = useMemo(
     () => [...baseReaderMenuItems, ...findMenuItems],
     [findMenuItems],
@@ -349,19 +356,12 @@ const ReaderView = ({
     length: number;
   } | null>(null);
   const speechStartOffsetRef = useRef(0);
-  const readerLanguageCode = useTranslatedTextDirection
-    ? (translationLanguage?.code ?? "en")
-    : "en";
   const originalTextIsRtl = useMemo(
     () => containsRightToLeftText(blocks),
     [blocks],
   );
-  const readerDirection =
-    (useTranslatedTextDirection &&
-      rightToLeftLanguageCodes.has(readerLanguageCode)) ||
-    (!useTranslatedTextDirection && originalTextIsRtl)
-      ? "rtl"
-      : "ltr";
+  const readerDirection = originalTextIsRtl ? "rtl" : "ltr";
+  const readerLanguageCode = originalTextIsRtl ? "ar" : "en";
   const ttsText = useMemo(
     () => blocks.map((block) => block.text.trim()).join("\n\n"),
     [blocks],
@@ -378,8 +378,13 @@ const ReaderView = ({
   const sentBlockIds = useRef(new Set(initialBlocks.map((block) => block.id)));
   const annotationDeliveryRevisionRef = useRef(0);
   const lastSourcePageRef = useRef(1);
+  const deliveredNavigationId = useRef<number | null>(null);
+  const observedLayoutGeneration = useRef(0);
   const [currentSourcePage, setCurrentSourcePage] = useState(1);
   const [webViewReady, setWebViewReady] = useState(false);
+  const [runtimeId, setRuntimeId] = useState(0);
+  const runtimeIdRef = useRef(0);
+  const awaitingRecoveryRestore = useRef(false);
   const [appendPass, setAppendPass] = useState(0);
   const [highlightPickerVisible, setHighlightPickerVisible] = useState(false);
   const [pagerHighlights, setPagerHighlights] = useState<
@@ -622,7 +627,10 @@ const ReaderView = ({
     // Append in page order. The destination lands after the pages in front of it
     // are already in the DOM, so a single scrollIntoView is stable instead of
     // landing on a sparse document and drifting as later batches insert above it.
-    const appended = remaining.slice(0, 220);
+    // A single native-to-WebView message containing hundreds of blocks causes
+    // a long main-thread task on large PDFs. Keep each append small enough to
+    // preserve touch responsiveness; further batches are scheduled below.
+    const appended = remaining.slice(0, 48);
     let highestAvailablePage = 0;
     blocks.forEach((block) => {
       if (
@@ -638,12 +646,8 @@ const ReaderView = ({
     if (!appended.length) {
       webViewRef.current?.postMessage(
         JSON.stringify({
-          type: "appendBlocks",
-          revision,
-          html: "",
+          type: "readerWindowStatus",
           hasMore,
-          highlights: pagerHighlights,
-          notes: readerNotes,
         }),
       );
       return;
@@ -653,6 +657,8 @@ const ReaderView = ({
         type: "appendBlocks",
         revision,
         html: blocksToMarkup(appended),
+        keepStart: windowStart,
+        keepEnd: windowEnd,
         hasMore,
         highlights: pagerHighlights,
         notes: readerNotes,
@@ -661,7 +667,7 @@ const ReaderView = ({
     appended.forEach((block) => sentBlockIds.current.add(block.id));
     appendedBlockCount.current = blocks.length;
     if (remaining.length > appended.length) {
-      const timer = setTimeout(() => setAppendPass((value) => value + 1), 45);
+      const timer = setTimeout(() => setAppendPass((value) => value + 1), 90);
       return () => clearTimeout(timer);
     }
   }, [
@@ -756,8 +762,7 @@ const ReaderView = ({
           range: scrollSelectionRangesRef.current[0],
           selectedText: event.nativeEvent.selectedText,
           blocks,
-          mode: readerMode ?? "reader",
-          languageCode: translationLanguage?.code,
+          mode: "reader",
         });
         if (anchor) onFindWordInOtherTab?.(findTarget, anchor);
         return;
@@ -804,14 +809,7 @@ const ReaderView = ({
         openBottomSheet("ai");
       }
     },
-    [
-      blocks,
-      isPremium,
-      onFindWordInOtherTab,
-      openBottomSheet,
-      readerMode,
-      translationLanguage?.code,
-    ],
+    [blocks, isPremium, onFindWordInOtherTab, openBottomSheet],
   );
 
   const openReaderNote = useCallback(
@@ -933,6 +931,10 @@ const ReaderView = ({
   const automaticHyphenation = useReaderSettingsStore(
     (state) => state.automaticHyphenation,
   );
+  const directionSafeTypography = typographyForReadingDirection(
+    readerDirection,
+    { letterSpacing, automaticHyphenation },
+  );
 
   const configuredBackgroundColor = useReaderSettingsStore(
     (state) => state.backgroundColor,
@@ -1028,43 +1030,19 @@ const ReaderView = ({
   );
 
   useEffect(() => {
-    // Reader and Translated stay mounted behind each other. Never let a hidden
+    // Reader views can remain mounted while hidden. Never let a hidden
     // vertical WebView consume a destination: its highlight animation would
     // finish before the tab becomes visible. Including isActive retries the
     // exact same pending destination as soon as this reader comes onscreen.
     if (!webViewReady || isPaged || !isActive) return;
     syncPageTransition();
     if (!activeModeDestination) return;
-    const destinationNonce = activeModeDestination.nonce;
-    const requiresDrawAcknowledgement =
-      !activeModeDestination.documentStart &&
-      (activeModeDestination.switchHighlightWordIndex !== undefined ||
-        activeModeDestination.switchHighlightWordProgress !== undefined ||
-        Boolean(activeModeDestination.switchHighlightQuery));
-    let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let attempts = 0;
-    const deliver = () => {
-      if (cancelled) return;
-      if (
-        requiresDrawAcknowledgement &&
-        acknowledgedSwitchDestinationRef.current === destinationNonce
-      )
-        return;
-      attempts += 1;
-      webViewRef.current?.postMessage(
-        verticalRestoreMessage(activeModeDestination),
-      );
-      if (requiresDrawAcknowledgement && attempts < 40) {
-        retryTimer = setTimeout(deliver, 200);
-      }
-    };
-    const frame = requestAnimationFrame(deliver);
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(frame);
-      if (retryTimer) clearTimeout(retryTimer);
-    };
+    const frame = requestAnimationFrame(() => {
+      awaitingRecoveryRestore.current = false;
+      deliveredNavigationId.current = activeModeDestination.nonce;
+      webViewRef.current?.postMessage(verticalRestoreMessage(activeModeDestination));
+    });
+    return () => cancelAnimationFrame(frame);
   }, [
     activeModeDestination,
     isActive,
@@ -1092,10 +1070,10 @@ const ReaderView = ({
         paragraphSpacing: paragraphSpacing,
         verticalMarginPreset,
         horizontalMarginPreset,
-        letterSpacing: letterSpacing,
+        letterSpacing: directionSafeTypography.letterSpacing,
         wordSpacing: wordSpacing,
         bold: bold,
-        automaticHyphenation: automaticHyphenation,
+        automaticHyphenation: directionSafeTypography.automaticHyphenation,
         backgroundColor: backgroundColor,
         textColor: textColor,
       }),
@@ -1107,10 +1085,10 @@ const ReaderView = ({
     paragraphSpacing,
     verticalMarginPreset,
     horizontalMarginPreset,
-    letterSpacing,
+    directionSafeTypography.letterSpacing,
     wordSpacing,
     bold,
-    automaticHyphenation,
+    directionSafeTypography.automaticHyphenation,
     backgroundColor,
     textColor,
   ]);
@@ -1126,6 +1104,7 @@ const ReaderView = ({
         type: "setTopBarVisibility",
         visible: topBarVisible,
         topBoundary: topBarVisible ? headerOverlayHeight : 0,
+        startInset: headerOverlayHeight,
       }),
     );
   }, [headerOverlayHeight, topBarVisible, webViewReady]);
@@ -1145,10 +1124,10 @@ const ReaderView = ({
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: "setReaderGuideMode",
-        mode: readerGuideMode,
+        mode: isActive ? readerGuideMode : null,
       }),
     );
-  }, [readerGuideMode, webViewReady]);
+  }, [isActive, readerGuideMode, webViewReady]);
 
   useEffect(() => {
     if (!webViewReady) return;
@@ -1181,6 +1160,8 @@ const ReaderView = ({
   }, [switchHighlightColor, webViewReady]);
 
   const handleReaderLoadEnd = useCallback(() => {
+    observedLayoutGeneration.current = 0;
+    deliveredNavigationId.current = null;
     const isRecoveryLoad = hasCompletedInitialWebViewLoad.current;
     hasCompletedInitialWebViewLoad.current = true;
     setWebViewReady(true);
@@ -1196,7 +1177,7 @@ const ReaderView = ({
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: "setReaderGuideMode",
-        mode: readerGuideMode,
+        mode: isActive ? readerGuideMode : null,
       }),
     );
     webViewRef.current?.postMessage(
@@ -1217,29 +1198,11 @@ const ReaderView = ({
         color: switchHighlightColor,
       }),
     );
-    // iOS WKWebView can settle on a non-zero document offset after load (the
-    // native contentInset then tucks the opening line up under the header).
-    // A freshly opened reader must always start at the absolute top. Wait a
-    // couple of frames for WebKit's post-load layout to settle, then reset the
-    // document unless an explicit destination / recovery navigation took over.
-    if (!isRecoveryLoad && !activeModeDestination)
-      webViewRef.current?.injectJavaScript(`
-      (function() {
-        if (window.__readerTransition === 'pager') return;
-        if (window.__pendingSourceDestination) return;
-        requestAnimationFrame(function() {
-          requestAnimationFrame(function() {
-            if (window.__pendingSourceDestination) return;
-            if (window.scrollY !== 0) window.scrollTo(0, 0);
-          });
-        });
-      })();
-      true;
-    `);
+
   }, [
-    activeModeDestination,
     guideBackgroundDimming,
     guideColor,
+    isActive,
     onReady,
     readerGuideMode,
     sendReaderSettings,
@@ -1305,6 +1268,7 @@ const ReaderView = ({
             --paragraph-spacing: 0.65em;
             --reader-side-padding: 28px;
             --reader-top-padding: 24px;
+            --reader-header-start-inset: 0px;
             --reader-bottom-padding: 160px;
           }
 
@@ -1327,8 +1291,9 @@ const ReaderView = ({
           }
 
           body {
-            padding: var(--reader-top-padding) var(--reader-side-padding);
-            padding-bottom: var(--reader-bottom-padding);
+            padding: calc(
+                var(--reader-top-padding) + var(--reader-header-start-inset)
+              ) var(--reader-side-padding) var(--reader-bottom-padding);
 
             color: #1e293b;
 
@@ -1516,23 +1481,23 @@ const ReaderView = ({
             border-radius: 3px;
             background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 62%, transparent);
             pointer-events: none;
-            animation: reader-switch-pulse 1.2s ease-out 0.4s forwards;
+            animation: reader-switch-pulse 1.05s ease-out forwards;
           }
           @keyframes reader-switch-pulse {
             0% {
-              background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 56%, transparent);
-              box-shadow: 0 0 0 0 color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 30%, transparent);
+              background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 88%, transparent);
+              box-shadow: 0 0 0 0 color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 24%, transparent);
               opacity: 0.82;
             }
-            32% {
-              background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 92%, transparent);
-              box-shadow: 0 0 0 4px color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 20%, transparent);
+            30% {
+              background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 88%, transparent);
+              box-shadow: 0 0 0 4px color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 18%, transparent);
               opacity: 1;
             }
-            62% {
-              background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 66%, transparent);
-              box-shadow: 0 0 0 1px color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 12%, transparent);
-              opacity: 0.9;
+            58% {
+              background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 88%, transparent);
+              box-shadow: 0 0 0 1px color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 10%, transparent);
+              opacity: 0.88;
             }
             100% {
               background-color: transparent;
@@ -1546,7 +1511,7 @@ const ReaderView = ({
           }
           @media (prefers-reduced-motion: reduce) {
             #reader-switch-highlight {
-              animation: reader-switch-fade 0.8s ease-out 0.4s forwards;
+              animation: reader-switch-fade 0.8s ease-out forwards;
             }
           }
           #reader-line-guide,
@@ -1557,16 +1522,18 @@ const ReaderView = ({
             pointer-events: none;
             border-radius: 4px;
             background: color-mix(in srgb, var(--guide-color, #F59E0B) 30%, transparent);
-            box-shadow:
-              0 0 0 9999px color-mix(
-                in srgb,
-                var(--reader-background, #f8fafc) var(--guide-dimming, 60%),
-                transparent
-              ),
-              inset 0 0 0 1px color-mix(in srgb, var(--guide-color, #F59E0B) 55%, transparent);
+            box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--guide-color, #F59E0B) 55%, transparent);
             transition: left 90ms ease, top 90ms ease, width 90ms ease, height 90ms ease;
           }
 
+          .reader-guide-dim {
+            display: none;
+            position: fixed;
+            pointer-events: none;
+            z-index: 29;
+            background: color-mix(in srgb,
+              var(--reader-background, #f8fafc) var(--guide-dimming, 60%), transparent);
+          }
           /*
            * Text selection highlight.
            */
@@ -1591,6 +1558,10 @@ const ReaderView = ({
 
       <body>
 
+        <div id="reader-guide-dim-top" class="reader-guide-dim" aria-hidden="true"></div>
+        <div id="reader-guide-dim-bottom" class="reader-guide-dim" aria-hidden="true"></div>
+        <div id="reader-guide-dim-left" class="reader-guide-dim" aria-hidden="true"></div>
+        <div id="reader-guide-dim-right" class="reader-guide-dim" aria-hidden="true"></div>
         <div id="reader-line-guide" aria-hidden="true"></div>
         <div id="reader-word-guide" aria-hidden="true"></div>
         <main id="reader-pages">
@@ -1660,6 +1631,12 @@ const ReaderView = ({
     try {
       const message = JSON.parse(event.data);
 
+      if (message.type === 'readerWindowStatus') {
+        window.__readerHasMore = Boolean(message.hasMore);
+        const loader = document.getElementById('reader-loader');
+        if (loader) loader.textContent = message.hasMore ? 'Preparing the rest of the book…' : 'End of book';
+        return;
+      }
       if (message.type === 'appendBlocks') {
         const revision = Number(message.revision);
         if (
@@ -1671,6 +1648,8 @@ const ReaderView = ({
         }
         const container = document.getElementById('reader-pages');
         if (!container) return;
+        const navigationInFlight = window.__readerNavigation?.suppressed;
+        const mutationToken = navigationInFlight ? window.__readerNavigation.generation : window.__readerNavigation?.begin();
         const anchorProbeY = Math.max(
           12,
           Math.min(
@@ -1683,9 +1662,10 @@ const ReaderView = ({
           : [24, window.innerWidth / 2, window.innerWidth - 24];
         let viewportAnchor = null;
         for (const x of anchorXs) {
-          viewportAnchor = document
-            .elementFromPoint(Math.max(1, Math.min(window.innerWidth - 1, x)), anchorProbeY)
-            ?.closest?.('[data-source-page-section]') || null;
+          const hit = document.elementFromPoint(
+            Math.max(1, Math.min(window.innerWidth - 1, x)), anchorProbeY);
+          viewportAnchor = hit?.closest?.('[data-reader-block]') ||
+            hit?.closest?.('[data-source-page-section]') || null;
           if (viewportAnchor) break;
         }
         if (!viewportAnchor) {
@@ -1738,33 +1718,24 @@ const ReaderView = ({
             container.insertBefore(section, next || null);
           });
         }
-        if (window.__activeProgrammaticTarget) {
-          // A programmatic destination is pinned. Newly appended sections in
-          // front of it would push the reading position toward earlier pages,
-          // so re-anchor on the target instead of preserving the (now stale)
-          // pixel offset. Coalesce bursts of append batches into a single
-          // layout on the next frame instead of forcing a synchronous
-          // full-document reflow for every batch.
-          if (
-            window.__activeProgrammaticTarget.isConnected &&
-            !window.__readerPinRescrollScheduled
-          ) {
-            window.__readerPinRescrollScheduled = true;
-            requestAnimationFrame(function() {
-              window.__readerPinRescrollScheduled = false;
-              const pinned = window.__activeProgrammaticTarget;
-              const alignedWord = window.__realignActiveProgrammaticWord?.();
-              if (!alignedWord && pinned && pinned.isConnected) {
-                pinned.scrollIntoView({ behavior: 'auto', block: 'start' });
-              }
-            });
-          }
-        } else if (viewportAnchor && Number.isFinite(anchorTop)) {
-          const nextAnchorTop = viewportAnchor.getBoundingClientRect().top;
-          const insertedOffset = nextAnchorTop - anchorTop;
-          if (Math.abs(insertedOffset) > 0.5) {
-            window.scrollBy({ top: insertedOffset, left: 0, behavior: 'auto' });
-          }
+        const removedPages = [];
+        const visibleSection = viewportAnchor?.closest?.('[data-source-page-section]');
+        if (Number.isFinite(message.keepStart) && Number.isFinite(message.keepEnd)) {
+          Array.from(container.children).forEach(function(section) {
+            const page = Number(section.dataset.sourcePageSection);
+            if (page > ${PRESERVED_OPENING_PAGES} && section !== visibleSection &&
+                (page < message.keepStart || page > message.keepEnd)) {
+              removedPages.push(page);
+              section.remove();
+            }
+          });
+        }
+        if (removedPages.length) window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'prunedPages', pages: removedPages
+        }));
+        if (viewportAnchor && Number.isFinite(anchorTop)) {
+          const insertedOffset = viewportAnchor.getBoundingClientRect().top - anchorTop;
+          if (Math.abs(insertedOffset) > 0.5) window.scrollBy(0, insertedOffset);
         }
         window.__readerHasMore = Boolean(message.hasMore);
         const loader = document.getElementById('reader-loader');
@@ -1783,7 +1754,10 @@ const ReaderView = ({
           message.highlights || [],
           message.notes || []
         );
-        window.__tryPendingSourceDestination?.();
+        if (window.__pendingSourceDestination) window.__tryPendingSourceDestination?.();
+        else if (!navigationInFlight) window.__readerNavigation?.settle(mutationToken, function() {
+          return viewportAnchor?.isConnected ? viewportAnchor.getBoundingClientRect().top : 0;
+        }, function() { window.__reportSwitchAnchor?.(true); });
         return;
       }
 
@@ -1802,9 +1776,12 @@ const ReaderView = ({
         window.__readerTopBoundary = window.__readerTopBarVisible
           ? Math.max(0, Number(message.topBoundary) || 0)
           : 0;
+        document.documentElement.style.setProperty(
+          '--reader-header-start-inset',
+          Math.max(0, Number(message.startInset) || 0) + 'px'
+        );
         if (window.__readerTopBarVisible) {
           requestAnimationFrame(function() {
-            window.__reportSwitchAnchor?.(true);
             window.__refreshReaderGuideForTopBar?.();
           });
         } else {
@@ -1881,6 +1858,7 @@ const ReaderView = ({
         return;
       }
       if (message.type === 'releaseSourceDestination') {
+        window.__readerNavigation?.cancel();
         window.__pendingSourceDestination = null;
         window.__pinnedSourcePage = null;
         window.__activeProgrammaticTarget = null;
@@ -1892,6 +1870,12 @@ const ReaderView = ({
       window.__tryPendingSourceDestination = window.__tryPendingSourceDestination || function() {
         const pending = window.__pendingSourceDestination;
         if (!pending) return;
+        if (document.fonts?.status === 'loading') {
+          document.fonts.ready.then(function() {
+            if (window.__pendingSourceDestination === pending) window.__tryPendingSourceDestination();
+          });
+          return;
+        }
         // A newer destination supersedes any previously pinned element. Drop
         // the old handle so its re-scroll can't fight the new target.
         if (window.__activeProgrammaticTargetNonce !== pending.nonce) {
@@ -1920,20 +1904,23 @@ const ReaderView = ({
           pending.searchQuery,
           pending.searchMatchIndex
         );
-        const destinationTarget = searchHighlight || resolvedTarget;
+        const pageSection = resolvedTarget.closest?.(
+          '[data-source-page-section]'
+        ) || document.querySelector(
+          '[data-source-page-section="' + pending.page + '"]'
+        );
+        const destinationTarget = pending.pageTop && pageSection
+          ? pageSection
+          : (searchHighlight || resolvedTarget);
         const isDocumentStart = pending.documentStart === true;
-        const hasSwitchTarget = !isDocumentStart && (
+        const hasSwitchTarget = (!isDocumentStart || pending.highlightDocumentStart) && (
           pending.switchHighlightWordIndex !== undefined ||
           pending.switchHighlightWordProgress !== undefined ||
           Boolean(pending.switchHighlightQuery)
         );
         if (window.__readerTransition === 'scroll') {
           window.__pinnedSourcePage = Number(pending.page);
-          // Keep a handle on the element we scrolled to. Content for the pages
-          // in front of it is still being appended in the background; re-scroll
-          // after each append so the destination cannot silently drift to an
-          // earlier page (which is what made far TOC/search jumps land 100-200
-          // pages off and then "reset to the top").
+          // The destination owns alignment until its settled report is verified.
           window.__activeProgrammaticTarget = isDocumentStart
             ? null
             : destinationTarget;
@@ -1949,15 +1936,14 @@ const ReaderView = ({
             window.__activeProgrammaticRange = null;
             window.__activeProgrammaticWord = null;
             window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-            requestAnimationFrame(function() {
-              window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-              window.__reportSourcePage?.(1);
+          } else if (pending.pageTop) {
+            window.scrollTo({
+              top: Math.max(0, window.scrollY + destinationTarget.getBoundingClientRect().top -
+                Math.max(0, Number(window.__readerTopBoundary) || 0)),
+              left: 0, behavior: 'auto'
             });
           } else if (!hasSwitchTarget) {
             destinationTarget.scrollIntoView({ behavior: 'auto', block: 'start' });
-            requestAnimationFrame(function() {
-              window.__reportSourcePage?.(pending.page);
-            });
           }
         } else if (window.__goToElementPage) {
           window.__goToElementPage(destinationTarget);
@@ -1969,17 +1955,21 @@ const ReaderView = ({
             });
           });
         }
-        setTimeout(function() {
+        const navigationToken = window.__readerNavigation?.generation;
+        Promise.resolve(document.fonts?.ready).then(function() {
+          if (navigationToken !== window.__readerNavigation?.generation) return;
           if (hasSwitchTarget) {
             let highlightAttempt = 0;
             const drawDestinationHighlight = function() {
+              if (navigationToken !== window.__readerNavigation?.generation) return;
               highlightAttempt += 1;
               const didDraw = window.__highlightSwitchWordAtIndex?.(
                 resolvedTarget,
                 pending.switchHighlightWordIndex,
                 pending.switchHighlightWordProgress,
                 pending.switchHighlightQuery,
-                pending.nonce
+                pending.nonce,
+                isDocumentStart
               );
               if (didDraw) {
                 requestAnimationFrame(function() {
@@ -1995,9 +1985,15 @@ const ReaderView = ({
             window.__reportSwitchAnchor?.();
             window.__clearReaderSwitchHighlight?.();
           }
-        }, 100);
+          window.__readerNavigation?.settle(navigationToken, function() {
+            return destinationTarget.isConnected ? destinationTarget.getBoundingClientRect().top : NaN;
+          }, function() { window.__reportSwitchAnchor?.(true); });
+        });
       };
       if (message.type === 'goToSourcePage') {
+        window.__cancelVerticalScrollFlip?.();
+        if (window.__readerNavigation && message.nonce < window.__readerNavigation.id) return;
+        window.__readerNavigation?.begin(message.nonce);
         window.__pendingSourceDestination = message;
         window.__tryPendingSourceDestination();
         return;
@@ -2137,12 +2133,6 @@ const ReaderView = ({
       }
       if (message.type === 'readerSettings') {
 
-        const anchorElement = document.elementFromPoint(
-          window.innerWidth / 2,
-          window.innerHeight * 0.3
-        )?.closest?.('[data-reader-block]');
-        const anchorTop = anchorElement?.getBoundingClientRect().top || 0;
-
         document.body.style.fontFamily = message.fontFamily === 'Lato_700Bold'
           ? 'LatoReaderBold'
           : message.fontFamily === 'SourceSans3_400Regular'
@@ -2215,20 +2205,6 @@ const ReaderView = ({
           requestAnimationFrame(function() {
             if (window.__readerTransition !== 'scroll') {
               window.__refreshReaderPages?.();
-            }
-            if (anchorElement) {
-              if (window.__readerTransition === 'scroll') {
-                const nextTop = anchorElement.getBoundingClientRect().top;
-                // Anchor-stability scrolling keeps the reading position still
-                // when typography changes mid-book. At the very top of a fresh
-                // document, preserving a mid-viewport anchor instead pushes the
-                // opening line up under the header, clipping the first words.
-                if (window.scrollY > 1) {
-                  window.scrollBy(0, nextTop - anchorTop);
-                }
-              } else {
-                window.__goToElementPage?.(anchorElement);
-              }
             }
             window.ReactNativeWebView.postMessage(JSON.stringify({
               type: 'settingsApplied'
@@ -2471,7 +2447,13 @@ const ReaderView = ({
   const handleWebViewMessage = (event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
+      if (data.runtimeId !== undefined && data.runtimeId !== runtimeIdRef.current) return;
+      if (awaitingRecoveryRestore.current && (data.type === "switchAnchor" || data.type === "scroll")) return;
 
+      if (data.type === "readerRuntimeReady") {
+        if (__DEV__) console.info("[Reader Runtime]", { version: data.version, runtimeId: data.runtimeId });
+        return;
+      }
       // ------------------------------
       // SCROLL
       // ------------------------------
@@ -2482,7 +2464,7 @@ const ReaderView = ({
       }
 
       if (data.type === "verticalRotationSettled") {
-        onVerticalRotationSettled?.();
+        onVerticalRotationSettled?.(data.ok !== false);
         return;
       }
 
@@ -2494,6 +2476,7 @@ const ReaderView = ({
       }
 
       if (data.type === "readerUserInteraction") {
+        if (typeof data.layoutGeneration === "number") observedLayoutGeneration.current = data.layoutGeneration;
         onUserInteraction?.();
         return;
       }
@@ -2518,6 +2501,7 @@ const ReaderView = ({
       }
 
       if (data.type === "readerPagination") {
+        if (!isPaged) return;
         const current = Math.max(1, Number(data.current) || 1);
         const total = Math.max(1, Number(data.total) || 1);
         const sourcePage = Math.max(1, Number(data.sourcePage) || 1);
@@ -2538,15 +2522,6 @@ const ReaderView = ({
       }
 
       if (data.type === "scroll") {
-        if (typeof data.sourcePage === "number") {
-          lastSourcePageRef.current = data.sourcePage;
-          setCurrentSourcePage(data.sourcePage);
-          if (!isPaged) {
-            onPageChange?.(data.sourcePage);
-            onPaginationChange?.(data.sourcePage, pageCount);
-          }
-        }
-
         const currentScrollY = data.scrollY;
 
         const difference = currentScrollY - lastScrollY.current;
@@ -2607,12 +2582,6 @@ const ReaderView = ({
       }
 
       if (data.type === "sourcePage" && typeof data.page === "number") {
-        lastSourcePageRef.current = data.page;
-        setCurrentSourcePage(data.page);
-        if (!isPaged) {
-          onPageChange?.(data.page);
-          onPaginationChange?.(data.page, pageCount);
-        }
         return;
       }
 
@@ -2642,6 +2611,17 @@ const ReaderView = ({
       }
 
       if (data.type === "switchAnchor" && typeof data.blockId === "string") {
+        if (data.documentId !== documentId) return;
+        if (deliveredNavigationId.current !== null && data.navigationId !== deliveredNavigationId.current) return;
+        if (typeof data.layoutGeneration !== "number" || data.layoutGeneration < observedLayoutGeneration.current) return;
+        observedLayoutGeneration.current = data.layoutGeneration;
+        if (activeModeDestination && data.navigationId !== activeModeDestination.nonce) return;
+        const sourceBlock = blocks.find((block) => block.id === data.blockId);
+        if (sourceBlock && isActive) {
+          lastSourcePageRef.current = sourceBlock.page;
+          setCurrentSourcePage(sourceBlock.page);
+          onPageChange?.(sourceBlock.page);
+        }
         const wordIndex =
           typeof data.wordIndex === "number" ? Math.max(0, data.wordIndex) : 0;
         if (typeof data.ttsOffset === "number") {
@@ -2738,10 +2718,6 @@ const ReaderView = ({
               speechStartOffsetRef.current = offset;
             }}
             onClearHighlight={clearSpokenWordHighlight}
-            translationLanguage={translationLanguage}
-            onTranslationLanguageChange={(language) =>
-              onTranslationLanguageChange?.(language)
-            }
           />
         );
 
@@ -3003,8 +2979,7 @@ const ReaderView = ({
                         range,
                         selectedText,
                         blocks,
-                        mode: readerMode,
-                        languageCode: translationLanguage?.code,
+                        mode: "reader",
                       });
                       if (anchor) onFindWordInOtherTab?.(target, anchor);
                     }}
@@ -3036,10 +3011,12 @@ const ReaderView = ({
                     fontSize={fontSize}
                     lineHeight={lineHeight}
                     paragraphSpacing={paragraphSpacing}
-                    letterSpacing={letterSpacing}
+                    letterSpacing={directionSafeTypography.letterSpacing}
                     wordSpacing={wordSpacing}
                     bold={bold}
-                    automaticHyphenation={automaticHyphenation}
+                    automaticHyphenation={
+                      directionSafeTypography.automaticHyphenation
+                    }
                     verticalMarginPreset={verticalMarginPreset}
                     horizontalMarginPreset={horizontalMarginPreset}
                     backgroundColor={backgroundColor}
@@ -3064,7 +3041,7 @@ const ReaderView = ({
               {!isPaged && (
                 <View pointerEvents="auto" style={StyleSheet.absoluteFill}>
                   <WebView
-                    key={`reader-web-runtime-20260828-2-${annotationScope}`}
+                    key={`reader-web-runtime-${runtimeId}-${annotationScope}`}
                     ref={webViewRef}
                     source={webViewSource}
                     style={{
@@ -3073,6 +3050,10 @@ const ReaderView = ({
                     }}
                     onLoadEnd={handleReaderLoadEnd}
                     onContentProcessDidTerminate={() => {
+                      if (runtimeId !== runtimeIdRef.current) return;
+                      runtimeIdRef.current += 1;
+                      awaitingRecoveryRestore.current = true;
+                      onUnavailable?.();
                       addSafeBreadcrumb(
                         "bic.webview",
                         "content-process-terminated",
@@ -3088,27 +3069,18 @@ const ReaderView = ({
                         initialBlocks.map((block) => block.id),
                       );
                       setWebViewReady(false);
-                      webViewRef.current?.reload();
+                      setRuntimeId(runtimeIdRef.current);
                     }}
                     /*
                      * Native scrolling.
                      */
                     scrollEnabled={!isPaged}
-                    contentInset={
-                      !isPaged && !isLandscape
-                        ? {
-                            top: headerOverlayHeight,
-                            left: 0,
-                            bottom: 0,
-                            right: 0,
-                          }
-                        : undefined
-                    }
                     contentInsetAdjustmentBehavior="never"
+                    automaticallyAdjustContentInsets={false}
                     /*
                      * Native bounce behavior.
                      */
-                    bounces={!isPaged && !useTranslatedTextDirection}
+                    bounces={!isPaged}
                     /*
                      * Smooth iOS scrolling.
                      */
@@ -3116,9 +3088,7 @@ const ReaderView = ({
                     /*
                      * Android overscroll.
                      */
-                    overScrollMode={
-                      isPaged || useTranslatedTextDirection ? "never" : "always"
-                    }
+                    overScrollMode={isPaged ? "never" : "always"}
                     showsVerticalScrollIndicator={!isPaged}
                     /*
                      * JavaScript required for:
@@ -3158,6 +3128,15 @@ const ReaderView = ({
               }
 
               window.__readerInitialized = true;
+              window.__readerRuntimeId = ${runtimeId};
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'readerRuntimeReady', runtimeId: window.__readerRuntimeId,
+                version: 'bounded-guide-20260909'
+              }));
+              window.__readerAnchorDebug = ${ANCHOR_DEBUG};
+              ${VERTICAL_NAVIGATION_RUNTIME}
+              ${VERTICAL_ANCHOR_PROBE}
+              ${READER_GUIDE_DIMMING_SCRIPT}
               if ('scrollRestoration' in history) {
                 history.scrollRestoration = 'manual';
               }
@@ -3226,8 +3205,9 @@ const ReaderView = ({
                 block,
                 wordIndex,
                 wordProgress,
-                translatedQuery,
-                destinationNonce
+                matchQuery,
+                destinationNonce,
+                preserveDocumentStart
               ) {
                 if (!block) return false;
                 const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
@@ -3249,7 +3229,7 @@ const ReaderView = ({
                     .replace(/[^\\p{L}\\p{N}]/gu, '');
                 }
 
-                const normalizedQuery = normalizeForMatch(translatedQuery);
+                const normalizedQuery = normalizeForMatch(matchQuery);
                 let selected = normalizedQuery
                   ? words.find(function(item) {
                       const normalizedWord = normalizeForMatch(item.match[0]);
@@ -3277,22 +3257,24 @@ const ReaderView = ({
                   selected.match.index + selected.match[0].length
                 );
                 if (window.__readerTransition === 'scroll') {
-                  const rect = range.getBoundingClientRect();
-                  const desiredTop = readerVisibleTopBoundary() + 8;
-                  const adjustment = rect.top - desiredTop;
-                  if (Math.abs(adjustment) > 0.5) {
-                    window.scrollBy({
-                      top: adjustment,
-                      left: 0,
-                      behavior: 'auto'
-                    });
+                  if (!preserveDocumentStart) {
+                    const rect = range.getBoundingClientRect();
+                    const desiredTop = readerVisibleTopBoundary() + 8;
+                    const adjustment = rect.top - desiredTop;
+                    if (Math.abs(adjustment) > 0.5) {
+                      window.scrollBy({
+                        top: adjustment,
+                        left: 0,
+                        behavior: 'auto'
+                      });
+                    }
+                    // Keep ordinary destinations pinned as earlier async blocks arrive.
+                    window.__activeProgrammaticRange = range.cloneRange();
+                    window.__activeProgrammaticWord = {
+                      blockId: block.dataset.blockId,
+                      wordIndex: words.indexOf(selected)
+                    };
                   }
-                  // Keep the exact word pinned as earlier async blocks arrive.
-                  window.__activeProgrammaticRange = range.cloneRange();
-                  window.__activeProgrammaticWord = {
-                    blockId: block.dataset.blockId,
-                    wordIndex: words.indexOf(selected)
-                  };
                   // Scrolling emits an event that clears transient markers.
                   // Paint only after WebKit has committed the destination,
                   // otherwise the highlight deletes itself on first open.
@@ -3318,107 +3300,20 @@ const ReaderView = ({
                 return didDraw;
               };
 
-              window.__realignActiveProgrammaticWord = function() {
-                const descriptor = window.__activeProgrammaticWord;
-                if (!descriptor?.blockId) return false;
-                const block = document.querySelector(
-                  '[data-block-id="' + CSS.escape(descriptor.blockId) + '"]'
-                );
-                if (!block) return false;
-                const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
-                const words = [];
-                let node = walker.nextNode();
-                while (node) {
-                  const text = node.textContent || '';
-                  Array.from(text.matchAll(/\\S+/g)).forEach(function(match) {
-                    words.push({ node: node, match: match });
-                  });
-                  node = walker.nextNode();
-                }
-                const selected = words[Math.max(
-                  0,
-                  Math.min(words.length - 1, Number(descriptor.wordIndex) || 0)
-                )];
-                if (!selected) return false;
-                const range = document.createRange();
-                range.setStart(selected.node, selected.match.index);
-                range.setEnd(selected.node, selected.match.index + selected.match[0].length);
-                const rect = Array.from(range.getClientRects()).find(function(item) {
-                  return item.width > 0 && item.height > 0;
-                });
-                if (!rect) return false;
-                window.__activeProgrammaticRange = range;
-                const delta = rect.top - (readerVisibleTopBoundary() + 8);
-                if (Math.abs(delta) > 0.5) {
-                  window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
-                }
-                return true;
-              };
-
               function readerVisibleTopBoundary() {
                 if (!window.__readerTopBarVisible) return 0;
-                // At the document start, the native WebView contentInset has
-                // already placed the first line below the header. Applying the
-                // header boundary again would skip the opening text. Once the
-                // document has scrolled, content can pass behind the overlay
-                // and the real header boundary is required.
+                // The opening spacer already places the first line below the
+                // header. Once the document has scrolled, content can pass
+                // behind the overlay and the real header boundary is required.
                 return window.scrollY <= 1
                   ? 0
                   : Math.max(0, Number(window.__readerTopBoundary) || 0);
               }
 
               function reportPreciseSwitchAnchor(force) {
-                if (window.__verticalScrollFlipRestoring) return true;
-                if (!window.__readerTopBarVisible && window.__readerTransition === 'scroll') return false;
-                const isRtl = document.documentElement.dir === 'rtl';
+                if (window.__verticalScrollFlipRestoring || window.__readerNavigation?.suppressed) return true;
                 const topBoundary = readerVisibleTopBoundary();
-                const blocksInView = Array.from(
-                  document.querySelectorAll('[data-reader-block]')
-                ).filter(function(block) {
-                  const rect = block.getBoundingClientRect();
-                  return rect.bottom > topBoundary && rect.top < window.innerHeight &&
-                    rect.right > 0 && rect.left < window.innerWidth;
-                }).sort(function(first, second) {
-                  const firstRect = first.getBoundingClientRect();
-                  const secondRect = second.getBoundingClientRect();
-                  const vertical = Math.max(topBoundary, firstRect.top) -
-                    Math.max(topBoundary, secondRect.top);
-                  if (Math.abs(vertical) > 1) return vertical;
-                  return isRtl
-                    ? secondRect.right - firstRect.right
-                    : firstRect.left - secondRect.left;
-                }).slice(0, 4);
-
-                let selected = null;
-                blocksInView.forEach(function(block) {
-                  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
-                  let textNode = walker.nextNode();
-                  while (textNode) {
-                    const text = textNode.textContent || '';
-                    Array.from(text.matchAll(/\\S+/g)).forEach(function(match) {
-                      const range = document.createRange();
-                      range.setStart(textNode, match.index);
-                      range.setEnd(textNode, match.index + match[0].length);
-                      const rect = Array.from(range.getClientRects()).find(function(item) {
-                        return item.width > 0 && item.height > 0 &&
-                          item.bottom > topBoundary &&
-                          item.top < window.innerHeight && item.right > 0 &&
-                          item.left < window.innerWidth;
-                      });
-                      if (!rect) return;
-                      // Preserve the original GitHub selection rule, but make
-                      // the bottom of the visible header act as viewport y=0.
-                      const visibleTop = Math.max(0, rect.top - topBoundary);
-                      const horizontal = isRtl ? -rect.right : rect.left;
-                      if (!selected || visibleTop < selected.visibleTop - 1 ||
-                        (Math.abs(visibleTop - selected.visibleTop) <= 1 &&
-                          horizontal < selected.horizontal)) {
-                        selected = { block, textNode, match, range, visibleTop, horizontal };
-                      }
-                    });
-                    textNode = walker.nextNode();
-                  }
-                });
+                const selected = window.__probeReaderAnchor?.(topBoundary);
                 if (!selected) return false;
 
                 const prefix = document.createRange();
@@ -3427,6 +3322,11 @@ const ReaderView = ({
                 const characterOffset = prefix.toString().length;
                 const wordIndex = (prefix.toString().match(/\\S+/g) || []).length;
                 const blockId = selected.block.dataset.blockId;
+                window.__rememberVerticalAnchor?.({
+                  blockId, offset: characterOffset, length: selected.match[0].length,
+                  edgeOffset: Math.max(0, selected.rect.top - topBoundary),
+                  documentStart: window.scrollY <= 1
+                });
                 const anchorKey = blockId + ':' + wordIndex;
                 if (blockId && window.__showReaderSwitchHighlight) {
                   drawReaderSwitchHighlight(selected.range);
@@ -3435,6 +3335,10 @@ const ReaderView = ({
                   lastSwitchAnchorKey = anchorKey;
                   window.ReactNativeWebView.postMessage(JSON.stringify({
                     type: 'switchAnchor',
+                    runtimeId: window.__readerRuntimeId,
+                    documentId: ${JSON.stringify(documentId)},
+                    navigationId: window.__readerNavigation?.id ?? null,
+                    layoutGeneration: window.__readerNavigation?.generation ?? 0,
                     blockId: blockId,
                     word: selected.match[0],
                     wordIndex: wordIndex,
@@ -3446,7 +3350,7 @@ const ReaderView = ({
               }
 
               function reportSwitchAnchor(force) {
-                if (window.__verticalScrollFlipRestoring) return;
+                if (window.__verticalScrollFlipRestoring || window.__readerNavigation?.suppressed) return;
                 if (reportPreciseSwitchAnchor(force)) return;
                 let block = null;
                 const topBoundary = readerVisibleTopBoundary();
@@ -3508,6 +3412,11 @@ const ReaderView = ({
                 }
 
                 const blockId = block.dataset.blockId;
+                if (switchHighlightRange) window.__rememberVerticalAnchor?.({
+                  blockId, offset: highlightedCharacterOffset, length: highlightedWord.length,
+                  edgeOffset: Math.max(0, switchHighlightRange.getBoundingClientRect().top - topBoundary),
+                  documentStart: window.scrollY <= 1
+                });
                 const anchorKey = blockId + ':' + highlightedWordIndex;
                 if (blockId && window.__showReaderSwitchHighlight) {
                   drawReaderSwitchHighlight(switchHighlightRange);
@@ -3516,6 +3425,10 @@ const ReaderView = ({
                   lastSwitchAnchorKey = anchorKey;
                   window.ReactNativeWebView.postMessage(JSON.stringify({
                     type: 'switchAnchor',
+                    runtimeId: window.__readerRuntimeId,
+                    documentId: ${JSON.stringify(documentId)},
+                    navigationId: window.__readerNavigation?.id ?? null,
+                    layoutGeneration: window.__readerNavigation?.generation ?? 0,
                     blockId: blockId,
                     word: highlightedWord,
                     wordIndex: highlightedWordIndex,
@@ -3632,6 +3545,7 @@ const ReaderView = ({
                 currentWordNode = node;
                 currentWordStart = match.index;
                 currentWordEnd = match.index + match[0].length;
+                window.__drawReaderGuideDimming?.(rect);
                 wordGuide.style.display = 'block';
                 wordGuide.style.left = Math.max(0, rect.left - 3) + 'px';
                 wordGuide.style.top = Math.max(0, rect.top - 2) + 'px';
@@ -3851,6 +3765,7 @@ const ReaderView = ({
 
               function drawLineGuide(line) {
                 if (!lineGuide || !line) return;
+                window.__drawReaderGuideDimming?.(line);
                 currentGuideDocumentTop = line.documentTop;
                 // A ragged RTL paragraph has a stable right edge, not a
                 // stable left edge. Keep the guide anchored to the reading
@@ -3898,6 +3813,7 @@ const ReaderView = ({
               }
 
               window.__setReaderGuideMode = function(mode) {
+                window.__drawReaderGuideDimming?.(null);
                 readerGuideMode = mode === 'line' || mode === 'word' ? mode : null;
                 currentGuideDocumentTop = null;
                 currentGuideLeft = null;
@@ -4125,6 +4041,7 @@ const ReaderView = ({
                   : sourcePageAtViewport();
                 if (page === lastReportedSourcePage) return page;
                 lastReportedSourcePage = page;
+                if (window.__readerTransition === 'scroll') return page;
                 window.ReactNativeWebView.postMessage(JSON.stringify({
                   type: 'sourcePage',
                   page: page
@@ -4236,10 +4153,11 @@ const ReaderView = ({
 
               ${VERTICAL_SCROLL_FLIP_SCRIPT}
 
+              let readerResizeFrame = 0;
               window.addEventListener('resize', function() {
-                setTimeout(function() {
-                  refreshReaderPages();
-                  pruneDistantSections();
+                cancelAnimationFrame(readerResizeFrame);
+                readerResizeFrame = requestAnimationFrame(function() {
+                  if (window.__readerTransition !== 'scroll') refreshReaderPages();
                   if (readerGuideMode) {
                     if (readerGuideMode === 'word') {
                       if (currentWordNode && currentWordStart >= 0) {
@@ -4255,13 +4173,14 @@ const ReaderView = ({
                       }
                     }
                   }
-                }, 50);
+                });
               });
               // --------------------------------
               // SCROLL HANDLING
               // --------------------------------
 
               function releaseProgrammaticSourcePage() {
+                window.__readerNavigation?.cancel();
                 clearTimeout(pruneTimer);
                 pruneTimer = null;
                 window.__pinnedSourcePage = null;
@@ -4270,7 +4189,9 @@ const ReaderView = ({
                 window.__activeProgrammaticWord = null;
                 window.__activeProgrammaticTargetNonce = null;
                 window.ReactNativeWebView.postMessage(JSON.stringify({
-                  type: 'readerUserInteraction'
+                  type: 'readerUserInteraction',
+                  runtimeId: window.__readerRuntimeId,
+                  layoutGeneration: window.__readerNavigation?.generation ?? 0
                 }));
               }
               window.addEventListener(
@@ -4382,11 +4303,14 @@ const ReaderView = ({
               function pruneDistantSections() {
                 // Only the vertical (native-scroll) reader can prune — the
                 // paged reader needs the full document for its column flow.
-                if (window.__readerTransition !== 'scroll') return;
+                if (window.__readerTransition !== 'scroll' || window.__readerNavigation?.suppressed) return;
                 const sections = document.querySelectorAll(
                   '[data-source-page-section]'
                 );
-                if (sections.length < 300) return;
+                // Prune well above the active 36-page delivery window. This
+                // makes pruning an infrequent memory-maintenance operation,
+                // not part of ordinary scrolling.
+                if (sections.length < 96) return;
                 const probeY = Math.min(
                   window.innerHeight - 12,
                   readerVisibleTopBoundary() + 12
@@ -4412,15 +4336,19 @@ const ReaderView = ({
                   ? visibleSection.getBoundingClientRect().top
                   : null;
 
+                const mutationToken = window.__readerNavigation?.begin();
                 const prunedPages = [];
                 sections.forEach(function(section) {
                   const page = Number(section.dataset.sourcePageSection);
-                  if (page < minKeepPage) {
+                  if (
+                    (page < minKeepPage || page > currentPage + ${PRUNE_BEHIND_PAGES}) &&
+                    page > ${PRESERVED_OPENING_PAGES}
+                  ) {
                     prunedPages.push(page);
                     section.remove();
                   }
                 });
-                if (!prunedPages.length) return;
+                if (!prunedPages.length) { window.__readerNavigation?.settle(mutationToken); return; }
 
                 // Keep the visible content from jumping when the sections
                 // above it are removed.
@@ -4436,10 +4364,12 @@ const ReaderView = ({
                   type: 'prunedPages',
                   pages: prunedPages
                 }));
+                window.__readerNavigation?.settle(mutationToken);
               }
 
               let scrollTimer = null;
               let pruneTimer = null;
+              let anchorTimer = null;
               // Track the last stable scroll position + document height so an
               // orientation change can re-anchor the reading position after the
               // text reflows (WebKit preserves the pixel scroll offset, which
@@ -4449,6 +4379,7 @@ const ReaderView = ({
               window.addEventListener(
                 'scroll',
                 function() {
+                  if (window.__readerNavigation?.suppressed || window.__verticalScrollFlipRestoring) return;
 
                   redrawLineGuideDuringScroll();
 
@@ -4467,14 +4398,14 @@ const ReaderView = ({
                     clearReaderSwitchHighlight();
                   }
 
-                  // A bounded 32 ms sampler keeps DOM range measurement off the
-                  // 60 fps hot path while staying within roughly two frames.
-                  // React Native keeps this result in a ref, so tab switching
-                  // does not wait for persistence or a React render.
+                  // Keep the native scroll handler light. Viewport/page updates
+                  // can be sampled during motion, but finding an exact word
+                  // creates many DOM ranges and must wait until the user pauses.
                   if (!scrollTimer) {
                     scrollTimer = setTimeout(
                       function() {
 
+                        if (window.__readerNavigation?.suppressed || window.__verticalScrollFlipRestoring) { scrollTimer = null; return; }
                         lastScrollMetrics.y = window.scrollY;
                         lastScrollMetrics.height =
                           document.documentElement.scrollHeight;
@@ -4482,12 +4413,15 @@ const ReaderView = ({
                         window.ReactNativeWebView.postMessage(
                           JSON.stringify({
                             type: 'scroll',
-                            scrollY: window.scrollY,
-                            sourcePage: reportSourcePage()
+                            scrollY: window.scrollY
                           })
                         );
 
-                        reportSwitchAnchor();
+                        clearTimeout(anchorTimer);
+                        anchorTimer = setTimeout(function() {
+                          reportSwitchAnchor();
+                          anchorTimer = null;
+                        }, 180);
 
                         clearTimeout(pruneTimer);
                         pruneTimer = setTimeout(function() {
@@ -4498,7 +4432,7 @@ const ReaderView = ({
                         scrollTimer = null;
 
                       },
-                      32
+                      80
                     );
                   }
 
@@ -4691,6 +4625,14 @@ const ReaderView = ({
           description="Ask questions, summarize difficult sections, and understand your document with the Bic Reader AI Assistant."
           featureName="AI Assistant is a Premium feature"
           onClose={() => setShowAiPremiumPrompt(false)}
+          onSignIn={
+            !session
+              ? () => {
+                  setShowAiPremiumPrompt(false);
+                  router.push(authRoute("/(auth)/sign-in", "premium"));
+                }
+              : undefined
+          }
           onUpgrade={() => {
             setShowAiPremiumPrompt(false);
             router.push({

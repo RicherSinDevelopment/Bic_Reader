@@ -1,3 +1,5 @@
+// Deno resolves npm: specifiers when Supabase bundles this Edge Function.
+// eslint-disable-next-line import/no-unresolved
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -40,13 +42,17 @@ Deno.serve(async (request) => {
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { error } = await admin.from("premium_entitlements").upsert({
-    user_id: user.id,
-    entitlement_id: entitlementId,
-    is_active: isActive,
-    expires_at: accessUntil,
-    updated_at: new Date().toISOString(),
+  const { error } = await admin.rpc("apply_revenuecat_entitlement", {
+    p_event_id: `verification-${crypto.randomUUID()}`,
+    p_event_timestamp_ms: Date.now(),
+    p_user_id: user.id,
+    p_entitlement_id: entitlementId,
+    p_is_active: isActive,
+    p_expires_at: accessUntil,
   });
-  if (error) return new Response(error.message, { status: 500 });
+  if (error) {
+    console.error("premium verification update failed", error.code ?? "unknown");
+    return new Response("Unable to store subscription status", { status: 500 });
+  }
   return Response.json({ isPremium: isActive });
 });

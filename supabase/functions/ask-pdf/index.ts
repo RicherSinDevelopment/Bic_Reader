@@ -1,6 +1,7 @@
 // Deno resolves npm: specifiers when Supabase bundles this Edge Function.
 // eslint-disable-next-line import/no-unresolved
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { getAiDenial } from "../_shared/aiPolicy.ts";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const MODEL = "gpt-5.4-nano";
@@ -47,24 +48,8 @@ async function requestHash(question: string, context: string) {
 }
 
 function denial(reason?: string) {
-  switch (reason) {
-    case "premium_required":
-      return jsonError("An active Premium subscription is required.", 403, reason);
-    case "request_in_progress":
-      return jsonError("Your previous AI request is still running.", 409, reason);
-    case "duplicate_request":
-      return jsonError("That same request was just submitted.", 409, reason);
-    case "minute_limit":
-      return jsonError("Too many requests. Wait a minute and try again.", 429, reason);
-    case "daily_limit":
-      return jsonError("You reached today's AI limit. Try again tomorrow.", 429, reason);
-    case "monthly_limit":
-      return jsonError("You reached this month's 200-request AI limit.", 429, reason);
-    case "invalid_request":
-      return jsonError("The AI request was invalid.", 400, reason);
-    default:
-      return jsonError("Unable to authorize this AI request.", 401, reason);
-  }
+  const result = getAiDenial(reason);
+  return jsonError(result.message, result.status, result.code);
 }
 
 Deno.serve(async (request) => {

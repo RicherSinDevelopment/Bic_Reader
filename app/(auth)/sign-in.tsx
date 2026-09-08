@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { Link, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import {
@@ -17,6 +17,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
+import {
+  authReturnTarget,
+  authRoute,
+  destinationAfterAuth,
+} from '@/lib/authNavigation';
 
 const logo = require('../../assets/images/Bicreaderlogo-large.png');
 
@@ -27,6 +32,8 @@ export default function SignIn() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const router = useRouter();
+  const params = useLocalSearchParams<{ returnTo?: string | string[] }>();
+  const returnTo = authReturnTarget(params.returnTo);
   const isDark = useColorScheme() === 'dark';
   const styles = useMemo(() => createStyles(isDark), [isDark]);
 
@@ -48,7 +55,7 @@ export default function SignIn() {
       return;
     }
 
-    router.replace('/HomePage');
+    router.replace(destinationAfterAuth(returnTo));
   };
 
   return (
@@ -152,16 +159,28 @@ export default function SignIn() {
               ) : null}
             </View>
 
-            <SocialAuthButtons disabled={isSubmitting} onError={setErrorMessage} />
+            <SocialAuthButtons
+              disabled={isSubmitting}
+              onError={setErrorMessage}
+              returnTo={returnTo}
+            />
 
             <View style={styles.switchRow}>
               <Text style={styles.switchText}>New to Bic Reader?</Text>
-              <Link href="/(auth)/sign-up" asChild>
+              <Link href={authRoute('/(auth)/sign-up', returnTo)} asChild>
                 <Pressable hitSlop={8}>
                   <Text style={styles.switchLink}>Create an account</Text>
                 </Pressable>
               </Link>
             </View>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.replace('/HomePage')}
+              style={styles.guestButton}
+            >
+              <Text style={styles.guestButtonText}>Continue without an account</Text>
+            </Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -280,4 +299,6 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
   },
   switchText: { color: isDark ? '#A6ADA1' : '#737270', fontFamily: 'Lato_400Regular', fontSize: 14 },
   switchLink: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 14 },
+  guestButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  guestButtonText: { color: isDark ? '#A6ADA1' : '#66705E', fontFamily: 'Lato_700Bold', fontSize: 14 },
 });

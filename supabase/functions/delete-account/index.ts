@@ -1,4 +1,7 @@
+// Deno resolves npm: specifiers when Supabase bundles this Edge Function.
+// eslint-disable-next-line import/no-unresolved
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isOwnedStoragePath } from "../_shared/securityPolicy.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -47,7 +50,13 @@ Deno.serve(async (request) => {
     .eq("user_id", user.id);
   if (documentsError)
     return response({ error: "Unable to enumerate account data" }, 500);
-  documents?.forEach((document) => paths.add(document.storage_path));
+  documents?.forEach((document) => {
+    if (isOwnedStoragePath(user.id, document.storage_path)) {
+      paths.add(document.storage_path);
+    } else {
+      console.error("delete-account rejected non-owned metadata path");
+    }
+  });
 
   for (let offset = 0; ; offset += 100) {
     const { data: objects, error: listError } = await admin.storage
@@ -59,7 +68,10 @@ Deno.serve(async (request) => {
       });
     if (listError)
       return response({ error: "Unable to enumerate stored PDFs" }, 500);
-    objects?.forEach((object) => paths.add(`${user.id}/${object.name}`));
+    objects?.forEach((object) => {
+      const path = `${user.id}/${object.name}`;
+      if (isOwnedStoragePath(user.id, path)) paths.add(path);
+    });
     if (!objects || objects.length < 100) break;
   }
 

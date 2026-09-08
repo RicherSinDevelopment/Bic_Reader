@@ -110,15 +110,13 @@ function RootNavigator() {
       <Stack.Protected guard={!session}>
         <Stack.Screen name="(auth)" />
       </Stack.Protected>
-      <Stack.Protected guard={!!session}>
-        <Stack.Screen
-          name="HomePage"
-          options={{ orientation: "portrait" }}
-        />
-        <Stack.Screen name="OpenPdf" />
-        <Stack.Screen name="Profile" />
-        <Stack.Screen name="Reader" />
-      </Stack.Protected>
+      <Stack.Screen
+        name="HomePage"
+        options={{ orientation: "portrait" }}
+      />
+      <Stack.Screen name="OpenPdf" />
+      <Stack.Screen name="Profile" />
+      <Stack.Screen name="Reader" />
     </Stack>
   );
 }

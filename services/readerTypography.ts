@@ -1,5 +1,15 @@
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 
+export function typographyForReadingDirection(
+  direction: "ltr" | "rtl",
+  settings: { letterSpacing: number; automaticHyphenation: boolean },
+) {
+  if (direction !== "rtl") return settings;
+  // Connected scripts must not inherit Latin-oriented tracking or word
+  // breaking: those settings visually separate and distort glyphs.
+  return { letterSpacing: 0, automaticHyphenation: false };
+}
+
 type PageLineMetrics = {
   lineHeight: number;
   lineWidth: number;
@@ -62,9 +72,10 @@ function startsLikeSentence(text: string) {
     text.trim().replace(/^[\u2018\u201c'"]/, ""),
   )[0];
   if (!firstCharacter) return false;
-  return /[0-9]/.test(firstCharacter) || (
-    firstCharacter.toLocaleUpperCase() === firstCharacter &&
-    firstCharacter.toLocaleLowerCase() !== firstCharacter
+  return (
+    /[0-9]/.test(firstCharacter) ||
+    (firstCharacter.toLocaleUpperCase() === firstCharacter &&
+      firstCharacter.toLocaleLowerCase() !== firstCharacter)
   );
 }
 
@@ -112,10 +123,9 @@ function shouldJoinParagraphLines(
   );
   if (leftDelta > Math.max(18, metrics.lineHeight * 1.25)) return false;
 
-  const overlap = Math.min(
-    previous.sourceBounds.right,
-    next.sourceBounds.right,
-  ) - Math.max(previous.sourceBounds.left, next.sourceBounds.left);
+  const overlap =
+    Math.min(previous.sourceBounds.right, next.sourceBounds.right) -
+    Math.max(previous.sourceBounds.left, next.sourceBounds.left);
   if (overlap < Math.min(blockWidth(previous), blockWidth(next)) * 0.5) {
     return false;
   }
@@ -137,8 +147,10 @@ function mergeParagraphLine(
   paragraph: ExtractedPdfBlock,
   line: ExtractedPdfBlock,
 ) {
-  const dehyphenate = paragraph.wordBounds.length === 0 &&
-    line.wordBounds.length === 0 && paragraph.text.endsWith("-") &&
+  const dehyphenate =
+    paragraph.wordBounds.length === 0 &&
+    line.wordBounds.length === 0 &&
+    paragraph.text.endsWith("-") &&
     startsWithLowercaseLetter(line.text);
   const paragraphText = dehyphenate
     ? paragraph.text.slice(0, -1)
@@ -160,7 +172,7 @@ function mergeParagraphLine(
 
 /**
  * Produces stable Reader Mode paragraphs without altering Original PDF data.
- * IDs come from the first source line so search, translation, and highlights
+ * IDs come from the first source line so search and highlights
  * all operate on the same normalized block collection.
  */
 export function normalizeReaderBlocks(blocks: ExtractedPdfBlock[]) {

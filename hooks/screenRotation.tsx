@@ -2,9 +2,7 @@ import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useCallback, useEffect, useRef } from "react";
 
-export function useScreenRotation(
-  setIsLandscape: (value: boolean) => void
-) {
+export function useScreenRotation(setIsLandscape: (value: boolean) => void) {
   const lastLandscape = useRef<boolean | null>(null);
 
   // Commit the orientation change immediately. The native viewport has already
@@ -12,14 +10,17 @@ export function useScreenRotation(
   // update (e.g. with setTimeout) only leaves React rendering with stale
   // isLandscape values against the already-rotated layout — the source of the
   // double-layout "jump" during rotation.
-  const updateLandscape = useCallback((value: boolean) => {
-    if (lastLandscape.current === value) return;
-    lastLandscape.current = value;
-    setIsLandscape(value);
-  }, [setIsLandscape]);
+  const updateLandscape = useCallback(
+    (value: boolean) => {
+      if (lastLandscape.current === value) return;
+      lastLandscape.current = value;
+      setIsLandscape(value);
+    },
+    [setIsLandscape],
+  );
 
   const disableRotation = useReaderSettingsStore(
-    (state) => state.disableRotation
+    (state) => state.disableRotation,
   );
 
   useEffect(() => {
@@ -29,7 +30,7 @@ export function useScreenRotation(
     const setupOrientation = async () => {
       if (disableRotation) {
         await ScreenOrientation.lockAsync(
-          ScreenOrientation.OrientationLock.PORTRAIT_UP
+          ScreenOrientation.OrientationLock.PORTRAIT_UP,
         );
 
         if (isActive) updateLandscape(false);
@@ -37,6 +38,7 @@ export function useScreenRotation(
       }
 
       await ScreenOrientation.unlockAsync();
+      if (!isActive) return;
 
       const orientation = await ScreenOrientation.getOrientationAsync();
       const landscape =
@@ -61,12 +63,18 @@ export function useScreenRotation(
     return () => {
       isActive = false;
       subscription?.remove();
-
-      if (!disableRotation) {
-        void ScreenOrientation.lockAsync(
-          ScreenOrientation.OrientationLock.PORTRAIT_UP
-        );
-      }
     };
   }, [disableRotation, updateLandscape]);
+
+  // Leaving the reader returns the rest of the app to its portrait contract.
+  // Keep this separate from the reactive effect above: its old cleanup ran on
+  // every guide toggle and caused an unwanted portrait frame before relocking.
+  useEffect(
+    () => () => {
+      void ScreenOrientation.lockAsync(
+        ScreenOrientation.OrientationLock.PORTRAIT_UP,
+      );
+    },
+    [],
+  );
 }

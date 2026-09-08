@@ -17,6 +17,7 @@ import { completeOnboarding } from '@/lib/onboarding';
 import { OnboardingBackButton } from '@/components/onboarding/OnboardingBackButton';
 import { useAuth } from '@/providers/AuthProvider';
 import { useRevenueCat } from '@/providers/RevenueCatProvider';
+import { authRoute } from '@/lib/authNavigation';
 
 const TERMS_URL = process.env.EXPO_PUBLIC_TERMS_URL;
 const PRIVACY_URL = process.env.EXPO_PUBLIC_PRIVACY_URL;
@@ -61,7 +62,7 @@ export default function PremiumOnboardingScreen() {
       setIsLoadingPackages(false);
     });
     return () => { isMounted = false; };
-  }, [isMembershipLoading, loadPackages]);
+  }, [isMembershipLoading, isPremium, loadPackages]);
 
   const selectedPackage = useMemo(
     () => packages.find((item) => item.identifier === selectedPackageId) ?? packages[0],
@@ -70,10 +71,15 @@ export default function PremiumOnboardingScreen() {
 
   const finishOnboarding = () => {
     completeOnboarding();
-    router.replace(session ? '/HomePage' : '/(auth)/sign-in');
+    router.replace('/HomePage');
   };
 
   const handlePurchase = async () => {
+    if (!session) {
+      completeOnboarding();
+      router.push(authRoute('/(auth)/sign-in', 'premium'));
+      return;
+    }
     if (isPremium) {
       finishOnboarding();
       return;
@@ -89,6 +95,11 @@ export default function PremiumOnboardingScreen() {
 
   const handleRestore = async () => {
     if (isRestoring) return;
+    if (!session) {
+      completeOnboarding();
+      router.push(authRoute('/(auth)/sign-in', 'premium'));
+      return;
+    }
     setMessage(null);
     setIsRestoring(true);
     const restored = await restorePurchases();
@@ -177,17 +188,30 @@ export default function PremiumOnboardingScreen() {
           {message ? <Text accessibilityRole="alert" style={styles.message}>{message}</Text> : null}
           <Pressable
             accessibilityRole="button"
-            disabled={isPurchasing || (!isPremium && (!selectedPackage || packagesUnavailable))}
+            disabled={
+              isPurchasing ||
+              (Boolean(session) &&
+                !isPremium &&
+                (!selectedPackage || packagesUnavailable))
+            }
             onPress={() => void handlePurchase()}
             style={({ pressed }) => [
               styles.premiumButton,
-              (isPurchasing || (!isPremium && !selectedPackage)) && styles.buttonDisabled,
+              (isPurchasing ||
+                (Boolean(session) && !isPremium && !selectedPackage)) &&
+                styles.buttonDisabled,
               pressed && styles.buttonPressed,
             ]}
           >
             {isPurchasing ? <ActivityIndicator color="#FFFFFF" size="small" /> : null}
             <Text style={styles.premiumButtonText}>
-              {isPremium ? 'Continue' : isPurchasing ? 'Purchasing…' : 'Start Premium'}
+              {isPremium
+                ? 'Continue'
+                : !session
+                  ? 'Sign in to start Premium'
+                  : isPurchasing
+                    ? 'Purchasing…'
+                    : 'Start Premium'}
             </Text>
           </Pressable>
 

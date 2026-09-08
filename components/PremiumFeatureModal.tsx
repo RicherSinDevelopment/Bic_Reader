@@ -6,6 +6,7 @@ type PremiumFeatureModalProps = {
   featureName: string;
   onClose: () => void;
   onUpgrade: () => void;
+  onSignIn?: () => void;
   visible: boolean;
 };
 
@@ -14,6 +15,7 @@ export default function PremiumFeatureModal({
   featureName,
   onClose,
   onUpgrade,
+  onSignIn,
   visible,
 }: PremiumFeatureModalProps) {
   return (
@@ -34,8 +36,20 @@ export default function PremiumFeatureModal({
             style={({ pressed }) => [styles.upgradeButton, pressed && styles.buttonPressed]}
           >
             <Sparkles color="#FFFFFF" size={18} />
-            <Text style={styles.upgradeText}>View Premium</Text>
+            <Text style={styles.upgradeText}>Upgrade to Premium</Text>
           </Pressable>
+          {onSignIn ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={onSignIn}
+              style={({ pressed }) => [
+                styles.signInButton,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.signInText}>Sign in</Text>
+            </Pressable>
+          ) : null}
           <Pressable accessibilityRole="button" onPress={onClose} style={styles.notNowButton}>
             <Text style={styles.notNowText}>Not now</Text>
           </Pressable>
@@ -56,6 +70,8 @@ const styles = StyleSheet.create({
   upgradeButton: { width: '100%', height: 53, marginTop: 20, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#639922' },
   buttonPressed: { opacity: 0.86, transform: [{ scale: 0.99 }] },
   upgradeText: { color: '#FFFFFF', fontFamily: 'Lato_700Bold', fontSize: 16 },
+  signInButton: { width: '100%', minHeight: 46, marginTop: 7, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#CAD8BB', borderRadius: 15, backgroundColor: '#F5F8F0' },
+  signInText: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 15 },
   notNowButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 20 },
   notNowText: { color: '#66705E', fontFamily: 'Lato_700Bold', fontSize: 14 },
 });

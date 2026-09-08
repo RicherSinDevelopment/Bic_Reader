@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">21.42% </span>
+                <span class="strong">26.19% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>9/42</span>
+                <span class='fraction'>11/42</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">32.43% </span>
+                <span class="strong">39.02% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>12/37</span>
+                <span class='fraction'>16/41</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">30% </span>
+                <span class="strong">40% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>3/10</span>
+                <span class='fraction'>4/10</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">24.32% </span>
+                <span class="strong">29.72% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>9/37</span>
+                <span class='fraction'>11/37</span>
             </div>
         
             
@@ -196,7 +196,10 @@
 <a name='L131'></a><a href='#L131'>131</a>
 <a name='L132'></a><a href='#L132'>132</a>
 <a name='L133'></a><a href='#L133'>133</a>
-<a name='L134'></a><a href='#L134'>134</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -220,7 +223,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -244,17 +247,20 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -352,8 +358,8 @@ export function verticalDestination(
   };
 }
 &nbsp;
-export function <span class="fstat-no" title="function not covered" >verticalRestoreMessage(</span>destination: AnchorDestination) {
-<span class="cstat-no" title="statement not covered" >  return JSON.stringify({ type: "goToSourcePage", ...destination });</span>
+export function verticalRestoreMessage(destination: AnchorDestination) {
+  return JSON.stringify({ type: "goToSourcePage", ...destination });
 }
 &nbsp;
 export function anchorFromVisibleWord(input: {
@@ -380,14 +386,17 @@ function anchorsMatch(
   <span class="missing-if-branch" title="if path not taken" >I</span>if (!actual || expected.documentId !== actual.documentId) <span class="cstat-no" title="statement not covered" >return false;</span>
   <span class="missing-if-branch" title="else path not taken" >E</span>if (expected.sourceBlockId) {
     <span class="missing-if-branch" title="if path not taken" >I</span>if (!actual.sourceBlockId) <span class="cstat-no" title="statement not covered" >return false;</span>
-    <span class="missing-if-branch" title="if path not taken" >I</span>if (expected.sourceBlockId !== actual.sourceBlockId) {
+    if (expected.sourceBlockId !== actual.sourceBlockId) {
       // Near the end of a source page the browser cannot place the final block
       // at the viewport top because there is no content beneath it. The
       // previous block's last line becomes the reported top-left word even
       // though the requested block is visible immediately below it. Treat the
       // same source page as a valid vertical landing; exact word placement is
       // still handled by the destination highlight.
-<span class="cstat-no" title="statement not covered" >      return expected.sourcePage === actual.sourcePage;</span>
+      return (
+        expected.sourcePage === actual.sourcePage &amp;&amp;
+        (expected.blockProgress ?? <span class="branch-1 cbranch-no" title="branch not covered" >0)</span> &gt;= 0.92
+      );
     }
     <span class="missing-if-branch" title="else path not taken" >E</span>if (
       expected.blockProgress !== undefined &amp;&amp;
@@ -469,7 +478,7 @@ export { anchorsMatch as verticalAnchorsMatch };
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-09-03T23:46:24.537Z
+                at 2026-09-04T07:36:57.003Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

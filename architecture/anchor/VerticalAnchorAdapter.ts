@@ -67,7 +67,9 @@ function anchorsMatch(
     ) {
       // Tiny floating-point representation differences must not turn an exact
       // eight-percent boundary into a false verification failure.
-      return Math.abs(expected.blockProgress - actual.blockProgress) <= 0.0800001;
+      return (
+        Math.abs(expected.blockProgress - actual.blockProgress) <= 0.0800001
+      );
     }
     return true;
   }
@@ -80,8 +82,7 @@ function anchorsMatch(
  * search hits, cross-tab switches) depend on progressive extraction + block
  * append reaching the WebView before the target word is visible; a fixed
  * microsecond check races that pipeline and mislabels a slow-but-successful
- * restore as a failure. Translated targets can additionally wait on Apple's
- * on-demand translation pipeline, so callers may extend the window.
+ * restore as a failure, so callers may extend the window for slower content.
  */
 const VERIFY_RESOLVE_WINDOW_MS = 2500;
 

@@ -1,8 +1,14 @@
 import { create } from "zustand";
-import type { CanonicalAnchor, ReaderLayout, ReaderMode, TransitionState } from "./AnchorTypes";
+import type {
+  CanonicalAnchor,
+  ReaderLayout,
+  ReaderMode,
+  TransitionState,
+} from "./AnchorTypes";
 
 type AnchorState = {
   canonicalAnchor: CanonicalAnchor | null;
+  desiredAnchor: CanonicalAnchor | null;
   activeMode: ReaderMode;
   activeLayout: ReaderLayout;
   transition: TransitionState;
@@ -13,10 +19,15 @@ type AnchorState = {
   resetForDocument: (documentId: string) => void;
 };
 
-const idleTransition: TransitionState = { id: 0, phase: "idle", status: "idle" };
+const idleTransition: TransitionState = {
+  id: 0,
+  phase: "idle",
+  status: "idle",
+};
 
 export const useAnchorStore = create<AnchorState>((set) => ({
   canonicalAnchor: null,
+  desiredAnchor: null,
   activeMode: "reader",
   activeLayout: "vertical",
   transition: idleTransition,
@@ -24,10 +35,12 @@ export const useAnchorStore = create<AnchorState>((set) => ({
   setActiveMode: (activeMode) => set({ activeMode }),
   setActiveLayout: (activeLayout) => set({ activeLayout }),
   setTransition: (transition) => set({ transition }),
-  resetForDocument: (documentId) => set((state) => ({
-    canonicalAnchor: state.canonicalAnchor?.documentId === documentId ? state.canonicalAnchor : null,
-    transition: idleTransition,
-  })),
+  resetForDocument: (_documentId) =>
+    set(() => ({
+      canonicalAnchor: null,
+      desiredAnchor: null,
+      transition: idleTransition,
+    })),
 }));
 
 export const anchorStore = useAnchorStore;

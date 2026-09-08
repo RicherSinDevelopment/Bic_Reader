@@ -16,7 +16,10 @@ import {
 } from "@/services/errorReporting";
 
 type OpenWithProps = {
-  onPdfReceived: (pdf: PickedPdf) => Promise<string | null>;
+  onPdfReceived: (pdf: PickedPdf) => Promise<{
+    pdfId?: string;
+    reason?: "limit";
+  }>;
 };
 
 function getPdfName(url: string) {
@@ -75,7 +78,7 @@ export default function OpenWith({ onPdfReceived }: OpenWithProps) {
         return;
       }
 
-      const pdfId = await onPdfReceived({
+      const result = await onPdfReceived({
         name: getPdfName(incomingUrl),
         uri: incomingUrl,
         mimeType: "application/pdf",
@@ -86,13 +89,18 @@ export default function OpenWith({ onPdfReceived }: OpenWithProps) {
       releaseIncomingPdfUrl(incomingUrl);
       importInProgress.current = null;
 
-      if (pdfId) {
+      if (result.pdfId) {
         addSafeBreadcrumb("bic.pdf.import", "open-with-completed", {
           imported: true,
         });
         router.replace({
           pathname: "/Reader/[pdfId]",
-          params: { pdfId },
+          params: { pdfId: result.pdfId },
+        });
+      } else if (result.reason === "limit") {
+        router.replace({
+          pathname: "/onboarding/premium",
+          params: { source: "app" },
         });
       } else {
         addSafeBreadcrumb("bic.pdf.import", "open-with-completed", {

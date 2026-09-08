@@ -9,6 +9,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import type { SQLiteDatabase } from "expo-sqlite";
 
 const PDF_DIRECTORY_NAME = "pdfs";
+const PDF_HEADER_SCAN_BYTES = 1024;
 
 export type PdfImportResult =
   | { status: "imported"; pdf: PdfDocument }
@@ -37,6 +38,18 @@ function getPdfDirectoryUri() {
   return `${FileSystem.documentDirectory}${PDF_DIRECTORY_NAME}/`;
 }
 
+async function assertPdfHeader(uri: string) {
+  const encodedHeader = await FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
+    length: PDF_HEADER_SCAN_BYTES,
+    position: 0,
+  });
+  const header = globalThis.atob(encodedHeader);
+  if (!header.includes("%PDF-")) {
+    throw new Error("This file is corrupt or is not a valid PDF.");
+  }
+}
+
 export async function importPdf(
   db: SQLiteDatabase,
   pickedPdf: PickedPdf,
@@ -61,6 +74,13 @@ export async function importPdf(
   const timestamp = new Date().toISOString();
 
   await FileSystem.copyAsync({ from: pickedPdf.uri, to: permanentUri });
+
+  try {
+    await assertPdfHeader(permanentUri);
+  } catch (error) {
+    await FileSystem.deleteAsync(permanentUri, { idempotent: true });
+    throw error;
+  }
 
   const pdf: NewPdfDocument = {
     id,

@@ -1,0 +1,17 @@
+appId: com.bicreader.app
+name: Guest can enter and use the local library
+---
+- launchApp:
+    clearState: true
+- runFlow:
+    when:
+      visible: "Skip onboarding"
+    commands:
+      - tapOn: "Skip onboarding"
+- assertVisible: "Bic Reader"
+- assertVisible: "Free library"
+- assertVisible: "0 of 5 PDFs"
+- tapOn: "Open settings"
+- assertVisible: "Guest"
+- assertVisible: "Sign in"
+- assertVisible: "Create an account"

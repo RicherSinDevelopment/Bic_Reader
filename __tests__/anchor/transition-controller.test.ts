@@ -3,7 +3,10 @@
 import { AnchorController } from "@/architecture/anchor/AnchorController";
 import { useAnchorStore } from "@/architecture/anchor/AnchorStore";
 import { TransitionController } from "@/architecture/anchor/TransitionController";
-import type { AnchorAdapter, CanonicalAnchor } from "@/architecture/anchor/AnchorTypes";
+import type {
+  AnchorAdapter,
+  CanonicalAnchor,
+} from "@/architecture/anchor/AnchorTypes";
 
 jest.mock("@/services/errorReporting", () => ({
   addSafeBreadcrumb: jest.fn(),
@@ -37,23 +40,38 @@ describe("AnchorController authority", () => {
     const controller = new AnchorController();
     const persisted = jest.fn();
     controller.setPersistenceScheduler(persisted);
-    const result = controller.publish({
-      documentId: "book",
-      sourcePage: 19.6,
-      wordIndex: -3,
-      blockProgress: 4,
-    }, "reader-user");
-    expect(result).toMatchObject({ sourcePage: 20, wordIndex: 0, blockProgress: 1 });
+    const result = controller.publish(
+      {
+        documentId: "book",
+        sourcePage: 19.6,
+        wordIndex: -3,
+        blockProgress: 4,
+      },
+      "reader-user",
+    );
+    expect(result).toMatchObject({
+      sourcePage: 20,
+      wordIndex: 0,
+      blockProgress: 1,
+    });
     expect(persisted).toHaveBeenCalledWith(result);
   });
 
   test("rejects renderer noise, invalid pages, and stale revisions", () => {
     const controller = new AnchorController();
     controller.initialize(canonical);
-    expect(controller.publish({ ...canonical, sourcePage: 99 }, "renderer")).toEqual(canonical);
-    expect(controller.publish({ ...canonical, sourcePage: 0 }, "reader-user")).toEqual(canonical);
-    expect(controller.publish({ ...canonical, sourcePage: 21, revision: 3 }, "reader-user"))
-      .toEqual(canonical);
+    expect(
+      controller.publish({ ...canonical, sourcePage: 99 }, "renderer"),
+    ).toEqual(canonical);
+    expect(
+      controller.publish({ ...canonical, sourcePage: 0 }, "reader-user"),
+    ).toEqual(canonical);
+    expect(
+      controller.publish(
+        { ...canonical, sourcePage: 21, revision: 3 },
+        "reader-user",
+      ),
+    ).toEqual(canonical);
   });
 });
 
@@ -88,7 +106,7 @@ describe("TransitionController transaction", () => {
     const destination = adapter();
     const result = controller.run({
       from: { mode: "reader", layout: "vertical" },
-      target: { mode: "translated", layout: "horizontal" },
+      target: { mode: "original", layout: "horizontal" },
       capture: () => canonical,
       adapter: destination,
     });
@@ -96,7 +114,7 @@ describe("TransitionController transaction", () => {
     await expect(result).resolves.toBe(true);
     expect(destination.restore).toHaveBeenCalledTimes(1);
     expect(useAnchorStore.getState()).toMatchObject({
-      activeMode: "translated",
+      activeMode: "original",
       activeLayout: "horizontal",
       transition: { status: "complete" },
     });
@@ -139,7 +157,7 @@ describe("TransitionController transaction", () => {
     });
     const first = controller.run({
       from: { mode: "reader", layout: "vertical" },
-      target: { mode: "translated", layout: "vertical" },
+      target: { mode: "original", layout: "vertical" },
       capture: () => delayedCapture,
       adapter: adapter(),
     });

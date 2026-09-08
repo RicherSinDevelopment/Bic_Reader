@@ -17,7 +17,6 @@ type OriginalPdfProps = {
   highlightTarget?: SwitchHighlightTarget | null;
   outlineOnly?: boolean;
   destination?: { page: number; nonce: number } | null;
-  resetZoomNonce?: number;
 };
 
 export type PdfOutlineItem = {
@@ -53,10 +52,10 @@ export default function OriginalPDF({
   highlightTarget,
   outlineOnly = false,
   destination,
-  resetZoomNonce = 0,
 }: OriginalPdfProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [documentInitialPage] = useState(initialPage);
   const isDark = useColorScheme() === "dark";
   const source = useMemo(() => ({ uri: pdfUri, cache: false }), [pdfUri]);
   const switchHighlightColor = useReaderSettingsStore(
@@ -71,7 +70,7 @@ export default function OriginalPDF({
   useEffect(() => {
     setErrorMessage(null);
     setLoading(true);
-  }, [pdfUri, resetZoomNonce]);
+  }, [pdfUri]);
 
   useEffect(() => {
     if (loading || !destination) return;
@@ -93,9 +92,9 @@ export default function OriginalPDF({
       markDocumentReady();
       onReady?.();
       onOutlineChanged?.(convertOutline(tableContents));
-      onPageChanged?.(Math.max(1, initialPage), totalPages);
+      onPageChanged?.(Math.max(1, documentInitialPage), totalPages);
     },
-    [initialPage, markDocumentReady, onOutlineChanged, onPageChanged, onReady],
+    [documentInitialPage, markDocumentReady, onOutlineChanged, onPageChanged, onReady],
   );
 
   if (errorMessage) {
@@ -123,14 +122,14 @@ export default function OriginalPDF({
       )}
 
       <Pdf
-        key={`original-pdf-${resetZoomNonce}`}
+        key={pdfUri}
         ref={pdfRef}
         source={source}
         // Subsequent destinations are imperative: exact targets use PDFKit's
         // goToRect, and page-only targets use setPage in the effect above.
         // Keeping this prop stable prevents a late prop commit from undoing an
         // exact highlight position.
-        page={Math.max(1, initialPage)}
+        page={Math.max(1, documentInitialPage)}
         horizontal={false}
         enablePaging={false}
         fitPolicy={0}

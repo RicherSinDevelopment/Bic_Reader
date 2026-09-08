@@ -11,6 +11,10 @@ import { Platform, Pressable, StyleSheet, Text, useColorScheme, View } from 'rea
 import { createSessionFromAuthUrl } from '@/lib/auth-deep-link';
 import { getNativeGoogleCredential } from '@/lib/native-google-auth';
 import { supabase } from '@/lib/supabase';
+import {
+  destinationAfterAuth,
+  type AuthReturnTarget,
+} from '@/lib/authNavigation';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -19,6 +23,7 @@ type SocialProvider = Extract<Provider, 'apple' | 'google'>;
 type SocialAuthButtonsProps = {
   disabled?: boolean;
   onError: (message: string | null) => void;
+  returnTo?: AuthReturnTarget;
 };
 
 const providers: { icon: 'apple' | 'google'; label: string; provider: SocialProvider }[] = [
@@ -26,7 +31,11 @@ const providers: { icon: 'apple' | 'google'; label: string; provider: SocialProv
   { icon: 'apple', label: 'Continue with Apple', provider: 'apple' },
 ];
 
-export function SocialAuthButtons({ disabled = false, onError }: SocialAuthButtonsProps) {
+export function SocialAuthButtons({
+  disabled = false,
+  onError,
+  returnTo,
+}: SocialAuthButtonsProps) {
   const [activeProvider, setActiveProvider] = useState<SocialProvider | null>(null);
   const router = useRouter();
   const isDark = useColorScheme() === 'dark';
@@ -73,7 +82,7 @@ export function SocialAuthButtons({ disabled = false, onError }: SocialAuthButto
       }
     }
 
-    router.replace('/HomePage');
+    router.replace(destinationAfterAuth(returnTo));
   };
 
   const handleNativeGoogleAuth = async () => {
@@ -89,7 +98,7 @@ export function SocialAuthButtons({ disabled = false, onError }: SocialAuthButto
     if (error) throw error;
     if (!data.session) throw new Error('Google sign-in completed, but no session was created.');
 
-    router.replace('/HomePage');
+    router.replace(destinationAfterAuth(returnTo));
   };
 
   const handleSocialAuth = async (provider: SocialProvider) => {
@@ -107,7 +116,9 @@ export function SocialAuthButtons({ disabled = false, onError }: SocialAuthButto
         return;
       }
 
-      const redirectTo = Linking.createURL('auth/callback');
+      const redirectTo = Linking.createURL('auth/callback', {
+        queryParams: returnTo ? { returnTo } : undefined,
+      });
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
         options: { redirectTo, skipBrowserRedirect: Platform.OS !== 'web' },
@@ -122,7 +133,7 @@ export function SocialAuthButtons({ disabled = false, onError }: SocialAuthButto
       if (result.type === 'success') {
         const session = await createSessionFromAuthUrl(result.url);
         if (!session) throw new Error('Sign-in completed, but no session was created.');
-        router.replace('/HomePage');
+        router.replace(destinationAfterAuth(returnTo));
       }
     } catch (error: unknown) {
       if (

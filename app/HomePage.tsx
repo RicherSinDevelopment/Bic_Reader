@@ -11,6 +11,8 @@ import type { PickedPdf } from "@/hooks/useDocumentPicker";
 import { usePdfLibrary } from "@/hooks/usePdfLibrary";
 import { FREE_PDF_LIMIT } from "@/lib/premiumFeatures";
 import { useRevenueCat } from "@/providers/RevenueCatProvider";
+import { useAuth } from "@/providers/AuthProvider";
+import { authRoute } from "@/lib/authNavigation";
 import { addSafeBreadcrumb } from "@/services/errorReporting";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
@@ -21,6 +23,7 @@ const HomePage = () => {
   const [numColumns, setNumColumns] = useState<1 | 2 | 3>(1);
   const { pdfs, importPdf, deletePdf, renamePdf } = usePdfLibrary();
   const { isPremium } = useRevenueCat();
+  const { session } = useAuth();
   const router = useRouter();
   const [sortOption, setSortOption] = useState<PdfSortOption>("newest");
   const [duplicatePdfName, setDuplicatePdfName] = useState<string | null>(null);
@@ -214,6 +217,10 @@ const HomePage = () => {
     description={`The free plan includes up to ${FREE_PDF_LIMIT} PDFs. Upgrade for an unlimited library while keeping everything already added.`}
     featureName="Your free library is full"
     onClose={() => setShowLibraryLimit(false)}
+    onSignIn={!session ? () => {
+      setShowLibraryLimit(false);
+      router.push(authRoute('/(auth)/sign-in', 'premium'));
+    } : undefined}
     onUpgrade={() => {
       setShowLibraryLimit(false);
       router.push({ pathname: '/onboarding/premium', params: { source: 'app' } });

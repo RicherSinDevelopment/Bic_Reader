@@ -5,6 +5,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import type { Session } from "@supabase/supabase-js";
 import type { SQLiteDatabase } from "expo-sqlite";
 import { withSerializedWrite } from "@/database/serializedWriteTransaction";
+import { isCloudRecordNewer } from "@/services/cloudConflictPolicy";
+import { claimGuestLibrary } from "@/services/guestLibraryMigration";
 
 const PDF_BUCKET = "premium-pdfs";
 
@@ -140,12 +142,7 @@ export async function syncPremiumLibrary(
   restoreFirst: boolean,
 ) {
   const userId = session.user.id;
-  await withSerializedWrite(db, (database) =>
-    database.runAsync(
-      "UPDATE pdf_documents SET cloud_owner_id = ? WHERE cloud_owner_id IS NULL",
-      userId,
-    ),
-  );
+  await claimGuestLibrary(db, userId);
   const localBefore = await db.getAllAsync<LocalPdfRow>(
     "SELECT * FROM pdf_documents WHERE cloud_owner_id = ?",
     userId,
@@ -274,7 +271,7 @@ export async function syncPremiumLibrary(
       "SELECT updated_at FROM reader_positions WHERE pdf_id = ? LIMIT 1",
       position.pdf_id,
     );
-    if (local && Date.parse(local.updated_at) >= Date.parse(position.updated_at)) {
+    if (!isCloudRecordNewer(local?.updated_at, position.updated_at)) {
       continue;
     }
     await withSerializedWrite(db, (database) => database.runAsync(

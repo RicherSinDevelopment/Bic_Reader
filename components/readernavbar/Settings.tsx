@@ -26,60 +26,72 @@ type SettingsProps = {
 
 export default function Settings({ onTransitionChange }: SettingsProps) {
   const disableRotation = useReaderSettingsStore(
-    (state) => state.disableRotation
+    (state) => state.disableRotation,
   );
   const toggleDisableRotation = useReaderSettingsStore(
-    (state) => state.toggleDisableRotation
+    (state) => state.toggleDisableRotation,
   );
   const hideTopBarOnScroll = useReaderSettingsStore(
-    (state) => state.hideTopBarOnScroll
+    (state) => state.hideTopBarOnScroll,
   );
   const setHideTopBarOnScroll = useReaderSettingsStore(
-    (state) => state.setHideTopBarOnScroll
+    (state) => state.setHideTopBarOnScroll,
   );
   const transition = useReaderSettingsStore((state) => state.transition);
   const automaticHyphenation = useReaderSettingsStore(
-    (state) => state.automaticHyphenation
+    (state) => state.automaticHyphenation,
   );
   const setAutomaticHyphenation = useReaderSettingsStore(
-    (state) => state.setAutomaticHyphenation
+    (state) => state.setAutomaticHyphenation,
   );
   const lineGuideEnabled = useReaderSettingsStore(
-    (state) => state.lineGuideEnabled
+    (state) => state.lineGuideEnabled,
   );
   const setLineGuideEnabled = useReaderSettingsStore(
-    (state) => state.setLineGuideEnabled
+    (state) => state.setLineGuideEnabled,
   );
   const wordGuideEnabled = useReaderSettingsStore(
-    (state) => state.wordGuideEnabled
+    (state) => state.wordGuideEnabled,
   );
   const setWordGuideEnabled = useReaderSettingsStore(
-    (state) => state.setWordGuideEnabled
+    (state) => state.setWordGuideEnabled,
   );
   const guideBackgroundDimming = useReaderSettingsStore(
-    (state) => state.guideBackgroundDimming
+    (state) => state.guideBackgroundDimming,
   );
   const setGuideBackgroundDimming = useReaderSettingsStore(
-    (state) => state.setGuideBackgroundDimming
+    (state) => state.setGuideBackgroundDimming,
   );
   const guideColor = useReaderSettingsStore((state) => state.guideColor);
   const setGuideColor = useReaderSettingsStore((state) => state.setGuideColor);
   const switchHighlightColor = useReaderSettingsStore(
-    (state) => state.switchHighlightColor
+    (state) => state.switchHighlightColor,
   );
   const setSwitchHighlightColor = useReaderSettingsStore(
-    (state) => state.setSwitchHighlightColor
+    (state) => state.setSwitchHighlightColor,
   );
   const setTransition = useReaderSettingsStore((state) => state.setTransition);
-  const verticalMarginPreset = useReaderSettingsStore((state) => state.verticalMarginPreset);
-  const horizontalMarginPreset = useReaderSettingsStore((state) => state.horizontalMarginPreset);
-  const setVerticalMarginPreset = useReaderSettingsStore((state) => state.setVerticalMarginPreset);
-  const setHorizontalMarginPreset = useReaderSettingsStore((state) => state.setHorizontalMarginPreset);
+  const verticalMarginPreset = useReaderSettingsStore(
+    (state) => state.verticalMarginPreset,
+  );
+  const horizontalMarginPreset = useReaderSettingsStore(
+    (state) => state.horizontalMarginPreset,
+  );
+  const setVerticalMarginPreset = useReaderSettingsStore(
+    (state) => state.setVerticalMarginPreset,
+  );
+  const setHorizontalMarginPreset = useReaderSettingsStore(
+    (state) => state.setHorizontalMarginPreset,
+  );
 
   return (
     <BottomSheetScrollView
       style={{ flex: 1 }}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 }}
+      contentContainerStyle={{
+        paddingHorizontal: 16,
+        paddingTop: 16,
+        paddingBottom: 32,
+      }}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
     >
@@ -88,7 +100,9 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
       </Text>
 
       <View className="mt-6 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Disable rotation:</Text>
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+          Disable rotation:
+        </Text>
         <Center>
           <Switch
             size="md"
@@ -107,7 +121,9 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
 
       <View className="mt-4 flex-row items-center justify-between">
         <View className="mr-4 flex-1">
-          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Horizontal swipe:</Text>
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+            Horizontal swipe:
+          </Text>
           <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
             Turn off to read with vertical scrolling.
           </Text>
@@ -131,7 +147,9 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
 
       <View className="mt-4 flex-row items-center justify-between">
         <View className="mr-4 flex-1">
-          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Hide top bar:</Text>
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+            Hide top bar:
+          </Text>
           <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
             Hide the header and iPhone status icons while scrolling down.
           </Text>
@@ -152,7 +170,9 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
 
       <View className="mt-4 flex-row items-center justify-between">
         <View className="mr-4 flex-1">
-          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Automatic hyphenation:</Text>
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+            Automatic hyphenation:
+          </Text>
           <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
             Break long words at natural points when space is tight.
           </Text>
@@ -173,7 +193,9 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
 
       <View className="mt-4 flex-row items-center justify-between">
         <View className="mr-4 flex-1">
-          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Line guide:</Text>
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+            Line guide:
+          </Text>
           <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
             Tap anywhere to move down one line.
           </Text>
@@ -195,7 +217,9 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
 
       <View className="mt-4 flex-row items-center justify-between">
         <View className="mr-4 flex-1">
-          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Word guide:</Text>
+          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+            Word guide:
+          </Text>
           <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
             Tap above or below to move one word.
           </Text>
@@ -220,7 +244,7 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
           Switch highlight color
         </Text>
         <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
-          Marks your position when switching Reader and Translated modes.
+          Marks your position when switching Reader and Original modes.
         </Text>
         <View className="mt-3 flex-row items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-white/10 dark:bg-[#1A1E18]">
           {guideColorPresets.map((preset) => {
@@ -240,7 +264,9 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
                   className="h-8 w-8 items-center justify-center rounded-full"
                   style={{ backgroundColor: swatchColor }}
                 >
-                  {selected ? <View className="h-2.5 w-2.5 rounded-full bg-white" /> : null}
+                  {selected ? (
+                    <View className="h-2.5 w-2.5 rounded-full bg-white" />
+                  ) : null}
                 </View>
               </Pressable>
             );
@@ -273,7 +299,9 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
                   className="h-8 w-8 items-center justify-center rounded-full"
                   style={{ backgroundColor: swatchColor }}
                 >
-                  {selected ? <View className="h-2.5 w-2.5 rounded-full bg-white" /> : null}
+                  {selected ? (
+                    <View className="h-2.5 w-2.5 rounded-full bg-white" />
+                  ) : null}
                 </View>
               </Pressable>
             );
@@ -307,31 +335,34 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
       </View>
 
       <View className="mt-6 border-t border-slate-200 pt-5 dark:border-white/10">
-          <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
-            Top & bottom margin
-          </Text>
-          <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
-            Controls the page edges and the space reserved around the chapter title and page number.
-          </Text>
-          <View className="mt-3 flex-row gap-2">
-            {marginPresets.map((preset) => {
-              const selected = verticalMarginPreset === preset.value;
-              return (
-                <Pressable
-                  key={preset.value}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  accessibilityLabel={`${preset.label} top and bottom margin`}
-                  onPress={() => setVerticalMarginPreset(preset.value)}
-                  className={`flex-1 rounded-lg border px-2 py-2 ${selected ? "border-[#639922] bg-[#639922]" : "border-slate-200 bg-white dark:border-white/10 dark:bg-[#1A1E18]"}`}
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+          Top & bottom margin
+        </Text>
+        <Text className="mt-1 text-xs text-slate-500 dark:text-[#9EA69A]">
+          Controls the page edges and the space reserved around the chapter
+          title and page number.
+        </Text>
+        <View className="mt-3 flex-row gap-2">
+          {marginPresets.map((preset) => {
+            const selected = verticalMarginPreset === preset.value;
+            return (
+              <Pressable
+                key={preset.value}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`${preset.label} top and bottom margin`}
+                onPress={() => setVerticalMarginPreset(preset.value)}
+                className={`flex-1 rounded-lg border px-2 py-2 ${selected ? "border-[#639922] bg-[#639922]" : "border-slate-200 bg-white dark:border-white/10 dark:bg-[#1A1E18]"}`}
+              >
+                <Text
+                  className={`text-center text-xs font-semibold ${selected ? "text-white" : "text-slate-600 dark:text-[#D8DDD3]"}`}
                 >
-                  <Text className={`text-center text-xs font-semibold ${selected ? "text-white" : "text-slate-600 dark:text-[#D8DDD3]"}`}>
-                    {preset.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+                  {preset.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
       <View className="mt-5">
@@ -353,7 +384,9 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
                 onPress={() => setHorizontalMarginPreset(preset.value)}
                 className={`flex-1 rounded-lg border px-2 py-2 ${selected ? "border-[#639922] bg-[#639922]" : "border-slate-200 bg-white dark:border-white/10 dark:bg-[#1A1E18]"}`}
               >
-                <Text className={`text-center text-xs font-semibold ${selected ? "text-white" : "text-slate-600 dark:text-[#D8DDD3]"}`}>
+                <Text
+                  className={`text-center text-xs font-semibold ${selected ? "text-white" : "text-slate-600 dark:text-[#D8DDD3]"}`}
+                >
                   {preset.label}
                 </Text>
               </Pressable>
@@ -361,7 +394,6 @@ export default function Settings({ onTransitionChange }: SettingsProps) {
           })}
         </View>
       </View>
-
     </BottomSheetScrollView>
   );
 }

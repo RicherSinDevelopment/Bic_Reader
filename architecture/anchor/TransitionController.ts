@@ -1,3 +1,5 @@
+import { ANCHOR_DEBUG } from "./AnchorDiagnostics";
+import { anchorController } from "./AnchorController";
 import { useAnchorStore } from "./AnchorStore";
 import type { AnchorAdapter, CanonicalAnchor, TransitionPhase, TransitionTarget } from "./AnchorTypes";
 import {
@@ -9,7 +11,7 @@ import { anchorAccuracyScore, recordTransitionMetric } from "./AnchorMetrics";
 const MAX_RESTORE_ATTEMPTS = 2;
 // Verification already polls the renderer until it observes a stable anchor.
 // A long unconditional pause only adds latency to every cached tab switch.
-const RESTORE_SETTLE_MS = 40;
+
 
 export class TransitionController {
   private nextId = Date.now();
@@ -23,13 +25,14 @@ export class TransitionController {
     const current = useAnchorStore.getState().transition;
     if (current.status !== "running") return;
     useAnchorStore.getState().setTransition({ ...current, status: "cancelled", error: reason });
+    useAnchorStore.setState({ desiredAnchor: null });
     addSafeBreadcrumb("bic.reader.transition", "cancelled", {
       fromLayout: current.from?.layout,
       fromMode: current.from?.mode,
       toLayout: current.target?.layout,
       toMode: current.target?.mode,
     });
-    if (__DEV__) console.info(`[Transition ${current.id}] aborted: ${reason}`);
+    if (ANCHOR_DEBUG) console.info(`[Transition ${current.id}] aborted: ${reason}`);
   }
 
   private phase(id: number, phase: TransitionPhase) {
@@ -42,7 +45,7 @@ export class TransitionController {
       toLayout: current.target?.layout,
       toMode: current.target?.mode,
     });
-    if (__DEV__) console.info(`[Transition ${id}] ${phase}`);
+    if (ANCHOR_DEBUG) console.info(`[Transition ${id}] ${phase}`);
     return true;
   }
 
@@ -60,6 +63,7 @@ export class TransitionController {
     try {
       const anchor = await input.capture();
       if (!this.isCurrent(id) || !anchor) throw new Error(anchor ? "superseded" : "no canonical anchor");
+      useAnchorStore.setState({ desiredAnchor: anchor });
       this.phase(id, "prepare");
       if (input.prepare && !(await input.prepare(anchor, id))) throw new Error("destination preparation failed");
       if (!this.isCurrent(id)) return false;
@@ -71,7 +75,6 @@ export class TransitionController {
         const restored = await input.adapter.restore(anchor, id);
         if (!this.isCurrent(id)) return false;
         if (!restored.ok && !restored.retryable) throw new Error(restored.reason ?? "restore failed");
-        await new Promise<void>((resolve) => setTimeout(resolve, RESTORE_SETTLE_MS));
         if (!this.isCurrent(id)) return false;
         this.phase(id, "verify");
         const verified = input.adapter.verify ? await input.adapter.verify(anchor, id) : { ok: restored.ok };
@@ -82,6 +85,7 @@ export class TransitionController {
             "expected" in verified ? verified.expected : anchor,
             "actual" in verified ? verified.actual : undefined,
           );
+          anchorController.completeNavigation(anchor);
           useAnchorStore.getState().setActiveMode(input.target.mode);
           useAnchorStore.getState().setActiveLayout(input.target.layout);
           useAnchorStore.getState().setTransition({ id, phase: "idle", status: "complete", from: input.from, target: input.target });
@@ -130,7 +134,7 @@ export class TransitionController {
           toMode: input.target.mode,
           attempt: attempt + 1,
         }, "warning");
-        if (__DEV__) {
+        if (ANCHOR_DEBUG) {
           console.warn(`[Transition ${id}] verification retry`, {
             attempt,
             expected: anchor,
@@ -142,6 +146,7 @@ export class TransitionController {
       throw new Error("anchor verification failed after retry");
     } catch (error) {
       if (!this.isCurrent(id)) return false;
+      useAnchorStore.setState({ desiredAnchor: null });
       const message = error instanceof Error ? error.message : String(error);
       useAnchorStore.getState().setTransition({ id, phase: "idle", status: message === "superseded" ? "cancelled" : "failed", from: input.from, target: input.target, error: message });
       if (message !== "superseded") {
@@ -159,7 +164,7 @@ export class TransitionController {
         durationMs: Date.now() - startedAt,
         status: message === "superseded" ? "cancelled" : "failed",
       });
-      if (__DEV__) console.warn(`[Transition ${id}] ${message}`);
+      if (ANCHOR_DEBUG) console.warn(`[Transition ${id}] ${message}`);
       return false;
     }
   }

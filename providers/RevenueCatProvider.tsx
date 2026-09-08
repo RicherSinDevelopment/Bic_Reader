@@ -2,6 +2,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import type { CustomerInfo, PurchasesError, PurchasesPackage } from 'react-native-purchases';
 import Purchases, { LOG_LEVEL, PURCHASES_ERROR_CODE } from 'react-native-purchases';
 import RevenueCatUI, { PAYWALL_RESULT } from 'react-native-purchases-ui';
+import { hasPremiumAccessForIdentity } from '@/services/revenueCatIdentity';
 import { useSegments } from 'expo-router';
 import {
   createContext,
@@ -253,9 +254,14 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
     }
   }, [applyCustomerInfo]);
 
+  // A store receipt can belong to RevenueCat's anonymous app user, but Bic
+  // Reader's paid AI and cloud data require a stable Supabase identity. Keep
+  // guest access on the five-PDF free tier until the customer signs in.
+  const hasPremiumAccess = hasPremiumAccessForIdentity(session?.user.id, isPremium);
+
   const value = useMemo<RevenueCatContextValue>(
-    () => ({ error, isLoading, isPremium, loadPackages, purchasePackage, refreshCustomerInfo, restorePurchases, showPaywall }),
-    [error, isLoading, isPremium, loadPackages, purchasePackage, refreshCustomerInfo, restorePurchases, showPaywall],
+    () => ({ error, isLoading, isPremium: hasPremiumAccess, loadPackages, purchasePackage, refreshCustomerInfo, restorePurchases, showPaywall }),
+    [error, hasPremiumAccess, isLoading, loadPackages, purchasePackage, refreshCustomerInfo, restorePurchases, showPaywall],
   );
 
   return <RevenueCatContext.Provider value={value}>{children}</RevenueCatContext.Provider>;

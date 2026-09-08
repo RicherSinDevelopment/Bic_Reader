@@ -35,6 +35,7 @@ import {
   addSafeBreadcrumb,
   captureOperationalMessage,
 } from "@/services/errorReporting";
+import { ReaderScrollDiagnostics } from "@/services/readerPerformance";
 
 type Destination = {
   page: number;
@@ -379,7 +380,7 @@ function HorizontalSelectablePage({
   const html = useMemo(
     () => `<!doctype html><html dir="${readingDirection}"><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
     ${fontFaceCss}
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:${topContentInset}px 0 ${bottomPadding}px;color:${textColor};font-family:${webFontFamily},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.page-running-header,.page-number{position:fixed;z-index:2;left:0;right:0;color:${textColor};opacity:.48;text-align:center;pointer-events:none}.page-running-header{top:${pageTopMargin}px;padding:0 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${Math.max(11, fontSize * 0.58)}px;font-weight:600;letter-spacing:.025em}.page-number{bottom:${pageBottomMargin}px;font-size:${Math.max(11, fontSize * 0.62)}px;font-variant-numeric:tabular-nums}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.segment.paragraph-start{text-indent:1.35em}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.2s ease-out .4s forwards}@keyframes readerSwitchPulse{0%{background-color:color-mix(in srgb,${switchHighlightColor} 56%,transparent);box-shadow:0 0 0 0 color-mix(in srgb,${switchHighlightColor} 30%,transparent)}32%{background-color:color-mix(in srgb,${switchHighlightColor} 92%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,${switchHighlightColor} 20%,transparent)}62%{background-color:color-mix(in srgb,${switchHighlightColor} 66%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,${switchHighlightColor} 12%,transparent)}100%{background-color:transparent;box-shadow:0 0 0 0 transparent}}@keyframes readerSwitchFade{from{background-color:color-mix(in srgb,${switchHighlightColor} 66%,transparent)}to{background-color:transparent}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out .4s forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body><div class="page-running-header">${escapeHtml(runningHeader)}</div>${markup}<div class="page-number">${pageNumber}</div><script>
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:${topContentInset}px 0 ${bottomPadding}px;color:${textColor};font-family:${webFontFamily},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.page-running-header,.page-number{position:fixed;z-index:2;left:0;right:0;color:${textColor};opacity:.48;text-align:center;pointer-events:none}.page-running-header{top:${pageTopMargin}px;padding:0 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${Math.max(11, fontSize * 0.58)}px;font-weight:600;letter-spacing:.025em}.page-number{bottom:${pageBottomMargin}px;font-size:${Math.max(11, fontSize * 0.62)}px;font-variant-numeric:tabular-nums}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.segment.paragraph-start{text-indent:1.35em}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.05s ease-out forwards}@keyframes readerSwitchPulse{0%{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent);box-shadow:0 0 0 0 color-mix(in srgb,${switchHighlightColor} 24%,transparent);opacity:.82}30%{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,${switchHighlightColor} 18%,transparent);opacity:1}58%{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,${switchHighlightColor} 10%,transparent);opacity:.88}100%{background-color:transparent;box-shadow:0 0 0 0 transparent;opacity:0}}@keyframes readerSwitchFade{from{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent)}to{background-color:transparent}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body><div class="page-running-header">${escapeHtml(runningHeader)}</div>${markup}<div class="page-number">${pageNumber}</div><script>
     window.__selectionRanges=[];
     function cleanLength(value){return String(value||'').replace(/\\u00ad/g,'').length}
     function rawIndexForClean(value,target){let clean=0;for(let index=0;index<value.length;index++){if(value[index]!=='\\u00ad'){if(clean===target)return index;clean++}}return value.length}
@@ -975,6 +976,7 @@ export default function HorizontalReaderPager({
   const readyReportedRef = useRef(false);
   const navigatedDestinationKeyRef = useRef<string | null>(null);
   const programmaticDestinationPageRef = useRef<number | null>(null);
+  const scrollDiagnosticsRef = useRef(new ReaderScrollDiagnostics());
   const programmaticDestinationAnchorRef = useRef<PageAnchor | undefined>(
     undefined,
   );
@@ -1198,7 +1200,7 @@ export default function HorizontalReaderPager({
     // a drag; programmatic/layout scroll events must never change its anchor.
     settledDestinationAnchorRef.current = confirmedAnchor;
     reportPageChange(viewablePageIndex, confirmedAnchor);
-  }, [reportPageChange, viewablePageIndex]);
+  }, [destination?.nonce, reportPageChange, viewablePageIndex]);
   const guideWords = useMemo(() => {
     if (guideMode !== "word") return [];
     return pages.flatMap((page, pageIndex) =>
@@ -1275,7 +1277,7 @@ export default function HorizontalReaderPager({
         page.some((segment) => segment.sourcePage >= destination.page),
       );
       if (sourcePageIndex >= 0) return sourcePageIndex;
-      // The destination page's content has not been generated/translated yet.
+      // The destination page's content has not been generated yet.
       // Return -1 so the navigation waits for `pages` to grow instead of
       // snapping to an unrelated (usually earlier) page.
       return -1;
@@ -1318,7 +1320,7 @@ export default function HorizontalReaderPager({
   }, [destination, destinationPage, pages]);
 
   useLayoutEffect(() => {
-    if (!pendingViewportRestoreRef.current || !pages.length) return;
+    if (!pendingViewportRestoreRef.current || !pages.length || destinationIsPending) return;
 
     pendingViewportRestoreRef.current = false;
     currentPageRef.current = preservedViewportPage;
@@ -1334,6 +1336,7 @@ export default function HorizontalReaderPager({
     onViewportSettled?.();
   }, [
     onViewportSettled,
+    destinationIsPending,
     pages,
     preservedViewportPage,
     reportPageChange,
@@ -1343,7 +1346,7 @@ export default function HorizontalReaderPager({
   useLayoutEffect(() => {
     if (!destination || !pages.length) return;
     if (!destinationIsPending || !destinationNavigationKey) return;
-    // Target content not generated/translated yet. Stay put and wait for
+    // Target content not generated yet. Stay put and wait for
     // `pages` to grow; do NOT consume the destination so this effect retries.
     if (destinationPage < 0) return;
     const resolvedAnchor = pageAnchor(pages[destinationPage], blocks);
@@ -1376,16 +1379,9 @@ export default function HorizontalReaderPager({
       animated: false,
       index: destinationPage,
     });
-    const settleFrame = requestAnimationFrame(() => {
-      pagerRef.current?.scrollToIndex({
-        animated: false,
-        index: destinationPage,
-      });
-    });
     currentPageRef.current = destinationPage;
     navigatedDestinationKeyRef.current = destinationNavigationKey;
-    reportPageChange(destinationPage, exactAnchor);
-    return () => cancelAnimationFrame(settleFrame);
+    // Publish only after native viewability confirms the destination.
   }, [
     destination,
     destinationIsPending,
@@ -1924,7 +1920,7 @@ export default function HorizontalReaderPager({
     )
       return;
 
-    // The translated pager is intentionally warmed while hidden. Do not spend
+    // A hidden pager is intentionally warmed. Do not spend
     // the highlight's lifetime there: wait until its target page is visible,
     // then allow React Native and the selectable page one frame to paint it.
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2283,17 +2279,21 @@ export default function HorizontalReaderPager({
           length: width,
           offset: width * pageIndex,
         })}
-        onScrollBeginDrag={() => {
+        onScrollBeginDrag={(event) => {
           programmaticDestinationPageRef.current = null;
           programmaticDestinationAnchorRef.current = undefined;
           settledDestinationAnchorRef.current = undefined;
           onSwipeStart?.();
+          scrollDiagnosticsRef.current.begin(
+            event.nativeEvent.contentOffset.x,
+          );
           if (activeSwitchHighlight) {
             setDismissedSwitchNonce(activeSwitchHighlight.nonce);
           }
         }}
         scrollEventThrottle={16}
         onScroll={(event) => {
+          scrollDiagnosticsRef.current.sample(event.nativeEvent.contentOffset.x);
           if (
             pendingViewportRestoreRef.current ||
             Math.abs(windowWidth - width) > 1 ||
@@ -2314,6 +2314,7 @@ export default function HorizontalReaderPager({
           reportPageChange(position);
         }}
         onMomentumScrollEnd={(event) => {
+          scrollDiagnosticsRef.current.end(event.nativeEvent.contentOffset.x);
           if (
             pendingViewportRestoreRef.current ||
             Math.abs(windowWidth - width) > 1

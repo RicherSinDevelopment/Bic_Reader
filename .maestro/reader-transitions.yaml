@@ -1,0 +1,17 @@
+appId: com.bicreader.app
+name: Reader modes preserve a seeded document
+env:
+  TEST_PDF_NAME: "Maestro Test Book"
+---
+# Import a fixture PDF once before this flow and set TEST_PDF_NAME to its title.
+- launchApp
+- tapOn: "${TEST_PDF_NAME}"
+- assertVisible: "Reader"
+- tapOn: "Original"
+- assertVisible: "Original"
+- tapOn: "Reader"
+- assertVisible: "Reader"
+- setOrientation: LANDSCAPE_LEFT
+- assertVisible: "Reader"
+- setOrientation: PORTRAIT
+- assertVisible: "Reader"

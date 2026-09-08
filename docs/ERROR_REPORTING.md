@@ -16,6 +16,13 @@ Bic Reader uses `@sentry/react-native` for JavaScript and native crash reporting
 
 Use `addSafeBreadcrumb` only with categorical values, booleans, counters, and coarse buckets. Use `captureHandledError` for meaningful caught failures. Repeated operational warnings should use `captureOperationalMessage`, which is rate-limited.
 
+Reader diagnostics add these safe breadcrumbs when an error occurs:
+
+- `bic.reader.toc`: request and resolution outcome (`settled` or `missed`) plus a coarse elapsed-time bucket.
+- `bic.reader.scroll`: horizontal reader gesture duration, distance, average speed, and peak speed, all as coarse buckets.
+
+They must not include chapter titles, page numbers, PDF identifiers, filenames, URLs, selected text, or annotations.
+
 ## EAS production setup
 
 The DSN is a public client identifier and has a built-in production fallback. It can be overridden with `EXPO_PUBLIC_SENTRY_DSN`.

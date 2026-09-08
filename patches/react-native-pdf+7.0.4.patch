@@ -385,7 +385,7 @@ index de46c98..d098055 100644
 +        initWithBounds:CGRectInset(highlightRect, -1.5, -1.0)
 +        forType:PDFAnnotationSubtypeHighlight
 +        withProperties:nil];
-+    annotation.color = [_switchHighlightColor colorWithAlphaComponent:0.55];
++    annotation.color = [_switchHighlightColor colorWithAlphaComponent:0.88];
 +    annotation.shouldDisplay = YES;
 +    annotation.shouldPrint = NO;
 +    [pdfPage addAnnotation:annotation];
@@ -440,15 +440,14 @@ index de46c98..d098055 100644
 +    CGFloat alpha = 0.0;
 +
 +    if (reduceMotion) {
-+        alpha = 0.68 * (1.0 - progress);
-+    } else if (progress < 0.24) {
-+        CGFloat rise = progress / 0.24;
-+        CGFloat easedRise = 1.0 - (1.0 - rise) * (1.0 - rise);
-+        alpha = 0.56 + (0.36 * easedRise);
++        alpha = 0.72 * (1.0 - progress);
++    } else if (progress < 0.30) {
++        CGFloat rise = progress / 0.30;
++        alpha = 0.78 + (0.17 * rise);
 +    } else {
-+        CGFloat fade = (progress - 0.24) / 0.76;
++        CGFloat fade = (progress - 0.30) / 0.70;
 +        CGFloat easedFade = fade * fade * (3.0 - 2.0 * fade);
-+        alpha = 0.92 * (1.0 - easedFade);
++        alpha = 0.95 * (1.0 - easedFade);
 +    }
 +
 +    _switchHighlightAnnotation.color =
@@ -489,4 +488,3 @@ index de46c98..d098055 100644
 +    [self clearNativeHighlight];
      _pdfDocument = Nil;
      _pdfView = Nil;
-

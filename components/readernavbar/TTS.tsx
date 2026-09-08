@@ -27,31 +27,7 @@ type TTSProps = {
   getStartOffset?: () => number;
   onSpeechStartOffsetChange: (offset: number) => void;
   onClearHighlight: () => void;
-  translationLanguage?: TranslationLanguage;
-  onTranslationLanguageChange: (language?: TranslationLanguage) => void;
 };
-
-export type TranslationLanguage = {
-  code: string;
-  label: string;
-};
-
-export const translationLanguages: TranslationLanguage[] = [
-  { code: "ar", label: "Arabic" },
-  { code: "zh", label: "Chinese" },
-  { code: "nl", label: "Dutch" },
-  { code: "en", label: "English" },
-  { code: "fr", label: "French" },
-  { code: "de", label: "German" },
-  { code: "hi", label: "Hindi" },
-  { code: "it", label: "Italian" },
-  { code: "ja", label: "Japanese" },
-  { code: "ko", label: "Korean" },
-  { code: "pt", label: "Portuguese" },
-  { code: "ru", label: "Russian" },
-  { code: "es", label: "Spanish" },
-  { code: "tr", label: "Turkish" },
-];
 const speedOptions = [
   { label: "0.5x", value: 0.5 },
   { label: "0.75x", value: 0.75 },
@@ -105,8 +81,6 @@ export default function TTS({
   getStartOffset,
   onSpeechStartOffsetChange,
   onClearHighlight,
-  translationLanguage,
-  onTranslationLanguageChange,
 }: TTSProps) {
   const isDark = useColorScheme() === "dark";
   const styles = useMemo(() => createStyles(isDark), [isDark]);
@@ -117,18 +91,14 @@ export default function TTS({
   const [speechRate, setSpeechRate] = useState(1);
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState<number>();
   const [sleepTimerRemaining, setSleepTimerRemaining] = useState(0);
-  const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
   const detectedLanguage = useMemo(() => detectTextLanguage(text), [text]);
   const visibleVoices = useMemo(() => {
-    const allowedLanguages = new Set([
-      detectedLanguage,
-      ...(translationLanguage?.code ? [translationLanguage.code] : []),
-    ]);
+    const allowedLanguages = new Set([detectedLanguage]);
     return voices.filter((voice) =>
       allowedLanguages.has(voice.language.toLocaleLowerCase().split("-")[0]),
     );
-  }, [detectedLanguage, translationLanguage?.code, voices]);
+  }, [detectedLanguage, voices]);
 
   useEffect(() => {
     if (
@@ -144,7 +114,7 @@ export default function TTS({
     try {
       const availableVoices = await appleSpeech.getVoices();
       const qualityRank = { Premium: 0, Enhanced: 1, Default: 2 } as const;
-      const preferredLanguage = translationLanguage?.code ?? "en";
+      const preferredLanguage = detectedLanguage;
       const languageRank = (language: string) => {
         const baseLanguage = language.toLocaleLowerCase().split("-")[0];
         if (baseLanguage === preferredLanguage) return 0;
@@ -169,7 +139,7 @@ export default function TTS({
       );
       throw error;
     }
-  }, [translationLanguage?.code]);
+  }, [detectedLanguage]);
 
   useEffect(() => {
     let isMounted = true;
@@ -260,9 +230,8 @@ export default function TTS({
         Math.min(text.length, Math.floor(requestedStartOffset)),
       );
       const visibleText = text.slice(safeStartOffset).trimStart();
-      const leadingWhitespace = text
-        .slice(safeStartOffset)
-        .length - visibleText.length;
+      const leadingWhitespace =
+        text.slice(safeStartOffset).length - visibleText.length;
       const speechOffset = safeStartOffset + leadingWhitespace;
       if (!visibleText) return;
       onSpeechStartOffsetChange(speechOffset);
@@ -274,7 +243,9 @@ export default function TTS({
       setIsSpeaking(true);
     } catch (error) {
       setSpeechError(
-        error instanceof Error ? error.message : "Unable to start Apple speech.",
+        error instanceof Error
+          ? error.message
+          : "Unable to start Apple speech.",
       );
       setIsSpeaking(false);
     }
@@ -284,29 +255,35 @@ export default function TTS({
     voices.find((voice) => voice.identifier === selectedVoice)?.name ??
     "System default";
 
-  const handleSleepTimerChange = useCallback((minutes: number) => {
-    if (minutes === 0) {
-      setSleepTimerMinutes(undefined);
-      clearAppleSpeechSleepTimer();
-      setSleepTimerRemaining(0);
-      return;
-    }
-    setSleepTimerMinutes(minutes);
-    if (isSpeaking) {
-      startAppleSpeechSleepTimer(minutes);
-      setSleepTimerRemaining(minutes * 60);
-    }
-  }, [isSpeaking]);
+  const handleSleepTimerChange = useCallback(
+    (minutes: number) => {
+      if (minutes === 0) {
+        setSleepTimerMinutes(undefined);
+        clearAppleSpeechSleepTimer();
+        setSleepTimerRemaining(0);
+        return;
+      }
+      setSleepTimerMinutes(minutes);
+      if (isSpeaking) {
+        startAppleSpeechSleepTimer(minutes);
+        setSleepTimerRemaining(minutes * 60);
+      }
+    },
+    [isSpeaking],
+  );
 
-  const formatSleepTimer = useCallback((minutes: number) => {
-    if (minutes === 0) return "Off";
-    if (sleepTimerRemaining > 0 && minutes === sleepTimerMinutes) {
-      return `${Math.ceil(sleepTimerRemaining / 60)} min left`;
-    }
-    return minutes < 60
-      ? `${minutes} min`
-      : `${minutes / 60} ${minutes === 60 ? "hour" : "hours"}`;
-  }, [sleepTimerMinutes, sleepTimerRemaining]);
+  const formatSleepTimer = useCallback(
+    (minutes: number) => {
+      if (minutes === 0) return "Off";
+      if (sleepTimerRemaining > 0 && minutes === sleepTimerMinutes) {
+        return `${Math.ceil(sleepTimerRemaining / 60)} min left`;
+      }
+      return minutes < 60
+        ? `${minutes} min`
+        : `${minutes / 60} ${minutes === 60 ? "hour" : "hours"}`;
+    },
+    [sleepTimerMinutes, sleepTimerRemaining],
+  );
 
   return (
     <View className="px-4 py-4">
@@ -315,79 +292,18 @@ export default function TTS({
       </Text>
 
       <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Translated to:</Text>
-        <Pressable
-          accessibilityLabel={`Choose translation language. Current language: ${translationLanguage?.label ?? "Original"}`}
-          accessibilityRole="button"
-          onPress={() => setIsLanguageMenuOpen(true)}
-          style={({ pressed }) => [styles.picker, pressed && styles.pressed]}
-        >
-          <Text numberOfLines={1} style={styles.pickerText}>
-            {translationLanguage?.label ?? "Original"}
-          </Text>
-          <ChevronDown color={isDark ? "#F4F5F1" : "#111827"} size={20} />
-        </Pressable>
-      </View>
-      <Modal
-        animationType="fade"
-        transparent
-        visible={isLanguageMenuOpen}
-        onRequestClose={() => setIsLanguageMenuOpen(false)}
-      >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setIsLanguageMenuOpen(false)}
-        >
-          <Pressable
-            accessibilityRole="menu"
-            onPress={(event) => event.stopPropagation()}
-            style={styles.menu}
-          >
-            <Text style={styles.menuTitle}>Translate to</Text>
-            <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
-            <Pressable
-              accessibilityRole="menuitem"
-              accessibilityState={{ selected: !translationLanguage }}
-              onPress={() => {
-                onTranslationLanguageChange(undefined);
-                setIsLanguageMenuOpen(false);
-              }}
-              style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
-            >
-              <Text style={styles.menuItemText}>Original</Text>
-              {!translationLanguage && <Check size={18} color={isDark ? "#F4F5F1" : "#111827"} />}
-            </Pressable>
-            {translationLanguages.map((language) => {
-              const isSelected = language.code === translationLanguage?.code;
-
-              return (
-                <Pressable
-                  key={language.code}
-                  accessibilityRole="menuitem"
-                  accessibilityState={{ selected: isSelected }}
-                  onPress={() => {
-                    onTranslationLanguageChange(language);
-                    setIsLanguageMenuOpen(false);
-                  }}
-                  style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
-                >
-                  <Text style={styles.menuItemText}>{language.label}</Text>
-                  {isSelected && <Check size={18} color={isDark ? "#F4F5F1" : "#111827"} />}
-                </Pressable>
-              );
-            })}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">Voice:</Text>
+        <Text className="text-m text-slate-600 dark:text-[#A6ADA1]">
+          Voice:
+        </Text>
         <Pressable
           accessibilityLabel={`Choose voice. Current voice: ${selectedVoiceName}`}
           accessibilityRole="button"
           onPress={() => setIsVoiceMenuOpen(true)}
-          style={({ pressed }) => [styles.picker, styles.voicePicker, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.picker,
+            styles.voicePicker,
+            pressed && styles.pressed,
+          ]}
         >
           <Text numberOfLines={1} style={styles.pickerText}>
             {voices.length ? selectedVoiceName : "Loading voices..."}
@@ -398,16 +314,21 @@ export default function TTS({
       {voices.length > 0 && (
         <View className="mt-2 flex-row items-center justify-end gap-3">
           <Text className="text-xs text-slate-500 dark:text-[#9EA69A]">
-            {visibleVoices.length} relevant Apple voices · {visibleVoices.filter(
-              (voice) => voice.quality !== "Default",
-            ).length} high quality
+            {visibleVoices.length} relevant Apple voices ·{" "}
+            {
+              visibleVoices.filter((voice) => voice.quality !== "Default")
+                .length
+            }{" "}
+            high quality
           </Text>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Refresh installed Apple voices"
             onPress={() => void loadVoices()}
           >
-            <Text className="text-xs font-semibold text-green-700">Refresh</Text>
+            <Text className="text-xs font-semibold text-green-700">
+              Refresh
+            </Text>
           </Pressable>
         </View>
       )}
@@ -428,43 +349,56 @@ export default function TTS({
             style={styles.menu}
           >
             <Text style={styles.menuTitle}>Choose a voice</Text>
-            <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
-            <Pressable
-              accessibilityRole="menuitem"
-              accessibilityState={{ selected: !selectedVoice }}
-              onPress={() => {
-                setSelectedVoice(undefined);
-                setIsVoiceMenuOpen(false);
-              }}
-              style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+            <ScrollView
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.menuItemText}>System default</Text>
-              {!selectedVoice && <Check size={18} color={isDark ? "#F4F5F1" : "#111827"} />}
-            </Pressable>
+              <Pressable
+                accessibilityRole="menuitem"
+                accessibilityState={{ selected: !selectedVoice }}
+                onPress={() => {
+                  setSelectedVoice(undefined);
+                  setIsVoiceMenuOpen(false);
+                }}
+                style={({ pressed }) => [
+                  styles.menuItem,
+                  pressed && styles.menuItemPressed,
+                ]}
+              >
+                <Text style={styles.menuItemText}>System default</Text>
+                {!selectedVoice && (
+                  <Check size={18} color={isDark ? "#F4F5F1" : "#111827"} />
+                )}
+              </Pressable>
 
-            {visibleVoices.map((voice) => {
-              const isSelected = voice.identifier === selectedVoice;
+              {visibleVoices.map((voice) => {
+                const isSelected = voice.identifier === selectedVoice;
 
-              return (
-                <Pressable
-                  key={voice.identifier}
-                  accessibilityRole="menuitem"
-                  onPress={() => {
-                    setSelectedVoice(voice.identifier);
-                    setIsVoiceMenuOpen(false);
-                  }}
-                  style={({ pressed }) => [styles.voiceMenuItem, pressed && styles.menuItemPressed]}
-                >
-                  <View style={styles.voiceDetails}>
-                    <Text style={styles.menuItemText}>{voice.name}</Text>
-                    <Text style={styles.menuItemDescription}>
-                      {voice.language} · {voice.quality}
-                    </Text>
-                  </View>
-                  {isSelected && <Check size={18} color={isDark ? "#F4F5F1" : "#111827"} />}
-                </Pressable>
-              );
-            })}
+                return (
+                  <Pressable
+                    key={voice.identifier}
+                    accessibilityRole="menuitem"
+                    onPress={() => {
+                      setSelectedVoice(voice.identifier);
+                      setIsVoiceMenuOpen(false);
+                    }}
+                    style={({ pressed }) => [
+                      styles.voiceMenuItem,
+                      pressed && styles.menuItemPressed,
+                    ]}
+                  >
+                    <View style={styles.voiceDetails}>
+                      <Text style={styles.menuItemText}>{voice.name}</Text>
+                      <Text style={styles.menuItemDescription}>
+                        {voice.language} · {voice.quality}
+                      </Text>
+                    </View>
+                    {isSelected && (
+                      <Check size={18} color={isDark ? "#F4F5F1" : "#111827"} />
+                    )}
+                  </Pressable>
+                );
+              })}
             </ScrollView>
           </Pressable>
         </Pressable>
@@ -541,74 +475,75 @@ export default function TTS({
   );
 }
 
-const createStyles = (isDark: boolean) => StyleSheet.create({
-  pressed: { opacity: 0.65 },
-  picker: {
-    alignItems: "center",
-    borderColor: isDark ? "#42483F" : "#E2E0DB",
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: "row",
-    height: 40,
-    justifyContent: "space-between",
-    maxWidth: "62%",
-    minWidth: 150,
-    paddingHorizontal: 12,
-  },
-  voicePicker: { maxWidth: 256 },
-  pickerText: {
-    color: isDark ? "#F4F5F1" : "#17202B",
-    flexShrink: 1,
-    fontSize: 14,
-    marginRight: 8,
-  },
-  modalBackdrop: {
-    alignItems: "center",
-    backgroundColor: "rgba(15, 23, 42, 0.28)",
-    flex: 1,
-    justifyContent: "center",
-    padding: 24,
-  },
-  menu: {
-    backgroundColor: isDark ? "#1A1E18" : "#FFFEFC",
-    borderRadius: 20,
-    maxHeight: "68%",
-    padding: 8,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 24,
-    width: "100%",
-  },
-  menuTitle: {
-    color: isDark ? "#F4F5F1" : "#111827",
-    fontSize: 20,
-    fontWeight: "600",
-    padding: 14,
-  },
-  menuItem: {
-    alignItems: "center",
-    borderRadius: 12,
-    flexDirection: "row",
-    height: 50,
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-  },
-  voiceMenuItem: {
-    alignItems: "center",
-    borderRadius: 12,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    minHeight: 56,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  menuItemPressed: { backgroundColor: isDark ? "#2A3027" : "#F3F2EF" },
-  menuItemText: { color: isDark ? "#F4F5F1" : "#111827", fontSize: 17 },
-  menuItemDescription: {
-    color: isDark ? "#9EA69A" : "#64748B",
-    fontSize: 12,
-    marginTop: 2,
-  },
-  voiceDetails: { flexShrink: 1, marginRight: 12 },
-});
+const createStyles = (isDark: boolean) =>
+  StyleSheet.create({
+    pressed: { opacity: 0.65 },
+    picker: {
+      alignItems: "center",
+      borderColor: isDark ? "#42483F" : "#E2E0DB",
+      borderRadius: 8,
+      borderWidth: 1,
+      flexDirection: "row",
+      height: 40,
+      justifyContent: "space-between",
+      maxWidth: "62%",
+      minWidth: 150,
+      paddingHorizontal: 12,
+    },
+    voicePicker: { maxWidth: 256 },
+    pickerText: {
+      color: isDark ? "#F4F5F1" : "#17202B",
+      flexShrink: 1,
+      fontSize: 14,
+      marginRight: 8,
+    },
+    modalBackdrop: {
+      alignItems: "center",
+      backgroundColor: "rgba(15, 23, 42, 0.28)",
+      flex: 1,
+      justifyContent: "center",
+      padding: 24,
+    },
+    menu: {
+      backgroundColor: isDark ? "#1A1E18" : "#FFFEFC",
+      borderRadius: 20,
+      maxHeight: "68%",
+      padding: 8,
+      shadowColor: "#000000",
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.2,
+      shadowRadius: 24,
+      width: "100%",
+    },
+    menuTitle: {
+      color: isDark ? "#F4F5F1" : "#111827",
+      fontSize: 20,
+      fontWeight: "600",
+      padding: 14,
+    },
+    menuItem: {
+      alignItems: "center",
+      borderRadius: 12,
+      flexDirection: "row",
+      height: 50,
+      justifyContent: "space-between",
+      paddingHorizontal: 14,
+    },
+    voiceMenuItem: {
+      alignItems: "center",
+      borderRadius: 12,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      minHeight: 56,
+      paddingHorizontal: 14,
+      paddingVertical: 7,
+    },
+    menuItemPressed: { backgroundColor: isDark ? "#2A3027" : "#F3F2EF" },
+    menuItemText: { color: isDark ? "#F4F5F1" : "#111827", fontSize: 17 },
+    menuItemDescription: {
+      color: isDark ? "#9EA69A" : "#64748B",
+      fontSize: 12,
+      marginTop: 2,
+    },
+    voiceDetails: { flexShrink: 1, marginRight: 12 },
+  });

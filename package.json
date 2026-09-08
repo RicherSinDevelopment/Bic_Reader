@@ -12,11 +12,14 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test": "jest --runInBand",
+    "test:coverage": "jest --runInBand --coverage",
+    "test:e2e": "maestro test .maestro/guest-library.yaml",
+    "test:e2e:guest": "maestro test .maestro/guest-library.yaml",
+    "test:e2e:reader": "maestro test .maestro/reader-transitions.yaml",
     "test:anchor": "jest --runInBand __tests__/anchor",
     "test:anchor:coverage": "jest --runInBand __tests__/anchor --coverage"
   },
   "dependencies": {
-    "@bsky.app/expo-translate-text": "^0.2.9",
     "@expo-google-fonts/lato": "^0.4.1",
     "@expo-google-fonts/source-sans-3": "^0.4.1",
     "@expo/html-elements": "^0.12.5",
@@ -105,14 +108,18 @@
     "collectCoverageFrom": [
       "architecture/anchor/**/*.{ts,tsx}",
       "architecture/HorizontalSwipFlip.tsx",
-      "architecture/FindWordInOtherTab.tsx"
+      "architecture/FindWordInOtherTab.tsx",
+      "database/readerPositionRepository.{ts,tsx}",
+      "lib/{auth-deep-link,authNavigation}.{ts,tsx}",
+      "services/{accountDeletionService,cloudConflictPolicy,guestLibraryMigration,incomingPdfService,pdfImportService,revenueCatIdentity}.{ts,tsx}",
+      "components/errors/AppErrorBoundary.tsx",
+      "supabase/functions/_shared/{aiPolicy,securityPolicy}.ts"
     ]
   },
   "expo": {
     "doctor": {
       "reactNativeDirectoryCheck": {
         "exclude": [
-          "@bsky.app/expo-translate-text",
           "bic-pdf-reader",
           "react-native-nitro-google-signin",
           "react-native-pdf-thumbnail"

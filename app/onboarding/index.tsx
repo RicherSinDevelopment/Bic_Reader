@@ -5,9 +5,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { completeOnboarding } from "@/lib/onboarding";
 
 export default function WelcomeOnboardingScreen() {
-  const openSignIn = () => {
+  const continueAsGuest = () => {
     completeOnboarding();
-    router.replace("/(auth)/sign-in");
+    router.replace("/HomePage");
   };
   const openNextStep = () => router.push("/onboarding/comfortable");
 
@@ -26,7 +26,7 @@ export default function WelcomeOnboardingScreen() {
             accessibilityRole="button"
             accessibilityLabel="Skip onboarding"
             hitSlop={12}
-            onPress={openSignIn}
+            onPress={continueAsGuest}
             style={({ pressed }) => [styles.skipButton, pressed && styles.pressed]}
           >
             <Text style={styles.skipText}>Skip</Text>

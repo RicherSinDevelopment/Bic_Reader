@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import * as Linking from 'expo-linking';
-import { Link, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { Eye, EyeOff, LockKeyhole, Mail, UserRound } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import {
@@ -18,6 +18,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
+import {
+  authReturnTarget,
+  authRoute,
+  destinationAfterAuth,
+} from '@/lib/authNavigation';
 
 const logo = require('../../assets/images/Bicreaderlogo-large.png');
 
@@ -30,6 +35,8 @@ export default function SignUp() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const router = useRouter();
+  const params = useLocalSearchParams<{ returnTo?: string | string[] }>();
+  const returnTo = authReturnTarget(params.returnTo);
   const isDark = useColorScheme() === 'dark';
   const styles = useMemo(() => createStyles(isDark), [isDark]);
 
@@ -45,7 +52,9 @@ export default function SignUp() {
       email: email.trim(),
       password,
       options: {
-        emailRedirectTo: Linking.createURL('auth/callback'),
+        emailRedirectTo: Linking.createURL('auth/callback', {
+          queryParams: returnTo ? { returnTo } : undefined,
+        }),
         data: { full_name: name.trim() },
       },
     });
@@ -58,7 +67,7 @@ export default function SignUp() {
     }
 
     if (data.session) {
-      router.replace('/HomePage');
+      router.replace(destinationAfterAuth(returnTo));
       return;
     }
 
@@ -178,11 +187,15 @@ export default function SignUp() {
               {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
             </View>
 
-            <SocialAuthButtons disabled={isSubmitting} onError={setErrorMessage} />
+            <SocialAuthButtons
+              disabled={isSubmitting}
+              onError={setErrorMessage}
+              returnTo={returnTo}
+            />
 
             <View style={styles.switchRow}>
               <Text style={styles.switchText}>Already have an account?</Text>
-              <Link href="/(auth)/sign-in" asChild>
+              <Link href={authRoute('/(auth)/sign-in', returnTo)} asChild>
                 <Pressable hitSlop={8}>
                   <Text style={styles.switchLink}>Sign in</Text>
                 </Pressable>

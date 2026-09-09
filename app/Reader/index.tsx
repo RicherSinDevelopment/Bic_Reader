@@ -1182,7 +1182,7 @@ function ReaderScreenContent() {
   );
 
   const readerChapters = useMemo<ReaderChapter[]>(() => {
-    const pageMap = activeTab === "reader" ? readerChapterPageMap : null;
+    const pageMap = activeTab === "reader" && readerTransition === "pager" ? readerChapterPageMap : null;
     const convert = (
       items: PdfOutlineItem[],
       path = "outline",
@@ -1198,7 +1198,7 @@ function ReaderScreenContent() {
         };
       });
     return convert(pdfOutline);
-  }, [activeTab, pdfOutline, readerChapterPageMap]);
+  }, [activeTab, pdfOutline, readerChapterPageMap, readerTransition]);
 
   const updateReaderChapterPageMap = useCallback(
     (
@@ -1229,12 +1229,32 @@ function ReaderScreenContent() {
 
   const handleReaderPagination = useCallback(
     (current: number, total: number) => {
+      // Generated pagination belongs exclusively to the horizontal pager. The
+      // pager can finish an async repagination while it is being unmounted;
+      // accepting that late callback after returning to scroll mode makes its
+      // generated total replace the PDF's source-page total.
+      if (readerTransition !== "pager") return;
       setReaderDisplayCurrentPage(current);
       setReaderDisplayPageCount(total);
 
     },
-    [],
+    [readerTransition],
   );
+
+  useEffect(() => {
+    if (readerTransition === "pager") return;
+
+    // Scroll mode is indexed by original PDF pages, never the generated pages
+    // used by the horizontal reader. Reset all horizontal-only presentation
+    // state immediately, rather than waiting for the vertical WebView to send
+    // its first status message.
+    const sourcePageTotal = readerPageCount || pdf?.totalPages || 0;
+    setReaderDisplayPageCount(sourcePageTotal);
+    setReaderDisplayCurrentPage((current) =>
+      Math.max(1, Math.min(current, sourcePageTotal || 1)),
+    );
+    setReaderChapterPageMap({});
+  }, [pdf?.totalPages, readerPageCount, readerTransition]);
   const handleReaderExplicitPageResolved = useCallback(
     (
       sourcePage: number,
@@ -1271,10 +1291,14 @@ function ReaderScreenContent() {
   );
   const visiblePage = activeTab === "original"
     ? originalCurrentPage
-    : canonicalAnchor?.sourcePage ?? readerCurrentPage;
+    : readerTransition === "pager"
+      ? readerDisplayCurrentPage
+      : canonicalAnchor?.sourcePage ?? readerCurrentPage;
   const visiblePageCount = activeTab === "original"
     ? originalPageCount || pdf?.totalPages || readerPageCount
-    : readerPageCount || pdf?.totalPages || 0;
+    : readerTransition === "pager"
+      ? readerDisplayPageCount
+      : readerPageCount || pdf?.totalPages || 0;
   const navigationCurrentPage =
     activeTab === "original"
       ? originalCurrentPage
@@ -1683,6 +1707,11 @@ function ReaderScreenContent() {
 
       {rotationMaskVisible && (
         <View
+          style={{
+            position: "absolute", top: 0, right: 0, bottom: 0, left: 0,
+            zIndex: 1000, elevation: 1000,
+            backgroundColor: isDark ? "#151814" : "#F7F5EC",
+          }}
           accessibilityLabel="Keeping your reading place"
           accessibilityLiveRegion="polite"
           className="absolute inset-0 z-[1000] items-center justify-center bg-[#F7F5EC] px-8 dark:bg-[#151814]"

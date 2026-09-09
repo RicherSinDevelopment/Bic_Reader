@@ -191,3 +191,21 @@ Added regression tests exercise 1,000 guide movements in each of three viewport 
 Additional changed files: `architecture/ReaderGuideDimming.ts`, `components/ReaderView.tsx`, `components/OriginalPDF.ios.tsx`, `app/Reader/index.tsx`, `__tests__/reader-guide-memory.test.ts`, `__tests__/anchor/original-pdf-lifecycle.test.tsx`, and this report.
 
 Validation for the memory fix: the full suite passed **89 tests in 21 suites**, including guide paint-bound stress tests and the native-PDF lifecycle test. Reload the app fully from Metro and look for `[Reader Runtime]` with `version: bounded-guide-20260909` before repeating the device scenario. No native dependency or binary change is required for these fixes. The post-fix rotation/switching sequence has not yet been manually reproduced on the iPhone.
+
+## Horizontal pager regression follow-up
+
+The added per-page paint/spinner gate was removed. Startup already hides the reader until readiness/restoration completes; making readiness depend on paint frames in that hidden WebView creates a circular dependency. Native load completion again supplies layout readiness. There is one screen-owned rotation cover, and the reader surface no longer fades to 55% opacity (which exposed the PDF underneath). Reader bounds clip intermediate native layout content.
+
+Pager navigation now compares its measured safe-area width with its committed pagination width, rather than comparing that width with the full screen. A destination delivered during a resize waits for the coalesced layout and clears the pending viewport restoration flag when applied. User swipes notify the existing navigation controller, and clearing the destination does not repaginate or issue duplicate position corrections. Word boundaries are retained for page-picker navigation.
+
+Layout events that return to the existing dimensions cancel queued intermediate resizes. Previously such events returned without cancelling the timer, allowing a stale narrow/short viewport to drive page totals and suppress scrolling. The exact reported 8,000-page total has not been reproduced with the user's document; lifecycle tests verify stable totals when returning to the same dimensions and no stale viewport installation after a cancelled rotation. Generated totals still legitimately depend on typography and orientation.
+
+The new component lifecycle tests exercise native load readiness, safe-area swipes, TOC jumps across reflow, destination clearing, page-picker consistency, and cancelled rotations. Native FlatList/WebView events are simulated; actual iPhone rendering and rotation smoothness still require device verification.
+
+## Handoff, TOC, and displayed page numbers
+
+A delayed-native-viewability lifecycle test reproduced a handoff to source page 20 being overwritten by the first measured layout restoring source page 1. The pending programmatic word now outranks the initial visible-page observation during resizing. A destination arriving during the resize debounce also retains its own boundary instead of accepting the earlier viewport snapshot. User drags still release programmatic ownership.
+
+Horizontal mode now uses generated current/total pages in both the header and TOC; vertical and Original continue to use PDF source pages. TOC page-top commands retain existing pagination boundaries, so selecting a chapter does not change the page numbering that was just displayed. A missing target source page remains pending rather than falling through to the next extracted source page.
+
+TOC parent rows now navigate on the first tap. Their separate, labelled expand/collapse button controls child sections. Component tests cover both actions independently, alongside handoff timing before native viewability and during resize, stable chapter page mapping, and delivery after missing extraction arrives. These tests simulate native events and do not replace a physical iPhone interaction run.

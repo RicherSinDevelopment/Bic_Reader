@@ -38,7 +38,6 @@ import React, {
 } from "react";
 import {
   Animated,
-  Easing,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -319,8 +318,6 @@ const ReaderView = ({
 }: ReaderViewProps) => {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const readerSafeAreaInsets = useSafeAreaInsets();
-  const readerResizeOpacity = useRef(new Animated.Value(1)).current;
-  const previousWindowWidth = useRef(windowWidth);
   const db = useSQLiteContext();
   const isDark = useColorScheme() === "dark";
   const { isPremium } = useRevenueCat();
@@ -567,37 +564,12 @@ const ReaderView = ({
     transition,
   });
 
-  // Fade the mask back in only once the pager has committed its repaginated
-  // layout. A shallow hold is kept during the (coalesced) repagination; a
-  // fallback timer guards against the pager not remounting.
+  // The screen owns the opaque rotation cover. Fading this whole subtree
+  // also faded its backgrounds and exposed the hidden PDF underneath.
   const handlePagerViewportSettled = useCallback(() => {
-    readerResizeOpacity.stopAnimation();
-    Animated.timing(readerResizeOpacity, {
-      toValue: 1,
-      duration: 160,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start();
     onVerticalRotationSettled?.();
-  }, [onVerticalRotationSettled, readerResizeOpacity]);
+  }, [onVerticalRotationSettled]);
 
-  useLayoutEffect(() => {
-    if (Math.abs(previousWindowWidth.current - windowWidth) < 1) return;
-    previousWindowWidth.current = windowWidth;
-    readerResizeOpacity.stopAnimation();
-    // The vertical WebView reflows natively; a mask would only dim it for no
-    // reason. Only the pager (which remounts and repaginates) needs masking.
-    if (!isPaged) {
-      readerResizeOpacity.setValue(1);
-      return;
-    }
-    readerResizeOpacity.setValue(0.55);
-    const fallback = setTimeout(() => {
-      readerResizeOpacity.stopAnimation();
-      readerResizeOpacity.setValue(1);
-    }, 900);
-    return () => clearTimeout(fallback);
-  }, [isPaged, readerResizeOpacity, windowWidth]);
   // Cross-layout location is supplied by TransitionController through the
   // renderer adapter. ReaderView no longer invents a second handoff anchor.
   const activeModeDestination = destination;
@@ -2926,7 +2898,7 @@ const ReaderView = ({
         {/* HTML READER */}
         {/* ========================= */}
 
-        <Animated.View style={{ flex: 1, opacity: readerResizeOpacity }}>
+        <Animated.View style={{ flex: 1, backgroundColor, overflow: "hidden" }}>
           <SafeAreaView
             edges={isLandscape ? ["left", "right"] : []}
             style={{
@@ -3033,7 +3005,10 @@ const ReaderView = ({
                       if (!readerGuideMode) showToolbar();
                     }}
                     onReady={() => onReady?.("layout")}
-                    onSwipeStart={hideToolbar}
+                    onSwipeStart={() => {
+                      onUserInteraction?.();
+                      hideToolbar();
+                    }}
                     onViewportSettled={handlePagerViewportSettled}
                   />
                 </View>

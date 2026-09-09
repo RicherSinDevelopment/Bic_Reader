@@ -83,10 +83,6 @@ export default function ThreeLinesButton({
           accessibilityRole="button"
           accessibilityLabel={`${chapter.title}, page ${chapter.page}`}
           onPress={() => {
-            if (hasChildren && !isExpanded) {
-              setExpandedChapterIds((current) => [...current, chapter.id]);
-              return;
-            }
             setShowDrawer(false);
             requestAnimationFrame(() => onGoToChapter?.(chapter));
           }}
@@ -106,12 +102,27 @@ export default function ThreeLinesButton({
             {chapter.title}
           </Text>
           <Text className="text-xs text-black/45 dark:text-white/45">{chapter.page}</Text>
-          {hasChildren &&
-            (isExpanded ? (
+          {hasChildren && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} ${chapter.title}`}
+              accessibilityState={{ expanded: isExpanded }}
+              hitSlop={8}
+              style={{ padding: 8 }}
+              onPress={(event) => {
+                event.stopPropagation();
+                setExpandedChapterIds((current) => isExpanded
+                  ? current.filter((id) => id !== chapter.id)
+                  : [...current, chapter.id]);
+              }}
+            >
+            {isExpanded ? (
               <ChevronDown size={16} color={isDark ? "#A6ADA1" : "#64748b"} />
             ) : (
               <ChevronRight size={16} color={isDark ? "#A6ADA1" : "#64748b"} />
-            ))}
+            )}
+            </Pressable>
+          )}
         </Pressable>
       );
     },

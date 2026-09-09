@@ -888,6 +888,7 @@ function ReaderScreenContent() {
                 setActiveTab("original");
               },
               currentPage: () => originalCurrentPageRef.current,
+              isTransitionCurrent: (id: number) => transitionController.isCurrent(id),
             })
           : targetLayout === "horizontal"
             ? createHorizontalAnchorAdapter(readerPorts, {
@@ -1285,7 +1286,7 @@ function ReaderScreenContent() {
     ? originalCurrentPage
     : readerTransition === "pager"
       ? readerDisplayCurrentPage
-      : canonicalAnchor?.sourcePage ?? readerCurrentPage;
+      : readerCurrentPage;
   const visiblePageCount = activeTab === "original"
     ? originalPageCount || pdf?.totalPages || readerPageCount
     : readerTransition === "pager"

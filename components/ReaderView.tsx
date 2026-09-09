@@ -4311,7 +4311,6 @@ const ReaderView = ({
 
               let scrollTimer = null;
               let pruneTimer = null;
-              let anchorTimer = null;
               // Track the last stable scroll position + document height so an
               // orientation change can re-anchor the reading position after the
               // text reflows (WebKit preserves the pixel scroll offset, which
@@ -4340,9 +4339,9 @@ const ReaderView = ({
                     clearReaderSwitchHighlight();
                   }
 
-                  // Keep the native scroll handler light. Viewport/page updates
-                  // can be sampled during motion, but finding an exact word
-                  // creates many DOM ranges and must wait until the user pauses.
+                  // Sample the bounded viewport probe during motion so the live
+                  // word, page counter and delivery window stay current. Bookmark
+                  // persistence remains debounced separately in useReaderAnchor.
                   if (!scrollTimer) {
                     scrollTimer = setTimeout(
                       function() {
@@ -4359,11 +4358,7 @@ const ReaderView = ({
                           })
                         );
 
-                        clearTimeout(anchorTimer);
-                        anchorTimer = setTimeout(function() {
-                          reportSwitchAnchor();
-                          anchorTimer = null;
-                        }, 180);
+                        reportSwitchAnchor();
 
                         clearTimeout(pruneTimer);
                         pruneTimer = setTimeout(function() {

@@ -227,3 +227,34 @@ Vertical word restoration resolves source character offsets across annotation sp
 Original highlights use the pending destination instead of briefly applying the previous canonical word. PDFKit highlight commands wait for a measured viewport and reapply for a new request or changed viewport dimensions. Passive native page changes cannot overwrite the saved return word; page-based changes to that return anchor require a user interaction. No native dependency or PDFKit binary patch was added.
 
 Validation: 119 tests passed in 28 suites, TypeScript passed, both reader script bodies parsed, and lint reported only the six existing horizontal-pager warnings. Added coverage includes repeated words, conflicting offset/progress metadata, annotation-split words, soft hyphens, initial toolbar alignment, viewport-driven PDFKit reapplication, and stale horizontal viewability events. These are simulated renderer tests; post-change visual checks on the physical iPhone remain outstanding.
+
+### Live vertical scroll reporting
+
+Audit found that vertical scroll events only reported their exact word after
+180 ms without another sample, and the vertical header preferred the separately
+debounced canonical bookmark. Continuous scrolling therefore left both the
+visible source-page counter and the delivery window behind the viewport.
+
+The existing 80 ms scroll sample now reports the bounded viewport word directly;
+the header uses the resulting live source page. Bookmark persistence retains its
+existing debounce, and navigation/rotation suppression remains in place. No new
+page-only navigation or restoration path was added. Regression tests execute the
+shipped listener with continuous motion, a pause/reverse gesture, burst events,
+and navigation/rotation suppression. Physical iPhone scrolling still needs
+verification; these tests do not establish native momentum behavior.
+
+### Repeated horizontal tab handoff timeout
+
+The reported ~5.3-second failures match two 2.5-second verification windows.
+Pager confirmation compared page arrays by reference, while FlatList keyed cells
+only by generated page number. A rebuilt but identical page could therefore be
+rejected without another viewability event. Confirmation now compares source
+segments, offsets and text; cell keys include source segment boundaries so a
+changed page gets a distinct identity. Different content still cannot verify a
+handoff. Exact-word verification and timeout limits remain unchanged.
+
+Original verification now waits for its asynchronous native page acknowledgement
+(with cancellation and a bounded timeout), rather than failing immediately after
+issuing the destination. Tests cover delayed acknowledgement, repeated unchanged
+pager destinations, and rejection of different content. Device confirmation is
+still needed for the reported sequence.

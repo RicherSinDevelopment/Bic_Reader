@@ -968,6 +968,21 @@ function pageIndexForAnchor(pages: Segment[][], anchor?: PageAnchor) {
   return horizontalPageForFlipAnchor(pages, anchor);
 }
 
+// FlatList may retain viewability tokens when the same content is rebuilt.
+function renderedPageKey(page: Segment[]) {
+  return JSON.stringify(page.map(({ blockId, startOffset, text }) => [blockId, startOffset, text.length]));
+}
+function sameRenderedPage(page: Segment[] | undefined, visible: Segment[] | undefined) {
+  if (!page || !visible) return false;
+  return page === visible || (
+    page.length === visible.length && page.every((segment, index) =>
+      segment.blockId === visible[index].blockId &&
+      segment.startOffset === visible[index].startOffset &&
+      segment.text === visible[index].text,
+    )
+  );
+}
+
 export default function HorizontalReaderPager({
   blocks,
   isActive = true,
@@ -1248,7 +1263,7 @@ export default function HorizontalReaderPager({
   );
 
   useEffect(() => {
-    if (viewportSettling || !viewablePage || pages[viewablePage.index] !== viewablePage.item ||
+    if (viewportSettling || !viewablePage || !sameRenderedPage(pages[viewablePage.index], viewablePage.item) ||
         programmaticDestinationPageRef.current !== viewablePage.index) return;
     // A visible item from an older pagination cannot confirm the new command.
     // Report its rendered first word, never substitute the requested word.
@@ -2348,7 +2363,7 @@ export default function HorizontalReaderPager({
         showsHorizontalScrollIndicator={false}
         onViewableItemsChanged={onViewablePagesChanged}
         viewabilityConfig={pageViewabilityConfig}
-        keyExtractor={(_, pageIndex) => `reader-page-${pageIndex}`}
+        keyExtractor={(page, pageIndex) => `reader-page-${pageIndex}:${renderedPageKey(page)}`}
         getItemLayout={(_, pageIndex) => ({
           index: pageIndex,
           length: width,

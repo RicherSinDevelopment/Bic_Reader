@@ -213,10 +213,28 @@ test('a stale native viewability item cannot confirm a repaginated destination',
   const onPageChange = jest.fn();
   const destination = { page: 20, blockId: 'block-19', switchHighlightOffset: 200, nonce: 500 };
   act(() => { tree = create(<HorizontalReaderPager {...defaults} onPageChange={onPageChange} destination={destination} />); });
-  const oldPages = list().props.data;
   layout(756, 390);
-  const index = list().props.initialScrollIndex;
+  const index = onPageChange.mock.calls.at(-1)[0] - 1;
+  const currentItem = list().props.data[index];
+  const staleItem = currentItem.map((segment: any, i: number) => i === 0
+    ? { ...segment, startOffset: segment.startOffset - 10 } : segment);
+  expect(list().props.keyExtractor(staleItem, index)).not.toBe(list().props.keyExtractor(currentItem, index));
   onPageChange.mockClear();
-  act(() => list().props.onViewableItemsChanged({ viewableItems: [{ index, isViewable: true, item: oldPages[index] }] }));
+  act(() => list().props.onViewableItemsChanged({ viewableItems: [{ index, isViewable: true, item: staleItem }] }));
   expect(onPageChange).not.toHaveBeenCalled();
+});
+
+test('an unchanged visible page confirms a repeated handoff without a new viewability event', () => {
+  const onPageChange = jest.fn();
+  const destination = { page: 20, blockId: 'block-19', switchHighlightOffset: 200, nonce: 600 };
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} destination={destination} onPageChange={onPageChange} />); });
+  layout(756, 390);
+  const index = onPageChange.mock.calls.at(-1)[0] - 1;
+  const visible = list().props.data[index].map((segment: any) => ({ ...segment }));
+  mockDelayViewability = true;
+  act(() => list().props.onViewableItemsChanged({ viewableItems: [{ index, isViewable: true, item: visible }] }));
+  onPageChange.mockClear();
+  act(() => tree.update(<HorizontalReaderPager {...defaults} destination={{ ...destination, nonce: 601 }} onPageChange={onPageChange} />));
+  expect(onPageChange).toHaveBeenCalled();
+  expect(onPageChange.mock.calls.at(-1)[3]).toMatchObject({ blockId: 'block-19', blockOffset: 200 });
 });

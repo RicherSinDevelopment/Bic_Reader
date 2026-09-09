@@ -91,7 +91,7 @@ test('TOC commands reach their source page after reflow and page count returns a
 
 test('clearing a consumed word destination and using the page picker preserve the current pagination', () => {
   const onPageChange = jest.fn();
-  const destination = { page: 10, blockId: 'block-9', switchHighlightOffset: 195, nonce: 4 };
+  const destination = { page: 10, blockId: 'block-9', switchHighlightOffset: 200, nonce: 4 };
   act(() => { tree = create(<HorizontalReaderPager {...defaults} destination={destination} onPageChange={onPageChange} />); });
   layout(756, 390);
   const pages = list().props.data;
@@ -118,29 +118,29 @@ test('a handoff arriving before native viewability survives the first measured l
   const onPageChange = jest.fn();
   act(() => { tree = create(<HorizontalReaderPager {...defaults} onPageChange={onPageChange} />); });
   mockDelayViewability = true;
-  const destination = { page: 20, blockId: 'block-19', switchHighlightOffset: 195, nonce: 99 };
+  const destination = { page: 20, blockId: 'block-19', switchHighlightOffset: 200, nonce: 99 };
   act(() => tree.update(<HorizontalReaderPager {...defaults} onPageChange={onPageChange} destination={destination} />));
   layout(756, 390);
   const props = list().props;
   expect(props.data[props.initialScrollIndex][0].blockId).toBe('block-19');
-  expect(props.data[props.initialScrollIndex][0].startOffset).toBe(195);
+  expect(props.data[props.initialScrollIndex][0].startOffset).toBe(200);
 });
 
 test('a handoff delivered during a queued resize keeps its exact word boundary', () => {
   act(() => { tree = create(<HorizontalReaderPager {...defaults} />); });
   const root = tree.root.findAll((node: any) => node.props.onLayout && node.props.onTouchStart)[0];
   act(() => root.props.onLayout({ nativeEvent: { layout: { width: 756, height: 390 } } }));
-  const destination = { page: 20, blockId: 'block-19', switchHighlightOffset: 195, nonce: 100 };
+  const destination = { page: 20, blockId: 'block-19', switchHighlightOffset: 200, nonce: 100 };
   act(() => tree.update(<HorizontalReaderPager {...defaults} destination={destination} />));
   act(() => jest.advanceTimersByTime(100));
   const props = list().props;
   expect(props.data[props.initialScrollIndex][0].blockId).toBe('block-19');
-  expect(props.data[props.initialScrollIndex][0].startOffset).toBe(195);
+  expect(props.data[props.initialScrollIndex][0].startOffset).toBe(200);
 });
 
 test('a TOC jump preserves the page numbering already displayed in the outline', () => {
   const onPageChange = jest.fn();
-  const destination = { page: 10, blockId: 'block-9', switchHighlightOffset: 195, nonce: 101 };
+  const destination = { page: 10, blockId: 'block-9', switchHighlightOffset: 200, nonce: 101 };
   act(() => { tree = create(<HorizontalReaderPager {...defaults} destination={destination} onPageChange={onPageChange} />); });
   layout(756, 390);
   const pages = list().props.data;
@@ -159,4 +159,52 @@ test('TOC waits for the requested source page instead of consuming a later extra
   expect(onPageChange).not.toHaveBeenCalled();
   act(() => tree.update(<HorizontalReaderPager {...defaults} destination={destination} onPageChange={onPageChange} />));
   expect(onPageChange.mock.calls.at(-1)[2]).toBe(20);
+});
+
+test('font and spacing changes keep the first visible word with a consumed destination', () => {
+  const destination = { page: 20, blockId: 'block-19', switchHighlightOffset: 200, nonce: 110 };
+  const onPageChange = jest.fn();
+  let props = { ...defaults, destination, onPageChange };
+  act(() => { tree = create(<HorizontalReaderPager {...props} />); });
+  layout(756, 390);
+  for (const fontSize of [30, 14, 24, 18]) {
+    props = { ...props, fontSize, lineHeight: fontSize === 14 ? 1.8 : 1.4, paragraphSpacing: 1.2 };
+    act(() => tree.update(<HorizontalReaderPager {...props} />));
+    const last = onPageChange.mock.calls.at(-1);
+    const first = list().props.data[last[0] - 1][0];
+    expect(first.blockId).toBe('block-19');
+    expect(first.startOffset).toBe(200);
+  }
+});
+
+test('measured overflow moves the remaining text to the next page without changing the first word', () => {
+  const onPageChange = jest.fn();
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} onPageChange={onPageChange} />); });
+  layout(756, 390);
+  const before = list().props.data;
+  const web = tree.root.findByType('NativeWebView');
+  act(() => web.props.onLoadEnd());
+  // The page component receives the geometry generation used by its WebView.
+  const page = tree.root.findAll((node: any) => node.props.layoutKey && node.props.onOverflow)[0];
+  act(() => web.props.onMessage({ nativeEvent: { data: JSON.stringify({
+    type: 'horizontalPageOverflow', layoutKey: page.props.layoutKey, blockId: 'block-0', blockOffset: 200,
+  }) } }));
+  const after = list().props.data;
+  expect(after[0][0].startOffset).toBe(0);
+  expect(after[1][0].startOffset).toBe(200);
+  expect(after.flat().map((segment: any) => segment.text).join(' ').replace(/\s+/g, ' '))
+    .toBe(before.flat().map((segment: any) => segment.text).join(' ').replace(/\s+/g, ' '));
+});
+
+test('typography changes after a manual swipe preserve that page, not the old destination', () => {
+  const onPageChange = jest.fn();
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} onPageChange={onPageChange} />); });
+  layout(756, 390);
+  act(() => list().props.onScrollBeginDrag({ nativeEvent: { contentOffset: { x: 0 } } }));
+  act(() => list().props.onScroll({ nativeEvent: { contentOffset: { x: 756 * 4 } } }));
+  const anchor = onPageChange.mock.calls.at(-1)[3];
+  act(() => tree.update(<HorizontalReaderPager {...defaults} fontSize={32} lineHeight={1.8} onPageChange={onPageChange} />));
+  const first = list().props.data[onPageChange.mock.calls.at(-1)[0] - 1][0];
+  expect(first.blockId).toBe(anchor.blockId);
+  expect(first.startOffset).toBe(anchor.blockOffset);
 });

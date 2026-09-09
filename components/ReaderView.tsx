@@ -671,6 +671,9 @@ const ReaderView = ({
     // Horizontal mode unmounts the vertical WebView. Reset its delivery
     // bookkeeping at the same time so a fresh vertical WebView receives every
     // block again instead of mistaking its initial batch for the whole book.
+    // Returning from the pager is a normal mount, not crash recovery. Calling
+    // it recovery would start a second restore over the layout handoff.
+    hasCompletedInitialWebViewLoad.current = false;
     setWebViewReady(false);
     appendedBlockCount.current = initialBlocks.length;
     sentBlockIds.current = new Set(initialBlocks.map((block) => block.id));
@@ -1692,11 +1695,14 @@ const ReaderView = ({
         }
         const removedPages = [];
         const visibleSection = viewportAnchor?.closest?.('[data-source-page-section]');
+        const visiblePage = Number(visibleSection?.dataset.sourcePageSection);
         if (Number.isFinite(message.keepStart) && Number.isFinite(message.keepEnd)) {
           Array.from(container.children).forEach(function(section) {
             const page = Number(section.dataset.sourcePageSection);
             if (page > ${PRESERVED_OPENING_PAGES} && section !== visibleSection &&
-                (page < message.keepStart || page > message.keepEnd)) {
+                (page < message.keepStart || page > message.keepEnd) &&
+                (!visiblePage || page < visiblePage - ${APPEND_BEHIND_PAGES} ||
+                  page > visiblePage + ${APPEND_AHEAD_PAGES})) {
               removedPages.push(page);
               section.remove();
             }

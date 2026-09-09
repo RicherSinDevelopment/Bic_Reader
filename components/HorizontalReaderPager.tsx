@@ -1,3 +1,4 @@
+import { HORIZONTAL_PAGE_FIT_SCRIPT } from "@/architecture/HorizontalPageFit";
 import {
   hyphenateText,
   type ExtractedPdfBlock,
@@ -13,7 +14,6 @@ import {
 } from "@/architecture/FindWordInOtherTab";
 import React, {
   useCallback,
-  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -200,6 +200,8 @@ function HorizontalSelectablePage({
   onReaderReveal,
   onReady,
   onSwitchHighlightReady,
+  onOverflow,
+  layoutKey,
   topContentInset,
   onGuideLines,
   guideWord,
@@ -244,6 +246,8 @@ function HorizontalSelectablePage({
   onReaderReveal?: () => void;
   onReady?: () => void;
   onSwitchHighlightReady?: () => void;
+  onOverflow?: (anchor: PageAnchor) => void;
+  layoutKey: string;
   topContentInset: number;
   onGuideLines?: (lines: GuideLine[]) => void;
   guideWord?: TextRange;
@@ -581,6 +585,14 @@ function HorizontalSelectablePage({
         true;
       `);
         onReady?.();
+        webViewRef.current?.injectJavaScript(`
+          window.__readerFitLayoutKey = ${JSON.stringify(layoutKey)};
+          ${HORIZONTAL_PAGE_FIT_SCRIPT}
+          Promise.resolve(document.fonts && document.fonts.ready).then(function() {
+            requestAnimationFrame(function() { window.__reportHorizontalPageFit(${bottomPadding}); });
+          });
+          true;
+        `);
       }}
       onContentProcessDidTerminate={() => {
         addSafeBreadcrumb(
@@ -598,7 +610,9 @@ function HorizontalSelectablePage({
       onMessage={(event) => {
         try {
           const message = JSON.parse(event.nativeEvent.data);
-          if (message.type === "selection") {
+          if (message.type === "horizontalPageOverflow" && message.layoutKey === layoutKey && typeof message.blockId === "string" && Number.isInteger(message.blockOffset)) {
+            onOverflow?.({ blockId: message.blockId, blockOffset: message.blockOffset, wordIndex: 0 });
+          } else if (message.type === "selection") {
             const hadSelection = selectionRangesRef.current.length > 0;
             selectionRangesRef.current = Array.isArray(message.ranges)
               ? message.ranges
@@ -691,6 +705,7 @@ function HorizontalSelectablePage({
 const MemoizedHorizontalSelectablePage = React.memo(
   HorizontalSelectablePage,
   (previous, next) =>
+    previous.layoutKey === next.layoutKey &&
     previous.page === next.page &&
     previous.userHighlights === next.userHighlights &&
     previous.userNotes === next.userNotes &&
@@ -728,7 +743,16 @@ export function buildPages(
   baseFontSize: number,
   paragraphSpacing: number,
   boundary?: PageAnchor,
+  measuredBreaks: PageAnchor[] = [],
 ) {
+  const breaksByBlock = new Map<string, number[]>();
+  for (const item of [...measuredBreaks, ...(boundary ? [boundary] : [])]) {
+    if (!Number.isInteger(item.blockOffset) || item.blockOffset < 0) continue;
+    const offsets = breaksByBlock.get(item.blockId) ?? [];
+    offsets.push(item.blockOffset);
+    breaksByBlock.set(item.blockId, offsets);
+  }
+  for (const offsets of breaksByBlock.values()) offsets.sort((a, b) => a - b);
   const pages: Segment[][] = [[]];
   let usedHeight = 0;
   const isRunningTitle = (block: ExtractedPdfBlock) => {
@@ -789,11 +813,10 @@ export function buildPages(
       Math.floor(charactersPerLine / textScale),
     );
 
-    const boundaryOffset = boundary?.blockId === block.id
-      ? Math.max(0, Math.min(block.text.length, boundary.blockOffset))
-      : undefined;
+    const blockBreaks = (breaksByBlock.get(block.id) ?? []).filter((offset) => offset < block.text.length);
     while (sourceOffset < block.text.length) {
-      if (sourceOffset === boundaryOffset && pages[pages.length - 1].length) {
+      const boundaryOffset = blockBreaks.find((offset) => offset > sourceOffset);
+      if (blockBreaks.includes(sourceOffset) && pages[pages.length - 1].length) {
         pages.push([]);
         usedHeight = 0;
       }
@@ -827,7 +850,7 @@ export function buildPages(
         );
       }
 
-      const available = Math.max(1, availableLines * scaledCharactersPerLine);
+      const available = Math.max(1, availableLines) * scaledCharactersPerLine;
       let end = Math.min(block.text.length, sourceOffset + available);
       if (end < block.text.length) {
         const breakAt = block.text.lastIndexOf(" ", end);
@@ -893,10 +916,12 @@ function cachedBuildPages(
   baseFontSize: number,
   paragraphSpacing: number,
   boundary?: PageAnchor,
+  measuredBreaks: PageAnchor[] = [],
 ) {
   const key = [
-    "source-bounded-pages-v4",
+    "source-bounded-pages-v5",
     JSON.stringify(boundary ?? null),
+    JSON.stringify(measuredBreaks),
     blocks.length,
     blocks[blocks.length - 1]?.id ?? "empty",
     blocks[blocks.length - 1]?.text.length ?? 0,
@@ -922,6 +947,7 @@ function cachedBuildPages(
     baseFontSize,
     paragraphSpacing,
     boundary,
+    measuredBreaks,
   );
   if (entries.size >= 8) {
     const oldestKey = entries.keys().next().value;
@@ -1100,14 +1126,7 @@ export default function HorizontalReaderPager({
     readyReportedRef.current = true;
     onReady?.();
   }, [onReady]);
-  // Painting the new type settings is urgent; rebuilding every page in a long
-  // book is not. Deferred layout metrics keep the controls responsive while
-  // React repaginates in the background.
-  const deferredFontSize = useDeferredValue(fontSize);
-  const deferredLineHeight = useDeferredValue(lineHeight);
-  const deferredParagraphSpacing = useDeferredValue(paragraphSpacing);
-  const deferredLetterSpacing = useDeferredValue(letterSpacing);
-  const deferredWordSpacing = useDeferredValue(wordSpacing);
+  // Pagination and WebView text must use the same typography in each commit.
   const typographyKey = [
     fontFamily,
     fontSize,
@@ -1117,9 +1136,23 @@ export default function HorizontalReaderPager({
     wordSpacing,
     bold ? 1 : 0,
     automaticHyphenation ? 1 : 0,
+    verticalMarginPreset,
+    horizontalMarginPreset,
   ].join(":");
   const previousTypographyKeyRef = useRef(typographyKey);
   const previousDestinationNonceRef = useRef(destination?.nonce);
+  // Capture before changed typography can publish a new page. React restarts
+  // this render with the frozen boundary before committing the new children.
+  if (previousTypographyKeyRef.current !== typographyKey) {
+    previousTypographyKeyRef.current = typographyKey;
+    const anchor = visiblePageAnchorRef.current ?? programmaticDestinationAnchorRef.current;
+    if (anchor) {
+      setPaginationAnchor(anchor);
+      pendingViewportRestoreRef.current = true;
+      if (programmaticDestinationAnchorRef.current) programmaticDestinationAnchorRef.current = anchor;
+    }
+  }
+
   const sideMargin = {
     compact: 18,
     comfortable: 30,
@@ -1145,21 +1178,26 @@ export default function HorizontalReaderPager({
       (width - horizontalPadding * 2) /
         Math.max(
           7,
-          deferredFontSize * 0.52 +
-            deferredLetterSpacing +
-            deferredWordSpacing * 0.16,
+          fontSize * 0.52 +
+            letterSpacing +
+            wordSpacing * 0.16,
         ),
     ),
   );
   const pageContentHeight = Math.max(
-    120,
+    1,
     usableHeight - topContentInset - bottomContentInset,
   );
-  const baseLineHeight = Math.max(16, deferredFontSize * deferredLineHeight);
+  const baseLineHeight = Math.max(16, fontSize * lineHeight);
   // A new command must not first navigate using the previous reflow boundary.
   const pageBoundary = destination && !destination.pageTop && destination.readerPage === undefined && previousDestinationNonceRef.current !== destination.nonce
     ? destinationBoundary
     : paginationAnchor ?? destinationBoundary;
+  const layoutKey = `${typographyKey}:${width}:${usableHeight}:${readingDirection}`;
+  const latestLayoutKey = useRef(layoutKey);
+  latestLayoutKey.current = layoutKey;
+  const [measuredFit, setMeasuredFit] = useState<{ key: string; breaks: PageAnchor[] }>({ key: layoutKey, breaks: [] });
+  const measuredBreaks = measuredFit.key === layoutKey ? measuredFit.breaks : undefined;
   const pages = useMemo(
     () =>
       cachedBuildPages(
@@ -1167,18 +1205,20 @@ export default function HorizontalReaderPager({
         charactersPerLine,
         pageContentHeight,
         baseLineHeight,
-        deferredFontSize,
-        deferredParagraphSpacing,
+        fontSize,
+        paragraphSpacing,
         pageBoundary,
+        measuredBreaks,
       ),
     [
       baseLineHeight,
       blocks,
       charactersPerLine,
-      deferredFontSize,
-      deferredParagraphSpacing,
+      fontSize,
+      paragraphSpacing,
       pageContentHeight,
       pageBoundary,
+      measuredBreaks,
     ],
   );
 
@@ -1190,20 +1230,6 @@ export default function HorizontalReaderPager({
     }
   }, [destination, destinationBoundary]);
 
-  useLayoutEffect(() => {
-    if (previousTypographyKeyRef.current === typographyKey) return;
-    previousTypographyKeyRef.current = typographyKey;
-    const anchor =
-      visiblePageAnchorRef.current ??
-      pageAnchor(pages[currentPageRef.current], blocks);
-    if (!anchor) return;
-    setPaginationAnchor((current) =>
-      current?.blockId === anchor.blockId &&
-      current.blockOffset === anchor.blockOffset
-        ? current
-        : anchor,
-    );
-  }, [blocks, pages, typographyKey]);
 
   const reportPageChange = useCallback(
     (pageIndex: number, anchorOverride?: PageAnchor) => {
@@ -1358,7 +1384,7 @@ export default function HorizontalReaderPager({
   }, [destination, destinationPage, pages]);
 
   useLayoutEffect(() => {
-    if (viewportSettling || !pendingViewportRestoreRef.current || !pages.length || destinationIsPending) return;
+    if (viewportSettling || (!pendingViewportRestoreRef.current && restoredPagesRef.current === pages) || !pages.length || destinationIsPending) return;
 
     pendingViewportRestoreRef.current = false;
     restoredPagesRef.current = pages;
@@ -1378,6 +1404,7 @@ export default function HorizontalReaderPager({
     onViewportSettled?.();
   }, [
     onViewportSettled,
+    typographyKey,
     viewportSettling,
     destinationIsPending,
     pages,
@@ -2262,7 +2289,7 @@ export default function HorizontalReaderPager({
         measuredViewportRef.current = { width: nextWidth, height: nextHeight };
         const widthChanged = Math.abs(nextWidth - viewport.width) > 1;
         const meaningfulHeightChange =
-          Math.abs(nextHeight - viewport.height) > 80;
+          Math.abs(nextHeight - viewport.height) > 1;
         // Cancel intermediate frames even when the final layout returns to
         // the existing size. Otherwise a stale timer installs the wrong size.
         if (viewportFrameRef.current !== null) {
@@ -2441,6 +2468,23 @@ export default function HorizontalReaderPager({
             >
               <MemoizedHorizontalSelectablePage
                 page={page}
+                layoutKey={layoutKey}
+                onOverflow={(anchor) => {
+                  if (latestLayoutKey.current !== layoutKey) return;
+                  const source = blocks.find((block) => block.id === anchor.blockId);
+                  if (!source) return;
+                  const prefix = source.text.slice(0, anchor.blockOffset);
+                  const wordStart = prefix.search(/\S*$/);
+                  anchor = { ...anchor, blockOffset: wordStart };
+                  const first = pageAnchor(page, blocks);
+                  if (!first || (first.blockId === anchor.blockId && anchor.blockOffset <= first.blockOffset)) return;
+                  if (!page.some((segment) => segment.blockId === anchor.blockId && anchor.blockOffset >= segment.startOffset && anchor.blockOffset < segment.startOffset + segment.text.length)) return;
+                  setMeasuredFit((current) => {
+                    const breaks = current.key === layoutKey ? current.breaks : [];
+                    if (breaks.some((item) => item.blockId === anchor.blockId && item.blockOffset === anchor.blockOffset)) return current;
+                    return { key: layoutKey, breaks: [...breaks, anchor] };
+                  });
+                }}
                 userHighlights={userHighlights}
                 userNotes={userNotes}
                 spokenWordHighlight={spokenWordHighlight}

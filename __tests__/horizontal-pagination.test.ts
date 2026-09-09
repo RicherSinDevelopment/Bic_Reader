@@ -37,3 +37,16 @@ test('missing anchors leave normal pagination unchanged', () => {
   expect(buildPages([block], 48, 160, 24, 20, 1,
     { blockId: 'absent', blockOffset: 50, wordIndex: 8 })).toEqual(normal);
 });
+
+test('multiple measured breaks in one source block retain every word in order', () => {
+  const offsets = ['Emmanuel', 'Espejo', 'Justin'].map(word => text.indexOf(word));
+  const pages = buildPages([block], 100, 1000, 24, 20, 1, undefined,
+    offsets.map(blockOffset => ({ blockId: block.id, blockOffset, wordIndex: 0 })));
+  expect(pages.map(page => page[0].startOffset)).toEqual([0, ...offsets]);
+  expect(pages.flat().map(segment => segment.text).join(' ')).toBe(text);
+});
+
+test('a temporarily short viewport does not create one-character pages', () => {
+  const pages = buildPages([block], 30, 1, 24, 20, 1);
+  expect(pages.length).toBeLessThan(text.length / 4);
+});

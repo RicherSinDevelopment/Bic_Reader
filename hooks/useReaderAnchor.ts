@@ -91,8 +91,14 @@ export function useReaderAnchor(input: {
           active.current &&
           useAnchorStore.getState().transition.id === transitionId &&
           useAnchorStore.getState().transition.status !== "running"
-        )
-          anchorController.publish(latest, "reader-user");
+        ) {
+          const committed = anchorController.publish(latest, "reader-user");
+          // A committed observation is still the live viewport. Keep its
+          // revision current so handoff capture does not discard it as stale.
+          if (committed && actualReaderAnchor.current === latest) {
+            actualReaderAnchor.current = { ...latest, revision: committed.revision };
+          }
+        }
       }, 220);
     },
     [documentId, isRotationInProgress],

@@ -1037,7 +1037,11 @@ function ReaderScreenContent() {
         ? `${readerPresentationKey}:${isLandscape ? "landscape" : "portrait"}`
         : `${readerPresentationKey}:vertical`;
     if (previousPresentationKey.current === nextKey) return;
+    const previousOrientation = previousPresentationKey.current.split(":").at(-1);
     previousPresentationKey.current = nextKey;
+    // The pager owns typography reflow and captures its visible first word.
+    // A second canonical restore here races that local layout transaction.
+    if (readerTransition === "pager" && previousOrientation === nextKey.split(":").at(-1)) return;
     if (!positionRestoreApplied.current) return;
     void runAnchorTransition(activeTabRef.current);
   }, [
@@ -1137,6 +1141,7 @@ function ReaderScreenContent() {
 
   const handlePageChanged = useCallback(
     (page: number, totalPages: number) => {
+      const previousPage = originalCurrentPageRef.current;
       const pendingPage = pendingOriginalPageRef.current;
       if (pendingPage !== null && page !== pendingPage) return;
       const completedProgrammaticNavigation = page === pendingPage;
@@ -1158,6 +1163,7 @@ function ReaderScreenContent() {
       // first source block as the new deterministic return anchor.
       if (
         !completedProgrammaticNavigation &&
+        page !== previousPage &&
         activeTabRef.current === "original" &&
         pdfId
       ) {

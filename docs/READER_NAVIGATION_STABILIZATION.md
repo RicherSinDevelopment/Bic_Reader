@@ -209,3 +209,11 @@ A delayed-native-viewability lifecycle test reproduced a handoff to source page 
 Horizontal mode now uses generated current/total pages in both the header and TOC; vertical and Original continue to use PDF source pages. TOC page-top commands retain existing pagination boundaries, so selecting a chapter does not change the page numbering that was just displayed. A missing target source page remains pending rather than falling through to the next extracted source page.
 
 TOC parent rows now navigate on the first tap. Their separate, labelled expand/collapse button controls child sections. Component tests cover both actions independently, alongside handoff timing before native viewability and during resize, stable chapter page mapping, and delivery after missing extraction arrives. These tests simulate native events and do not replace a physical iPhone interaction run.
+
+## Horizontal typography and landscape fit
+
+Typography is now captured before changed pages commit: the pager freezes its first visible word, then repaginates and restores it locally. The screen no longer launches an additional horizontal typography transition. Rendering and pagination use the same settings, and measured viewport height changes are no longer ignored below an 80-point threshold.
+
+Character-based pagination remains the initial estimate. Each mounted page checks actual word rectangles after fonts load and reports the first word that would overlap the reserved footer space. That source offset becomes an additional page boundary for the current geometry/typography only; the remaining text is paginated onto subsequent pages. Stale geometry reports and duplicate boundaries are ignored, and soft hyphens are excluded from source offsets. This does not add a loading/readiness gate. Totals can refine as mounted pages are measured.
+
+Tests cover increasing/decreasing typography with both a consumed destination and a manually swiped position, overflowing text moved without loss, multiple measured breaks within a block, footer limits, and soft-hyphen offsets. Physical-device visual verification is still outstanding.

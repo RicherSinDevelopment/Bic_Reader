@@ -47,30 +47,12 @@ function anchorsMatch(
   actual: CanonicalAnchor | null,
 ) {
   if (!actual || expected.documentId !== actual.documentId) return false;
+  if (expected.sourcePage !== actual.sourcePage) return false;
   if (expected.sourceBlockId) {
-    if (!actual.sourceBlockId) return false;
-    if (expected.sourceBlockId !== actual.sourceBlockId) {
-      // Near the end of a source page the browser cannot place the final block
-      // at the viewport top because there is no content beneath it. The
-      // previous block's last line becomes the reported top-left word even
-      // though the requested block is visible immediately below it. Treat the
-      // same source page as a valid vertical landing; exact word placement is
-      // still handled by the destination highlight.
-      return (
-        expected.sourcePage === actual.sourcePage &&
-        (expected.blockProgress ?? 0) >= 0.92
-      );
-    }
-    if (
-      expected.blockProgress !== undefined &&
-      actual.blockProgress !== undefined
-    ) {
-      // Tiny floating-point representation differences must not turn an exact
-      // eight-percent boundary into a false verification failure.
-      return (
-        Math.abs(expected.blockProgress - actual.blockProgress) <= 0.0800001
-      );
-    }
+    if (expected.sourceBlockId !== actual.sourceBlockId) return false;
+    if (expected.characterOffset !== undefined) return expected.characterOffset === actual.characterOffset;
+    if (expected.wordIndex !== undefined) return expected.wordIndex === actual.wordIndex;
+    if (expected.blockProgress !== undefined) return expected.blockProgress === actual.blockProgress;
     return true;
   }
   return expected.sourcePage === actual.sourcePage;

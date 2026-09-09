@@ -17,12 +17,14 @@ export function originalHighlightTarget(
   if (!anchor) return null;
   const block = anchor.sourceBlockId
     ? blocks.find((candidate) => candidate.id === anchor.sourceBlockId)
-    : blocks.find((candidate) => candidate.page >= anchor.sourcePage && candidate.text.trim());
+    : blocks.find((candidate) => candidate.page === anchor.sourcePage && candidate.text.trim());
   if (!block || !pageSizes[block.page]) return null;
   const words = Array.from(block.text.matchAll(/\S+/g));
   const wordIndex = Math.max(0, Math.min(
     Math.max(0, words.length - 1),
-    anchor.wordIndex ?? Math.round((anchor.blockProgress ?? 0) * Math.max(0, words.length - 1)),
+    (anchor.characterOffset !== undefined
+      ? Math.max(0, words.findIndex((word) => word.index! + word[0].length > anchor.characterOffset!))
+      : anchor.wordIndex) ?? Math.round((anchor.blockProgress ?? 0) * Math.max(0, words.length - 1)),
   ));
   const bounds = block.wordBounds?.[wordIndex];
   const sourceBounds = bounds && bounds.length === 4

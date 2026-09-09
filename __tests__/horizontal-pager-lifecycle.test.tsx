@@ -28,7 +28,7 @@ jest.mock('react-native', () => {
       const { data, onViewableItemsChanged } = props;
       React.useEffect(() => {
         if (mockDelayViewability) return;
-        onViewableItemsChanged({ viewableItems: [{ index, isViewable: true }] });
+        onViewableItemsChanged({ viewableItems: [{ index, isViewable: true, item: data[index] }] });
       }, [index, data, onViewableItemsChanged]);
       return React.createElement('PagerList', props,
         props.data[index] ? props.renderItem({ item: props.data[index], index }) : null);
@@ -207,4 +207,16 @@ test('typography changes after a manual swipe preserve that page, not the old de
   const first = list().props.data[onPageChange.mock.calls.at(-1)[0] - 1][0];
   expect(first.blockId).toBe(anchor.blockId);
   expect(first.startOffset).toBe(anchor.blockOffset);
+});
+
+test('a stale native viewability item cannot confirm a repaginated destination', () => {
+  const onPageChange = jest.fn();
+  const destination = { page: 20, blockId: 'block-19', switchHighlightOffset: 200, nonce: 500 };
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} onPageChange={onPageChange} destination={destination} />); });
+  const oldPages = list().props.data;
+  layout(756, 390);
+  const index = list().props.initialScrollIndex;
+  onPageChange.mockClear();
+  act(() => list().props.onViewableItemsChanged({ viewableItems: [{ index, isViewable: true, item: oldPages[index] }] }));
+  expect(onPageChange).not.toHaveBeenCalled();
 });

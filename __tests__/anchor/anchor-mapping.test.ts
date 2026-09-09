@@ -194,13 +194,10 @@ describe("accuracy scoring", () => {
     expect(anchorAccuracyScore(anchor, { ...anchor, sourcePage: 21 })).toBe(0);
   });
 
-  test("verification tolerance accepts at most eight percent word progress drift", () => {
-    expect(
-      verticalAnchorsMatch(anchor, { ...anchor, blockProgress: 0.43 }),
-    ).toBe(true);
-    expect(
-      verticalAnchorsMatch(anchor, { ...anchor, blockProgress: 0.431 }),
-    ).toBe(false);
+  test("verification requires the exact source word rather than progress tolerance", () => {
+    expect(verticalAnchorsMatch(anchor, { ...anchor, blockProgress: 0.43 })).toBe(true);
+    expect(verticalAnchorsMatch(anchor, { ...anchor, characterOffset: 44 })).toBe(false);
+    expect(verticalAnchorsMatch(anchor, { ...anchor, characterOffset: undefined })).toBe(false);
   });
 
   test("does not accept a different block merely because it is on the same page", () => {
@@ -213,13 +210,13 @@ describe("accuracy scoring", () => {
     ).toBe(false);
   });
 
-  test("allows the previous visible block only for an end-of-block destination", () => {
+  test("rejects the previous block even for an end-of-block destination", () => {
     expect(
       verticalAnchorsMatch(
         { ...anchor, blockProgress: 0.95 },
         { ...anchor, sourceBlockId: "p22-b2", blockProgress: 1 },
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test("keeps only the latest 100 privacy-safe transition measurements", () => {

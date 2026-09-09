@@ -23,6 +23,7 @@ type OriginalPdfProps = {
   pdfUri: string;
   fileSize?: number;
   initialPage?: number;
+  onUserInteraction?: () => void;
   onPageChanged?: (page: number, totalPages: number) => void;
   onReady?: () => void;
   onOutlineChanged?: (outline: PdfOutlineItem[]) => void;
@@ -126,6 +127,7 @@ export default function OriginalPDF({
   fileSize,
   initialPage = 1,
   onPageChanged,
+  onUserInteraction,
   onReady,
   onOutlineChanged,
   highlightTarget,
@@ -250,6 +252,7 @@ export default function OriginalPDF({
 
   return (
     <WebView
+      onTouchStart={onUserInteraction}
       ref={webViewRef}
       source={source}
       originWhitelist={["*"]}

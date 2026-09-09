@@ -1025,7 +1025,6 @@ export default function HorizontalReaderPager({
   const programmaticDestinationAnchorRef = useRef<PageAnchor | undefined>(
     undefined,
   );
-  const settledDestinationAnchorRef = useRef<PageAnchor | undefined>(undefined);
   const destinationBoundary = useMemo(() => {
     if (!destination?.blockId || destination.readerPage !== undefined || destination.pageTop) return undefined;
     const offset = destination.searchMatchIndex ?? destination.switchHighlightOffset;
@@ -1039,7 +1038,8 @@ export default function HorizontalReaderPager({
   const restoredPagesRef = useRef<Segment[][] | null>(null);
   const [pagerWarm, setPagerWarm] = useState(false);
   const [viewportSettling, setViewportSettling] = useState(false);
-  const [viewablePageIndex, setViewablePageIndex] = useState(0);
+  const [viewablePage, setViewablePage] = useState<{ index: number; item: Segment[] } | null>(null);
+  const viewablePageIndex = viewablePage?.index ?? -1;
   const [paintedSwitchNonce, setPaintedSwitchNonce] = useState<number | null>(
     null,
   );
@@ -1047,12 +1047,12 @@ export default function HorizontalReaderPager({
     ({
       viewableItems,
     }: {
-      viewableItems: Array<{ index: number | null; isViewable: boolean }>;
+      viewableItems: Array<{ index: number | null; isViewable: boolean; item: Segment[] }>;
     }) => {
       const visible = viewableItems.find(
         (item) => item.isViewable && item.index != null,
       );
-      if (visible?.index != null) setViewablePageIndex(visible.index);
+      if (visible?.index != null) setViewablePage({ index: visible.index, item: visible.item });
     },
   ).current;
   const pageViewabilityConfig = useRef({
@@ -1232,15 +1232,10 @@ export default function HorizontalReaderPager({
 
 
   const reportPageChange = useCallback(
-    (pageIndex: number, anchorOverride?: PageAnchor) => {
+    (pageIndex: number) => {
       if (!pages.length) return;
       const safeIndex = Math.max(0, Math.min(pages.length - 1, pageIndex));
-      const anchor =
-        anchorOverride ??
-        (safeIndex === currentPageRef.current
-          ? settledDestinationAnchorRef.current
-          : undefined) ??
-        pageAnchor(pages[safeIndex], blocks);
+      const anchor = pageAnchor(pages[safeIndex], blocks);
       visiblePageAnchorRef.current = anchor;
       onPageChange?.(
         safeIndex + 1,
@@ -1253,17 +1248,13 @@ export default function HorizontalReaderPager({
   );
 
   useEffect(() => {
-    if (viewportSettling || programmaticDestinationPageRef.current !== viewablePageIndex) return;
-    const confirmedAnchor = programmaticDestinationAnchorRef.current;
-    // Becoming viewable does not mean an iOS horizontal pager has finished
-    // settling.  In particular, a generated page can begin with the tail of
-    // the preceding source page.  Releasing the lock here lets the remaining
-    // native scroll events replace the explicit destination with that tail.
-    // Keep the discrete destination locked until the reader actually starts
-    // a drag; programmatic/layout scroll events must never change its anchor.
-    settledDestinationAnchorRef.current = confirmedAnchor;
-    reportPageChange(viewablePageIndex, confirmedAnchor);
-  }, [destination, reportPageChange, viewablePageIndex, viewportSettling]);
+    if (viewportSettling || !viewablePage || pages[viewablePage.index] !== viewablePage.item ||
+        programmaticDestinationPageRef.current !== viewablePage.index) return;
+    // A visible item from an older pagination cannot confirm the new command.
+    // Report its rendered first word, never substitute the requested word.
+    reportPageChange(viewablePage.index);
+  }, [destination, pages, reportPageChange, viewablePage, viewportSettling]);
+
   const guideWords = useMemo(() => {
     if (guideMode !== "word") return [];
     return pages.flatMap((page, pageIndex) =>
@@ -1446,7 +1437,6 @@ export default function HorizontalReaderPager({
     restoredPagesRef.current = pages;
     programmaticDestinationPageRef.current = destinationPage;
     programmaticDestinationAnchorRef.current = exactAnchor ?? resolvedAnchor;
-    settledDestinationAnchorRef.current = undefined;
     pagerRef.current?.scrollToIndex({
       animated: false,
       index: destinationPage,
@@ -2367,8 +2357,7 @@ export default function HorizontalReaderPager({
         onScrollBeginDrag={(event) => {
           programmaticDestinationPageRef.current = null;
           programmaticDestinationAnchorRef.current = undefined;
-          settledDestinationAnchorRef.current = undefined;
-          onSwipeStart?.();
+                onSwipeStart?.();
           scrollDiagnosticsRef.current.begin(
             event.nativeEvent.contentOffset.x,
           );

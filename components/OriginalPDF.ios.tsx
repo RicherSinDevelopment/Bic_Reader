@@ -11,6 +11,7 @@ type OriginalPdfProps = {
   pdfUri: string;
   fileSize?: number;
   initialPage?: number;
+  onUserInteraction?: () => void;
   onPageChanged?: (page: number, totalPages: number) => void;
   onReady?: () => void;
   onOutlineChanged?: (outline: PdfOutlineItem[]) => void;
@@ -47,6 +48,7 @@ export default function OriginalPDF({
   pdfUri,
   initialPage = 1,
   onPageChanged,
+  onUserInteraction,
   onReady,
   onOutlineChanged,
   highlightTarget,
@@ -55,6 +57,7 @@ export default function OriginalPDF({
 }: OriginalPdfProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [viewportKey, setViewportKey] = useState<string>();
   const [documentInitialPage] = useState(initialPage);
   const isDark = useColorScheme() === "dark";
   const source = useMemo(() => ({ uri: pdfUri, cache: false }), [pdfUri]);
@@ -65,6 +68,8 @@ export default function OriginalPDF({
     documentKey: pdfUri,
     target: highlightTarget,
     color: switchHighlightColor,
+    requestId: destination?.nonce,
+    viewportKey,
   });
 
   useEffect(() => {
@@ -114,6 +119,11 @@ export default function OriginalPDF({
     <View
       className="flex-1 bg-[#F7F5EC] dark:bg-[#10120F]"
       pointerEvents={outlineOnly ? "none" : "auto"}
+      onTouchStart={onUserInteraction}
+      onLayout={(event) => {
+        const { width, height } = event.nativeEvent.layout;
+        if (width > 0 && height > 0) setViewportKey(`${Math.round(width)}:${Math.round(height)}`);
+      }}
     >
       {loading && !outlineOnly && (
         <View className="absolute inset-0 z-10 items-center justify-center bg-[#F7F5EC] dark:bg-[#10120F]">

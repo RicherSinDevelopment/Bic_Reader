@@ -1,3 +1,4 @@
+import { VERTICAL_WORD_TARGET } from "@/architecture/anchor/VerticalWordTarget";
 import { READER_GUIDE_DIMMING_SCRIPT } from "@/architecture/ReaderGuideDimming";
 import { VERTICAL_ANCHOR_PROBE } from "@/architecture/anchor/VerticalAnchorProbe";
 import { ANCHOR_DEBUG } from "@/architecture/anchor/AnchorDiagnostics";
@@ -1398,6 +1399,7 @@ const ReaderView = ({
           }
           body.reader-paged .page-divider { display: none; }
           #reader-loader {
+            min-height: 100vh;
             padding: 28px 12px 150px;
             color: rgba(71, 85, 105, 0.7);
             font-size: 13px;
@@ -1758,6 +1760,7 @@ const ReaderView = ({
           '--reader-header-start-inset',
           Math.max(0, Number(message.startInset) || 0) + 'px'
         );
+        window.__alignActiveReaderDestination?.();
         if (window.__readerTopBarVisible) {
           requestAnimationFrame(function() {
             window.__refreshReaderGuideForTopBar?.();
@@ -1947,7 +1950,8 @@ const ReaderView = ({
                 pending.switchHighlightWordProgress,
                 pending.switchHighlightQuery,
                 pending.nonce,
-                isDocumentStart
+                isDocumentStart,
+                pending.switchHighlightOffset ?? pending.searchMatchIndex
               );
               if (didDraw) {
                 requestAnimationFrame(function() {
@@ -1964,7 +1968,9 @@ const ReaderView = ({
             window.__clearReaderSwitchHighlight?.();
           }
           window.__readerNavigation?.settle(navigationToken, function() {
-            return destinationTarget.isConnected ? destinationTarget.getBoundingClientRect().top : NaN;
+            window.__alignActiveReaderDestination?.();
+            return window.__activeProgrammaticRange?.getBoundingClientRect().top ??
+              (destinationTarget.isConnected ? destinationTarget.getBoundingClientRect().top : NaN);
           }, function() { window.__reportSwitchAnchor?.(true); });
         });
       };
@@ -3117,6 +3123,7 @@ const ReaderView = ({
               window.__readerAnchorDebug = ${ANCHOR_DEBUG};
               ${VERTICAL_NAVIGATION_RUNTIME}
               ${VERTICAL_ANCHOR_PROBE}
+              ${VERTICAL_WORD_TARGET}
               ${READER_GUIDE_DIMMING_SCRIPT}
               if ('scrollRestoration' in history) {
                 history.scrollRestoration = 'manual';
@@ -3188,73 +3195,23 @@ const ReaderView = ({
                 wordProgress,
                 matchQuery,
                 destinationNonce,
-                preserveDocumentStart
+                preserveDocumentStart,
+                characterOffset
               ) {
                 if (!block) return false;
-                const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
-                const words = [];
-                let textNode = walker.nextNode();
-                while (textNode) {
-                  const text = textNode.textContent || '';
-                  Array.from(text.matchAll(/\\S+/g)).forEach(function(match) {
-                    words.push({ node: textNode, match: match });
-                  });
-                  textNode = walker.nextNode();
-                }
-                if (!words.length) return false;
-
-                function normalizeForMatch(value) {
-                  return String(value || '')
-                    .toLocaleLowerCase()
-                    .replace(/[\u064B-\u065F\u0670]/g, '')
-                    .replace(/[^\\p{L}\\p{N}]/gu, '');
-                }
-
-                const normalizedQuery = normalizeForMatch(matchQuery);
-                let selected = normalizedQuery
-                  ? words.find(function(item) {
-                      const normalizedWord = normalizeForMatch(item.match[0]);
-                      return normalizedWord.includes(normalizedQuery) ||
-                        normalizedQuery.includes(normalizedWord);
-                    })
-                  : null;
-
-                if (!selected) {
-                  const progress = Number(wordProgress);
-                  const fallbackIndex = Number.isFinite(progress)
-                    ? Math.round(Math.max(0, Math.min(1, progress)) * (words.length - 1))
-                    : Math.max(
-                        0,
-                        Math.min(words.length - 1, Number(wordIndex) || 0)
-                      );
-                  selected = words[fallbackIndex];
-                }
+                const selected = window.__resolveReaderWord(block, characterOffset, wordIndex, wordProgress);
                 if (!selected) return false;
-
-                const range = document.createRange();
-                range.setStart(selected.node, selected.match.index);
-                range.setEnd(
-                  selected.node,
-                  selected.match.index + selected.match[0].length
-                );
+                const range = selected.range;
                 if (window.__readerTransition === 'scroll') {
                   if (!preserveDocumentStart) {
-                    const rect = range.getBoundingClientRect();
-                    const desiredTop = readerVisibleTopBoundary() + 8;
-                    const adjustment = rect.top - desiredTop;
-                    if (Math.abs(adjustment) > 0.5) {
-                      window.scrollBy({
-                        top: adjustment,
-                        left: 0,
-                        behavior: 'auto'
-                      });
-                    }
                     // Keep ordinary destinations pinned as earlier async blocks arrive.
                     window.__activeProgrammaticRange = range.cloneRange();
                     window.__activeProgrammaticWord = {
                       blockId: block.dataset.blockId,
-                      wordIndex: words.indexOf(selected)
+                      wordIndex: selected.wordIndex,
+                      offset: selected.offset
                     };
+                    window.__alignActiveReaderDestination?.();
                   }
                   // Scrolling emits an event that clears transient markers.
                   // Paint only after WebKit has committed the destination,
@@ -3283,25 +3240,29 @@ const ReaderView = ({
 
               function readerVisibleTopBoundary() {
                 if (!window.__readerTopBarVisible) return 0;
-                // The opening spacer already places the first line below the
-                // header. Once the document has scrolled, content can pass
-                // behind the overlay and the real header boundary is required.
-                return window.scrollY <= 1
-                  ? 0
-                  : Math.max(0, Number(window.__readerTopBoundary) || 0);
+                // The overlay occludes text even before the first scroll.
+                // Capture and restore use the same measured header boundary.
+                return Math.max(0, Number(window.__readerTopBoundary) || 0);
               }
 
               function reportPreciseSwitchAnchor(force) {
                 if (window.__verticalScrollFlipRestoring || window.__readerNavigation?.suppressed) return true;
                 const topBoundary = readerVisibleTopBoundary();
-                const selected = window.__probeReaderAnchor?.(topBoundary);
+                let selected = window.__probeReaderAnchor?.(topBoundary);
+                const pinned = window.__activeProgrammaticRange;
+                const pinnedRect = pinned?.getBoundingClientRect();
+                if (pinned?.startContainer.isConnected && pinnedRect &&
+                    Math.abs(pinnedRect.top - topBoundary - 8) <= 1 && pinnedRect.bottom <= window.innerHeight) {
+                  const block = pinned.startContainer.parentElement.closest('[data-reader-block]');
+                  if (block) selected = { block, textNode: pinned.startContainer,
+                    match: { index: pinned.startOffset, 0: pinned.toString() }, range: pinned, rect: pinnedRect };
+                }
                 if (!selected) return false;
-
-                const prefix = document.createRange();
-                prefix.selectNodeContents(selected.block);
-                prefix.setEnd(selected.textNode, selected.match.index);
-                const characterOffset = prefix.toString().length;
-                const wordIndex = (prefix.toString().match(/\\S+/g) || []).length;
+                const model = window.__readerTextModel(selected.block);
+                const entry = model.entries.find(function(item) { return item.node === selected.textNode; });
+                if (!entry) return false;
+                const characterOffset = entry.start + entry.raw.slice(0, selected.match.index).replace(/\\u00ad/g, '').length;
+                const wordIndex = Math.max(0, model.words.findIndex(function(word) { return word.index + word[0].length > characterOffset; }));
                 const blockId = selected.block.dataset.blockId;
                 window.__rememberVerticalAnchor?.({
                   blockId, offset: characterOffset, length: selected.match[0].length,

@@ -6,6 +6,8 @@ type UsePdfKitHighlightOptions = {
   documentKey: string;
   target?: SwitchHighlightTarget | null;
   color?: string;
+  requestId?: number;
+  viewportKey?: string;
 };
 
 function hexToRgb(color: string) {
@@ -53,6 +55,8 @@ export function usePdfKitHighlight({
   documentKey,
   target,
   color = "#F59E0B",
+  requestId,
+  viewportKey,
 }: UsePdfKitHighlightOptions) {
   const pdfRef = useRef<PdfRef>(null);
   const [documentReady, setDocumentReady] = useState(false);
@@ -82,10 +86,12 @@ export function usePdfKitHighlight({
       return;
     }
 
+    if (!viewportKey) return;
     const { left, top, right, bottom } = target.sourceBounds;
     const { width, height } = target.pageSize;
     const { red, green, blue } = hexToRgb(color);
     const nextKey = [
+      requestId, viewportKey,
       target.page,
       left,
       top,
@@ -114,7 +120,7 @@ export function usePdfKitHighlight({
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [clearHighlight, color, documentReady, target]);
+  }, [clearHighlight, color, documentReady, target, requestId, viewportKey]);
 
   return {
     clearHighlight,

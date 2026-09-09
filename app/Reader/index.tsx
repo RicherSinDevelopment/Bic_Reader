@@ -233,6 +233,7 @@ function ReaderScreenContent() {
     ].join(":"),
   );
   const canonicalAnchor = useAnchorStore((state) => state.canonicalAnchor);
+  const desiredAnchor = useAnchorStore((state) => state.desiredAnchor);
   const anchorTransition = useAnchorStore((state) => state.transition);
   const hideTopBarOnScroll = useReaderSettingsStore(
     (state) => state.hideTopBarOnScroll,
@@ -302,6 +303,7 @@ function ReaderScreenContent() {
   const [originalCurrentPage, setOriginalCurrentPage] = useState(1);
   const originalCurrentPageRef = React.useRef(1);
   const pendingOriginalPageRef = React.useRef<number | null>(null);
+  const originalUserInteractedRef = React.useRef(false);
   // A TOC request is expected to settle on the requested page. Retaining only
   // the start time lets diagnostics measure that handoff without identifying
   // the document or chapter.
@@ -369,8 +371,11 @@ function ReaderScreenContent() {
   });
   const canonicalOriginalHighlight = useMemo(
     () =>
-      originalHighlightTarget(canonicalAnchor, readerBlocks, readerPageSizes),
-    [canonicalAnchor, readerBlocks, readerPageSizes],
+      originalHighlightTarget(
+        anchorTransition.status === "running" && anchorTransition.target?.mode === "original"
+          ? desiredAnchor ?? canonicalAnchor : canonicalAnchor,
+        readerBlocks, readerPageSizes),
+    [canonicalAnchor, desiredAnchor, anchorTransition.status, anchorTransition.target?.mode, readerBlocks, readerPageSizes],
   );
 
   const beginRotationMask = useCallback(() => {
@@ -865,37 +870,17 @@ function ReaderScreenContent() {
         actual: () => actualReaderAnchor.current,
         isTransitionCurrent: (id: number) => transitionController.isCurrent(id),
       };
-      const verificationAnchor = (anchor: CanonicalAnchor) => {
-        const targetBlock = latestReaderBlocks.current.find(
-          (block) => block.id === anchor.sourceBlockId,
-        );
-        const words = targetBlock
-          ? Array.from(targetBlock.text.matchAll(/\S+/g))
-          : [];
-        const wordIndex = words.length
-          ? Math.max(
-              0,
-              Math.min(
-                words.length - 1,
-                anchor.blockProgress === undefined
-                  ? (anchor.wordIndex ?? 0)
-                  : Math.round(anchor.blockProgress * (words.length - 1)),
-              ),
-            )
-          : 0;
-        return {
-          ...anchor,
-          wordIndex,
-          characterOffset: words[wordIndex]?.index,
-          blockProgress: words.length > 1 ? wordIndex / (words.length - 1) : 0,
-        };
-      };
+      const verificationAnchor = (anchor: CanonicalAnchor): CanonicalAnchor => ({
+        ...anchor,
+        ...resolveAnchor(anchor, anchor.documentId, latestReaderPageCount.current, latestReaderBlocks.current),
+      });
       const adapter =
         targetMode === "original"
           ? createOriginalAnchorAdapter({
               isReady: () => originalContentReadyRef.current,
               restore: (destination, transitionId) => {
                 if (!transitionController.isCurrent(transitionId)) return;
+                originalUserInteractedRef.current = false;
                 pendingOriginalPageRef.current = destination.page;
                 setOriginalCurrentPage(destination.page);
                 setOriginalDestination(destination);
@@ -1164,6 +1149,7 @@ function ReaderScreenContent() {
       if (
         !completedProgrammaticNavigation &&
         page !== previousPage &&
+        originalUserInteractedRef.current &&
         activeTabRef.current === "original" &&
         pdfId
       ) {
@@ -1569,6 +1555,7 @@ function ReaderScreenContent() {
             onReady={() => {
               originalContentReadyRef.current = true;
             }}
+            onUserInteraction={() => { originalUserInteractedRef.current = true; }}
             onPageChanged={handlePageChanged}
             onOutlineChanged={handleOutlineChanged}
             highlightTarget={

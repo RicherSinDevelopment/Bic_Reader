@@ -18,9 +18,9 @@ function runtime() {
     addEventListener: (_: string, listener: () => void) => { scroll = listener; },
   };
   new Function('window', 'document', 'reportSwitchAnchor', 'pruneDistantSections',
-    'redrawLineGuideDuringScroll', 'searchHighlightDismissArmed', source.slice(start, end))(
+    'redrawLineGuideDuringScroll', 'searchHighlightDismissArmed', 'sourcePageAtViewport', source.slice(start, end))(
     window, { documentElement: { scrollHeight: 50000 }, getElementById: () => null },
-    report, prune, jest.fn(), false,
+    report, prune, jest.fn(), false, () => 20,
   );
   return { window, scroll, report, prune };
 }

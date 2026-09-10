@@ -260,8 +260,6 @@ function ReaderScreenContent() {
   const [activeTab, setActiveTab] = useState<ReaderMode>("reader");
   const [headerHeight, setHeaderHeight] = useState(0);
   const [rotationMaskVisible, setRotationMaskVisible] = useState(false);
-  const [transitionMaskVisible, setTransitionMaskVisible] = useState(false);
-  const transitionMaskEligibleRef = React.useRef(false);
   const rotationMaskFallback = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -328,6 +326,7 @@ function ReaderScreenContent() {
     blockId?: string;
     searchQuery?: string;
     searchMatchIndex?: number;
+    suppressSwitchHighlight?: boolean;
     switchHighlightOffset?: number;
     switchHighlightWordIndex?: number;
     switchHighlightWordProgress?: number;
@@ -412,28 +411,6 @@ function ReaderScreenContent() {
       reveal();
     }
   }, []);
-
-  useEffect(() => {
-    const isTabSwitch =
-      anchorTransition.status === "running" &&
-      Boolean(anchorTransition.target) &&
-      anchorTransition.from?.mode !== anchorTransition.target?.mode &&
-      transitionMaskEligibleRef.current;
-    if (!isTabSwitch) {
-      setTransitionMaskVisible(false);
-      return;
-    }
-
-    // Cover the content immediately: the destination renderer performs its
-    // exact positioning during this short interval, so neither the previous
-    // mode nor its internal corrective scroll leaks into the handoff.
-    setTransitionMaskVisible(true);
-  }, [
-    anchorTransition.from?.mode,
-    anchorTransition.id,
-    anchorTransition.status,
-    anchorTransition.target,
-  ]);
 
   const handleOrientationChange = useCallback(
     (landscape: boolean) => {
@@ -791,6 +768,16 @@ function ReaderScreenContent() {
   }, [actualReaderAnchor, pdfId]);
   captureCanonicalAnchorRef.current = captureCanonicalAnchor;
 
+  // Cover in the same render that replaces the renderer, before its default
+  // page can paint. The transition then owns the cover until verification ends.
+  const layoutChanging = readerTransition !== previousReaderTransition.current;
+  const transitionMaskVisible = layoutChanging || (
+    anchorTransition.status === "running" && Boolean(anchorTransition.target) && (
+      anchorTransition.from?.mode !== anchorTransition.target?.mode ||
+      anchorTransition.from?.layout !== anchorTransition.target?.layout
+    )
+  );
+
   // The settings store changes before the horizontal pager mounts. Capture the
   // old renderer's live word during this render, before the new pager can emit
   // its initial page (page zero) and replace the vertical viewport anchor.
@@ -825,7 +812,6 @@ function ReaderScreenContent() {
       const resolved = candidate && latestReaderPageSizes.current[candidate.sourcePage] && resolveAnchor(candidate, candidate.documentId,
         latestReaderPageCount.current, latestReaderBlocks.current);
       const capturedAnchor = candidate ? { ...candidate, ...(resolved || {}) } : null;
-      transitionMaskEligibleRef.current = from.mode !== targetMode;
 
       const readerPorts = {
         isReady: (anchor: CanonicalAnchor) =>
@@ -845,7 +831,8 @@ function ReaderScreenContent() {
           const destination = verticalDestination(anchor, transitionId);
           setReaderDestination({
             ...destination,
-            ...(suppressSwitchHighlight
+            suppressSwitchHighlight,
+            ...(suppressSwitchHighlight && destinationOverride.pageTop
               ? {
                   switchHighlightOffset: undefined,
                   switchHighlightWordIndex: undefined,
@@ -1029,7 +1016,7 @@ function ReaderScreenContent() {
     // A second canonical restore here races that local layout transaction.
     if (readerTransition === "pager" && previousOrientation === nextKey.split(":").at(-1)) return;
     if (!positionRestoreApplied.current) return;
-    void runAnchorTransition(activeTabRef.current);
+    void runAnchorTransition(activeTabRef.current, undefined, undefined, { suppressSwitchHighlight: true });
   }, [
     isLandscape,
     readerPresentationKey,
@@ -1610,6 +1597,7 @@ function ReaderScreenContent() {
                 showSwitchHighlight={
                   activeTab === "reader" &&
                   Boolean(readerDestination) &&
+                  !readerDestination?.suppressSwitchHighlight &&
                   (!readerDestination?.documentStart ||
                     readerDestination.highlightDocumentStart)
                 }

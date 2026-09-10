@@ -258,3 +258,75 @@ Original verification now waits for its asynchronous native page acknowledgement
 issuing the destination. Tests cover delayed acknowledgement, repeated unchanged
 pager destinations, and rejection of different content. Device confirmation is
 still needed for the reported sequence.
+
+### Hide the initial page during layout switches
+
+The opaque transition cover previously applied only to mode switches and was
+activated by a passive effect. Horizontal-to-vertical remounts could expose the
+vertical WebView's initial page before restoration. Cover visibility is now
+derived during render from a pending layout change or a running mode/layout
+transition. The existing verification completion releases it; failure and
+cancellation release it too. No navigation logic or artificial delay was added.
+Physical-device visual confirmation remains outstanding.
+
+### Quiet rotation and TOC positioning
+
+Horizontal orientation restores now carry an explicit visual suppression flag
+without removing their exact word offsets. The pager hides both navigation and
+stationary transition markers for that command. Vertical TOC commands also gate
+the separate live switch-highlight visibility setting, which previously could
+reintroduce the yellow marker despite explicit highlight suppression. Existing
+TOC page-top positioning is retained. The vertical exact-word helper can suppress
+painting after alignment without skipping alignment. Pager lifecycle tests cover
+preservation of the destination offset through both viewport shapes.
+
+### Keep prefetch out of active navigation
+
+The live-scroll reporting fix exposed an existing conflict: every background
+append began a suppression transaction, waited for scrolling to settle, forced
+another anchor report, and could prune distant sections with scroll compensation.
+During momentum this stalled reporting until idle/the frame limit, and append-time
+removal could interrupt native scrolling. Background append now leaves navigation
+ownership alone; append-time pruning is limited to an already suppressed
+transaction. Ordinary removal remains in the existing 1.2-second idle pruner.
+Insertion compensation is retained for incoming text above the viewport.
+
+This also removes the background settle wait from renderer startup. The transition
+cover and exact destination verification remain unchanged. Tests execute the
+actual append handler and verify no background begin/settle/removal, while covered
+destination cleanup still preserves opening and visible sections. Native momentum
+and device handoff duration require physical verification.
+
+### Preserve scroll geometry when unloading pages
+
+The supplied logs include a 2,971 ms second-attempt handoff and two WebKit content
+process terminations. They do not include viewport coordinates for the reported
+510-to-470 jump and do not establish the process termination cause.
+
+Pruning previously removed page sections altogether, collapsing their scroll
+space. Both pruning paths now release their children while retaining a measured
+minimum-height placeholder. The scroll sampler separately requests the window at
+the viewport's section, including an unloaded section; it does not publish that
+approximation as a canonical word. Reloaded placeholders retain their height until
+all available source blocks for that page are delivered, and recover their divider.
+Exact block destinations now wait for the block rather than falling back to a
+partially delivered section. Existing exact-word verification remains intact.
+
+The 55 anchor tests pass, including assertions that covered cleanup frees children
+without removing the page or its measured height. Injected scripts parse. Device
+validation of native scrolling and process termination remains outstanding.
+
+### Do not mutate background content during native momentum
+
+The remaining append path could still insert text/refill placeholders during a
+finger drag or momentum and issue scrollBy compensation. Background append is now
+queued by revision until touch has ended and scroll events have been quiet for
+180 ms. Initial delivery and explicit navigation bypass that queue. Annotation
+rendering precedes compensation so the measurement includes the full mutation.
+This is a vertical-only change; navigation verification remains unchanged.
+
+Regression coverage exercises continuous momentum, duplicate revisions, cancelled
+touches and explicit-navigation bypass: 58 anchor tests pass. Development logs
+now identify page jumps and append corrections without book text; runtime version
+is idle-prefetch-20260910. Physical-device reproduction is still needed before
+claiming the intermittent skipping is permanently resolved.

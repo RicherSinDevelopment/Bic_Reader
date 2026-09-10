@@ -41,6 +41,7 @@ type Destination = {
   page: number;
   readerPage?: number;
   pageTop?: boolean;
+  suppressSwitchHighlight?: boolean;
   switchHighlightOffset?: number;
   switchHighlightWordIndex?: number;
   switchHighlightWordProgress?: number;
@@ -1928,7 +1929,7 @@ export default function HorizontalReaderPager({
   );
 
   const destinationSwitchHighlightOffset = useMemo(() => {
-    if (!destination?.blockId) return undefined;
+    if (!destination?.blockId || destination.suppressSwitchHighlight) return undefined;
     if (destination.switchHighlightOffset !== undefined)
       return destination.switchHighlightOffset;
     const block = blocks.find(
@@ -1963,7 +1964,7 @@ export default function HorizontalReaderPager({
           nonce: destination.nonce,
         }
       : null;
-  const activeSwitchHighlight =
+  const activeSwitchHighlight = destination?.suppressSwitchHighlight ? null :
     stationarySwitchHighlight &&
     (!navigationSwitchHighlight ||
       stationarySwitchHighlight.nonce >= navigationSwitchHighlight.nonce)

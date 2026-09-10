@@ -66,6 +66,7 @@ export type AnchorDestination = {
   documentStart?: boolean;
   blockId?: string;
   searchMatchIndex?: number;
+  suppressSwitchHighlight?: boolean;
   switchHighlightOffset?: number;
   switchHighlightWordIndex?: number;
   switchHighlightWordProgress?: number;

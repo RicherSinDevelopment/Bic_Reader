@@ -238,3 +238,14 @@ test('an unchanged visible page confirms a repeated handoff without a new viewab
   expect(onPageChange).toHaveBeenCalled();
   expect(onPageChange.mock.calls.at(-1)[3]).toMatchObject({ blockId: 'block-19', blockOffset: 200 });
 });
+
+test('a suppressed rotation highlight preserves the exact destination word', () => {
+  const onPageChange = jest.fn();
+  const destination = { page: 20, blockId: 'block-19', switchHighlightOffset: 200,
+    switchHighlightWordIndex: 40, suppressSwitchHighlight: true, nonce: 700 };
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} destination={destination} onPageChange={onPageChange} />); });
+  layout(756, 390);
+  expect(onPageChange.mock.calls.at(-1)[3]).toMatchObject({ blockId: 'block-19', blockOffset: 200 });
+  layout(390, 700);
+  expect(onPageChange.mock.calls.at(-1)[3]).toMatchObject({ blockId: 'block-19', blockOffset: 200 });
+});

@@ -1,3 +1,4 @@
+import { VERTICAL_MUTATION_QUEUE } from "@/architecture/anchor/VerticalMutationQueue";
 import { VERTICAL_WORD_TARGET } from "@/architecture/anchor/VerticalWordTarget";
 import { READER_GUIDE_DIMMING_SCRIPT } from "@/architecture/ReaderGuideDimming";
 import { VERTICAL_ANCHOR_PROBE } from "@/architecture/anchor/VerticalAnchorProbe";
@@ -99,6 +100,7 @@ type ReaderDestination = {
   blockId?: string;
   searchQuery?: string;
   searchMatchIndex?: number;
+  suppressSwitchHighlight?: boolean;
   switchHighlightOffset?: number;
   switchHighlightWordIndex?: number;
   switchHighlightWordProgress?: number;
@@ -630,6 +632,9 @@ const ReaderView = ({
         type: "appendBlocks",
         revision,
         html: blocksToMarkup(appended),
+        completePages: [...new Set(appended.map((block) => block.page))].filter((page) =>
+          blocks.filter((block) => block.page === page).every((block) =>
+            sentBlockIds.current.has(block.id) || appended.some((item) => item.id === block.id))),
         keepStart: windowStart,
         keepEnd: windowEnd,
         hasMore,
@@ -1548,6 +1553,7 @@ const ReaderView = ({
 
 
         <script>
+  ${VERTICAL_MUTATION_QUEUE}
   window.__processedReaderRevisions = new Set();
   window.__renderReaderAnnotations = function(highlights, notes) {
     document.querySelectorAll('.reader-note-marker').forEach(function(marker) { marker.remove(); });
@@ -1615,6 +1621,7 @@ const ReaderView = ({
         return;
       }
       if (message.type === 'appendBlocks') {
+        if (window.__deferReaderAppend?.(message.revision, function() { handleMessage(event); })) return;
         const revision = Number(message.revision);
         if (
           Number.isFinite(revision) &&
@@ -1626,7 +1633,8 @@ const ReaderView = ({
         const container = document.getElementById('reader-pages');
         if (!container) return;
         const navigationInFlight = window.__readerNavigation?.suppressed;
-        const mutationToken = navigationInFlight ? window.__readerNavigation.generation : window.__readerNavigation?.begin();
+        // Background prefetch must not take navigation ownership: momentum
+        // never settles, so suppressing reports here stalls the live window.
         const anchorProbeY = Math.max(
           12,
           Math.min(
@@ -1665,6 +1673,7 @@ const ReaderView = ({
               }
             );
             if (existingSection) {
+              const wasPlaceholder = existingSection.dataset.readerPlaceholder === 'true';
               const divider = existingSection.querySelector('.page-divider');
               Array.from(
                 section.querySelectorAll('[data-reader-block]')
@@ -1687,6 +1696,14 @@ const ReaderView = ({
                   insertionPoint || divider
                 );
               });
+              if (!divider) {
+                const incomingDivider = section.querySelector('.page-divider');
+                if (incomingDivider) existingSection.appendChild(incomingDivider);
+              }
+              if (wasPlaceholder && message.completePages?.includes(page)) {
+                delete existingSection.dataset.readerPlaceholder;
+                existingSection.style.minHeight = '';
+              }
               return;
             }
             const next = Array.from(container.children).find(function(candidate) {
@@ -1698,25 +1715,27 @@ const ReaderView = ({
         const removedPages = [];
         const visibleSection = viewportAnchor?.closest?.('[data-source-page-section]');
         const visiblePage = Number(visibleSection?.dataset.sourcePageSection);
-        if (Number.isFinite(message.keepStart) && Number.isFinite(message.keepEnd)) {
+        // Only prune synchronously behind the navigation cover. During user
+        // scrolling, the idle pruner owns removal and its offset compensation.
+        if (navigationInFlight && Number.isFinite(message.keepStart) && Number.isFinite(message.keepEnd)) {
           Array.from(container.children).forEach(function(section) {
             const page = Number(section.dataset.sourcePageSection);
             if (page > ${PRESERVED_OPENING_PAGES} && section !== visibleSection &&
                 (page < message.keepStart || page > message.keepEnd) &&
                 (!visiblePage || page < visiblePage - ${APPEND_BEHIND_PAGES} ||
                   page > visiblePage + ${APPEND_AHEAD_PAGES})) {
+              if (section.dataset.readerPlaceholder === 'true') return;
+              const height = section.getBoundingClientRect().height;
+              section.style.minHeight = height + 'px';
+              section.replaceChildren();
+              section.dataset.readerPlaceholder = 'true';
               removedPages.push(page);
-              section.remove();
             }
           });
         }
         if (removedPages.length) window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'prunedPages', pages: removedPages
         }));
-        if (viewportAnchor && Number.isFinite(anchorTop)) {
-          const insertedOffset = viewportAnchor.getBoundingClientRect().top - anchorTop;
-          if (Math.abs(insertedOffset) > 0.5) window.scrollBy(0, insertedOffset);
-        }
         window.__readerHasMore = Boolean(message.hasMore);
         const loader = document.getElementById('reader-loader');
         if (loader) {
@@ -1734,10 +1753,20 @@ const ReaderView = ({
           message.highlights || [],
           message.notes || []
         );
+        // Include annotation layout in the compensation, after all DOM edits.
+        if (viewportAnchor && Number.isFinite(anchorTop)) {
+          const insertedOffset = viewportAnchor.getBoundingClientRect().top - anchorTop;
+          if (Math.abs(insertedOffset) > 0.5) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'readerScrollCorrection', revision: message.revision,
+              delta: insertedOffset, scrollY: window.scrollY,
+              runtimeId: window.__readerRuntimeId
+            }));
+            window.scrollBy(0, insertedOffset);
+          }
+        }
         if (window.__pendingSourceDestination) window.__tryPendingSourceDestination?.();
-        else if (!navigationInFlight) window.__readerNavigation?.settle(mutationToken, function() {
-          return viewportAnchor?.isConnected ? viewportAnchor.getBoundingClientRect().top : 0;
-        }, function() { window.__reportSwitchAnchor?.(true); });
+        // Ordinary append leaves scrolling and live reporting uninterrupted.
         return;
       }
 
@@ -1868,7 +1897,7 @@ const ReaderView = ({
         const block = pending.blockId
           ? document.querySelector('[data-block-id="' + CSS.escape(pending.blockId) + '"]')
           : null;
-        const target = block || document.querySelector('[data-source-page-section="' + pending.page + '"]');
+        const target = pending.blockId ? block : document.querySelector('[data-source-page-section="' + pending.page + '"]');
         let resolvedTarget = target;
         if (!resolvedTarget && !pending.blockId && window.__readerHasMore === false) {
           const sections = Array.from(
@@ -1951,7 +1980,8 @@ const ReaderView = ({
                 pending.switchHighlightQuery,
                 pending.nonce,
                 isDocumentStart,
-                pending.switchHighlightOffset ?? pending.searchMatchIndex
+                pending.switchHighlightOffset ?? pending.searchMatchIndex,
+                pending.suppressSwitchHighlight
               );
               if (didDraw) {
                 requestAnimationFrame(function() {
@@ -2565,6 +2595,16 @@ const ReaderView = ({
         return;
       }
 
+      if (data.type === "readerScrollCorrection") {
+        if (__DEV__) console.info("[Reader Scroll Correction]", { delta: data.delta, scrollY: data.scrollY, revision: data.revision });
+        return;
+      }
+
+      if (data.type === "readerWindowPage" && !isPaged && isActive && Number.isFinite(data.page)) {
+        setCurrentSourcePage(Math.max(1, Math.min(pageCount, data.page)));
+        return;
+      }
+
       if (data.type === "sourcePage" && typeof data.page === "number") {
         return;
       }
@@ -2602,6 +2642,13 @@ const ReaderView = ({
         if (activeModeDestination && data.navigationId !== activeModeDestination.nonce) return;
         const sourceBlock = blocks.find((block) => block.id === data.blockId);
         if (sourceBlock && isActive) {
+          if (__DEV__ && Math.abs(sourceBlock.page - lastSourcePageRef.current) > 2) {
+            console.info("[Reader Page Jump]", {
+              from: lastSourcePageRef.current, to: sourceBlock.page,
+              scrollY: data.scrollY, navigating: Boolean(activeModeDestination),
+              generation: data.layoutGeneration,
+            });
+          }
           lastSourcePageRef.current = sourceBlock.page;
           setCurrentSourcePage(sourceBlock.page);
           onPageChange?.(sourceBlock.page);
@@ -3118,7 +3165,7 @@ const ReaderView = ({
               window.__readerRuntimeId = ${runtimeId};
               window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'readerRuntimeReady', runtimeId: window.__readerRuntimeId,
-                version: 'bounded-guide-20260909'
+                version: 'idle-prefetch-20260910'
               }));
               window.__readerAnchorDebug = ${ANCHOR_DEBUG};
               ${VERTICAL_NAVIGATION_RUNTIME}
@@ -3196,7 +3243,8 @@ const ReaderView = ({
                 matchQuery,
                 destinationNonce,
                 preserveDocumentStart,
-                characterOffset
+                characterOffset,
+                suppressHighlight
               ) {
                 if (!block) return false;
                 const selected = window.__resolveReaderWord(block, characterOffset, wordIndex, wordProgress);
@@ -3213,6 +3261,7 @@ const ReaderView = ({
                     };
                     window.__alignActiveReaderDestination?.();
                   }
+                  if (suppressHighlight) { clearReaderSwitchHighlight(false); return true; }
                   // Scrolling emits an event that clears transient markers.
                   // Paint only after WebKit has committed the destination,
                   // otherwise the highlight deletes itself on first open.
@@ -3277,6 +3326,7 @@ const ReaderView = ({
                   lastSwitchAnchorKey = anchorKey;
                   window.ReactNativeWebView.postMessage(JSON.stringify({
                     type: 'switchAnchor',
+                    scrollY: window.scrollY,
                     runtimeId: window.__readerRuntimeId,
                     documentId: ${JSON.stringify(documentId)},
                     navigationId: window.__readerNavigation?.id ?? null,
@@ -3367,6 +3417,7 @@ const ReaderView = ({
                   lastSwitchAnchorKey = anchorKey;
                   window.ReactNativeWebView.postMessage(JSON.stringify({
                     type: 'switchAnchor',
+                    scrollY: window.scrollY,
                     runtimeId: window.__readerRuntimeId,
                     documentId: ${JSON.stringify(documentId)},
                     navigationId: window.__readerNavigation?.id ?? null,
@@ -3940,7 +3991,7 @@ const ReaderView = ({
                 const edgeX = document.documentElement.dir === 'rtl'
                   ? window.innerWidth - 24
                   : 24;
-                const anchorY = Math.min(48, window.innerHeight * 0.1);
+                const anchorY = Math.min(window.innerHeight - 1, readerVisibleTopBoundary() + 8);
 
                 // Cheap hit test at the reading area's top edge. Accurate for
                 // the common case, and it avoids forcing a layout pass over
@@ -4284,10 +4335,14 @@ const ReaderView = ({
                   const page = Number(section.dataset.sourcePageSection);
                   if (
                     (page < minKeepPage || page > currentPage + ${PRUNE_BEHIND_PAGES}) &&
-                    page > ${PRESERVED_OPENING_PAGES}
+                    page > ${PRESERVED_OPENING_PAGES} &&
+                    section.dataset.readerPlaceholder !== 'true'
                   ) {
+                    const height = section.getBoundingClientRect().height;
+                    section.style.minHeight = height + 'px';
+                    section.replaceChildren();
+                    section.dataset.readerPlaceholder = 'true';
                     prunedPages.push(page);
-                    section.remove();
                   }
                 });
                 if (!prunedPages.length) { window.__readerNavigation?.settle(mutationToken); return; }
@@ -4359,6 +4414,10 @@ const ReaderView = ({
                         );
 
                         reportSwitchAnchor();
+                        const viewportPage = sourcePageAtViewport();
+                        window.ReactNativeWebView.postMessage(JSON.stringify({
+                          type: 'readerWindowPage', page: viewportPage, runtimeId: window.__readerRuntimeId
+                        }));
 
                         clearTimeout(pruneTimer);
                         pruneTimer = setTimeout(function() {

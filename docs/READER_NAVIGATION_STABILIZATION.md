@@ -339,3 +339,35 @@ animation until the destination is released after verification. Live reports and
 synthetic scroll events preserve that explicit marker, while user touch still
 clears it. Positioning and suppression for rotation/TOC are unchanged. Regression
 tests execute the marker/release code and inspect the horizontal keyframes.
+
+### Large-document rotation workload
+
+Rotation suppression previously let the ordinary background queue bypass its
+idle guard, and flush drained every queued batch together. Rotation now blocks
+background delivery until its restore ends; subsequent batches drain individually.
+Before rotation restoration, distant text outside four source pages on each side
+is released through the existing placeholder-preserving cleanup. Rotation uses
+the shared exact source-word resolver when available, including annotation/soft
+hyphen handling. Other renderers and destination verification are unchanged.
+
+Runtime version: rotation-window-20260910. A deep-offset test exercises restoration
+around scrollY 108335 and verifies one restore through the shared resolver. Queue
+tests cover rotation suppression and paced draining. The supplied termination
+logs are not an iOS memory report; device testing is still required to determine
+whether these workload reductions resolve that termination sequence.
+
+### Reader-to-Original zoom and acknowledgement
+
+The native exact-highlight command now resets PDFKit scale to the target page's
+fit width before revealing its rectangle. The stable React scale prop alone does
+not reset an existing native pinch scale on every handoff. The command reports a
+page acknowledgement only if the target page and highlight rectangle are visible,
+including same-page commands which need not produce a page-change notification.
+The screen ignores passive adjacent-page notifications until user interaction or
+a new explicit destination. This prevents those callbacks from invalidating a
+verified handoff near a page boundary.
+
+63 existing anchor tests and two new page-acknowledgement guard tests pass;
+TypeScript passes. The native patch has been regenerated and the native source
+hunk reverse-dry-run checked. Native compilation and device validation remain
+outstanding. This change requires a rebuilt iOS binary, not Metro reload alone.

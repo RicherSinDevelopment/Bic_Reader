@@ -3167,7 +3167,7 @@ const ReaderView = ({
               window.__readerRuntimeId = ${runtimeId};
               window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'readerRuntimeReady', runtimeId: window.__readerRuntimeId,
-                version: 'idle-prefetch-20260910'
+                version: 'rotation-window-20260910'
               }));
               window.__readerAnchorDebug = ${ANCHOR_DEBUG};
               ${VERTICAL_NAVIGATION_RUNTIME}
@@ -4302,7 +4302,7 @@ const ReaderView = ({
                 }
               }, { passive: true });
 
-              function pruneDistantSections() {
+              function pruneDistantSections(rotationRadius) {
                 // Only the vertical (native-scroll) reader can prune — the
                 // paged reader needs the full document for its column flow.
                 if (window.__readerTransition !== 'scroll' || window.__readerNavigation?.suppressed) return;
@@ -4312,7 +4312,7 @@ const ReaderView = ({
                 // Prune well above the active 36-page delivery window. This
                 // makes pruning an infrequent memory-maintenance operation,
                 // not part of ordinary scrolling.
-                if (sections.length < 96) return;
+                if (!rotationRadius && sections.length < 96) return;
                 const probeY = Math.min(
                   window.innerHeight - 12,
                   readerVisibleTopBoundary() + 12
@@ -4332,7 +4332,7 @@ const ReaderView = ({
 
                 const minKeepPage = Math.max(
                   1,
-                  currentPage - ${PRUNE_BEHIND_PAGES}
+                  currentPage - (rotationRadius || ${PRUNE_BEHIND_PAGES})
                 );
                 const anchorTop = visibleSection
                   ? visibleSection.getBoundingClientRect().top
@@ -4343,7 +4343,7 @@ const ReaderView = ({
                 sections.forEach(function(section) {
                   const page = Number(section.dataset.sourcePageSection);
                   if (
-                    (page < minKeepPage || page > currentPage + ${PRUNE_BEHIND_PAGES}) &&
+                    (page < minKeepPage || page > currentPage + (rotationRadius || ${PRUNE_BEHIND_PAGES})) &&
                     page > ${PRESERVED_OPENING_PAGES} &&
                     section.dataset.readerPlaceholder !== 'true'
                   ) {
@@ -4372,6 +4372,8 @@ const ReaderView = ({
                 }));
                 window.__readerNavigation?.settle(mutationToken);
               }
+
+              window.__prepareVerticalRotation = function() { pruneDistantSections(4); };
 
               let scrollTimer = null;
               let pruneTimer = null;

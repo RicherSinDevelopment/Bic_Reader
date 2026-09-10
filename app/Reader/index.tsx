@@ -1117,6 +1117,12 @@ function ReaderScreenContent() {
       const previousPage = originalCurrentPageRef.current;
       const pendingPage = pendingOriginalPageRef.current;
       if (pendingPage !== null && page !== pendingPage) return;
+      // PDFKit may call the neighboring page "current" while the handoff word
+      // is visible near a page boundary. Keep the acknowledged handoff until
+      // the user scrolls, or a new explicit destination replaces it.
+      if (pendingPage === null && !originalUserInteractedRef.current &&
+          originalHandoffAnchorRef.current &&
+          page !== originalHandoffAnchorRef.current.sourcePage) return;
       const completedProgrammaticNavigation = page === pendingPage;
       if (completedProgrammaticNavigation)
         pendingOriginalPageRef.current = null;

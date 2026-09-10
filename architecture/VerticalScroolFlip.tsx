@@ -32,12 +32,12 @@ export const VERTICAL_SCROLL_FLIP_SCRIPT = String.raw`
     }
     const block = document.querySelector('[data-block-id="' + CSS.escape(anchor.blockId) + '"]');
     if (!block) return false;
-    const start = textPoint(block, anchor.offset);
-    const end = textPoint(block, anchor.offset + anchor.length);
-    if (!start || !end) return false;
-    const range = document.createRange();
-    range.setStart(start.node, start.offset);
-    range.setEnd(end.node, end.offset);
+    const exact = window.__resolveReaderWord?.(block, anchor.offset);
+    const start = exact ? null : textPoint(block, anchor.offset);
+    const end = exact ? null : textPoint(block, anchor.offset + anchor.length);
+    if (!exact && (!start || !end)) return false;
+    const range = exact ? exact.range : document.createRange();
+    if (!exact) { range.setStart(start.node, start.offset); range.setEnd(end.node, end.offset); }
     const rect = range.getBoundingClientRect();
     if (!rect.height) return false;
     // Recompute chrome coordinates in the new layout. Never restore to the
@@ -55,6 +55,7 @@ export const VERTICAL_SCROLL_FLIP_SCRIPT = String.raw`
     const navigation = window.__readerNavigation;
     if (!navigation || (navigation.suppressed && !restoring)) return;
     const anchor = savedAnchor;
+    window.__prepareVerticalRotation?.();
     restoring = true;
     window.__verticalScrollFlipRestoring = true;
     const generation = ++restoreGeneration;

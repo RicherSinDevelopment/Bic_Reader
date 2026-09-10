@@ -278,7 +278,7 @@ index 0000000..af8531b
 +
 + #endif /* RNPDFPdfView_h */
 diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
-index de46c98..d098055 100644
+index de46c98..66aa0ac 100644
 --- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
 +++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
 @@ -75,6 +75,12 @@ @implementation RNPDFPdfView
@@ -294,7 +294,7 @@ index de46c98..d098055 100644
  }
 
  #ifdef RCT_NEW_ARCH_ENABLED
-@@ -234,6 +240,187 @@ - (void)setNativePage:(NSInteger)page
+@@ -234,6 +240,209 @@ - (void)setNativePage:(NSInteger)page
      [self didSetProps:[NSArray arrayWithObject:@"page"]];
  }
 
@@ -413,8 +413,31 @@ index de46c98..d098055 100644
 +        CGRectGetHeight(highlightRect) + 116.0
 +    );
 +    revealRect = CGRectIntersection(revealRect, crop);
-+    [_pdfView goToRect:revealRect onPage:pdfPage];
++    // Each Reader handoff starts at fit width, independently of prior pinch zoom.
++    CGFloat displayedWidth = (pdfPage.rotation == 90 || pdfPage.rotation == 270)
++        ? CGRectGetHeight(crop) : CGRectGetWidth(crop);
++    CGFloat fitWidth = CGRectGetWidth(_pdfView.bounds) / displayedWidth;
++    if (isfinite(fitWidth) && fitWidth > 0) {
++        _scale = 1.0;
++        _fixScaleFactor = fitWidth;
++        _pdfView.minScaleFactor = fitWidth * _minScale;
++        _pdfView.maxScaleFactor = fitWidth * _maxScale;
++        _pdfView.scaleFactor = fitWidth;
++    }
++    PDFDestination *destination = [[PDFDestination alloc] initWithPage:pdfPage
++        atPoint:CGPointMake(CGRectGetMinX(crop), CGRectGetMaxY(revealRect))];
++    destination.zoom = _pdfView.scaleFactor;
++    [_pdfView goToDestination:destination];
++    [_pdfView layoutIfNeeded];
 +    [_pdfView setNeedsDisplay];
++    // A same-page handoff need not emit PDFViewPageChangedNotification.
++    // Acknowledge only a visibly revealed target, never the requested page alone.
++    CGRect visibleTarget = [_pdfView convertRect:highlightRect fromPage:pdfPage];
++    if ([_pdfView.visiblePages containsObject:pdfPage] &&
++        CGRectIntersectsRect(_pdfView.bounds, visibleTarget)) {
++        [self notifyOnChangeWithMessage:[NSString stringWithFormat:@"pageChanged|%ld|%lu",
++            (long)page, (unsigned long)_pdfDocument.pageCount]];
++    }
 +    RLog(@"switch highlight applied: page=%ld text=%@ sourceSize=%@ rect=%@",
 +         (long)page,
 +         selection.string ?: @"<no PDFKit text; rectangle fallback>",
@@ -481,7 +504,7 @@ index de46c98..d098055 100644
  #endif
 
  - (instancetype)initWithBridge:(RCTBridge *)bridge
-@@ -600,6 +787,7 @@ - (void)notifyOnChangeWithMessage:(NSString *)message
+@@ -600,5 +809,6 @@ - (void)notifyOnChangeWithMessage:(NSString *)message
 
  - (void)dealloc{
 

@@ -208,3 +208,22 @@ test("missing rotation anchors report failure without publishing the displaced v
   expect(JSON.parse(r.window.ReactNativeWebView.postMessage.mock.calls[0][0]).ok).toBe(false);
   expect(r.window.__reportSwitchAnchor).not.toHaveBeenCalled();
 });
+
+test('deep-document rotation trims before restoring through the exact word resolver', () => {
+  const r = renderer();
+  r.window.scrollY = 108335;
+  r.setWordTop(108535);
+  r.window.__prepareVerticalRotation = jest.fn();
+  r.window.__resolveReaderWord = jest.fn(() => ({ range: {
+    getBoundingClientRect: () => ({ top: 108535 - r.window.scrollY, height: 20 }),
+  } }));
+  r.remember();
+  r.window.innerWidth = 844;
+  r.window.__readerTopBoundary = 0;
+  r.emit('resize');
+  expect(r.window.__prepareVerticalRotation).toHaveBeenCalledTimes(1);
+  r.settle();
+  expect(r.window.__resolveReaderWord).toHaveBeenCalledWith(expect.anything(), 4);
+  expect(r.window.scrollY).toBe(108527);
+  expect(r.window.scrollBy).toHaveBeenCalledTimes(1);
+});

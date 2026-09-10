@@ -953,7 +953,7 @@ function ReaderScreenContent() {
       "reader",
       readerTransition === "pager" ? "horizontal" : "vertical",
       undefined,
-      undefined,
+      { suppressSwitchHighlight: true },
       initialOpenIsNew.current
         ? { ...canonicalAnchor, ...pageStartAnchor(pdfId, readerBlocks[0].page, readerBlocks) }
         : canonicalAnchor,

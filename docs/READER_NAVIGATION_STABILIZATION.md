@@ -330,3 +330,12 @@ touches and explicit-navigation bypass: 58 anchor tests pass. Development logs
 now identify page jumps and append corrections without book text; runtime version
 is idle-prefetch-20260910. Physical-device reproduction is still needed before
 claiming the intermittent skipping is permanently resolved.
+
+### Handoff highlight lifetime
+
+Horizontal highlight keyframes no longer animate opacity on the mark containing
+the word; only background and shadow fade. Vertical explicit markers pause their
+animation until the destination is released after verification. Live reports and
+synthetic scroll events preserve that explicit marker, while user touch still
+clears it. Positioning and suppression for rotation/TOC are unchanged. Regression
+tests execute the marker/release code and inspect the horizontal keyframes.

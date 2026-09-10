@@ -1868,6 +1868,8 @@ const ReaderView = ({
         return;
       }
       if (message.type === 'releaseSourceDestination') {
+        const marker = document.getElementById('reader-switch-highlight');
+        if (marker) marker.style.animationPlayState = 'running';
         window.__readerNavigation?.cancel();
         window.__pendingSourceDestination = null;
         window.__pinnedSourcePage = null;
@@ -3215,6 +3217,9 @@ const ReaderView = ({
               window.__clearReaderSwitchHighlight = clearReaderSwitchHighlight;
 
               function drawReaderSwitchHighlight(range, explicit) {
+                // Live reports must not replace an explicit handoff marker.
+                const existing = document.getElementById('reader-switch-highlight');
+                if (!explicit && existing?.dataset.explicit === 'true') return true;
                 clearReaderSwitchHighlight(false);
                 if (!range) return false;
                 const rect = Array.from(range.getClientRects()).find(function(item) {
@@ -3224,6 +3229,9 @@ const ReaderView = ({
                 const marker = document.createElement('div');
                 marker.id = 'reader-switch-highlight';
                 marker.dataset.explicit = explicit ? 'true' : 'false';
+                if (explicit && window.__activeProgrammaticTargetNonce != null) {
+                  marker.style.animationPlayState = 'paused';
+                }
                 marker.style.left = (rect.left + window.scrollX) + 'px';
                 marker.style.top = (rect.top + window.scrollY) + 'px';
                 marker.style.width = rect.width + 'px';
@@ -4173,6 +4181,7 @@ const ReaderView = ({
               // --------------------------------
 
               function releaseProgrammaticSourcePage() {
+                clearReaderSwitchHighlight(false);
                 window.__readerNavigation?.cancel();
                 clearTimeout(pruneTimer);
                 pruneTimer = null;
@@ -4385,13 +4394,13 @@ const ReaderView = ({
 
                   if (window.__showReaderSwitchHighlight) {
                     window.__showReaderSwitchHighlight = false;
-                    clearReaderSwitchHighlight();
+                    clearReaderSwitchHighlight(true);
                   }
                   if (
                     !window.__pinnedSourcePage &&
                     document.getElementById('reader-switch-highlight')
                   ) {
-                    clearReaderSwitchHighlight();
+                    clearReaderSwitchHighlight(true);
                   }
 
                   // Sample the bounded viewport probe during motion so the live

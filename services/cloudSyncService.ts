@@ -9,6 +9,11 @@ import { isCloudRecordNewer } from "@/services/cloudConflictPolicy";
 import { claimGuestLibrary } from "@/services/guestLibraryMigration";
 
 const PDF_BUCKET = "premium-pdfs";
+const MAX_CLOUD_PDF_BYTES = 100 * 1024 * 1024;
+
+export type CloudSyncResult = {
+  skippedOversizeDocuments: string[];
+};
 
 type LocalPdfRow = {
   id: string;
@@ -121,6 +126,16 @@ async function uploadPdf(
   }
 }
 
+async function getCloudFileSize(row: LocalPdfRow) {
+  const info = await FileSystem.getInfoAsync(row.file_uri);
+  if (!info.exists) return null;
+
+  const size = typeof info.size === "number" ? info.size : row.file_size;
+  return typeof size === "number" && Number.isSafeInteger(size) && size >= 0
+    ? size
+    : null;
+}
+
 async function downloadPdf(storagePath: string, id: string) {
   const { data, error } = await supabase.storage
     .from(PDF_BUCKET)
@@ -140,7 +155,7 @@ export async function syncPremiumLibrary(
   db: SQLiteDatabase,
   session: Session,
   restoreFirst: boolean,
-) {
+): Promise<CloudSyncResult> {
   const userId = session.user.id;
   await claimGuestLibrary(db, userId);
   const localBefore = await db.getAllAsync<LocalPdfRow>(
@@ -317,8 +332,14 @@ export async function syncPremiumLibrary(
     }
   }
   const existingCloudIds = new Set(cloudRows.map((row) => row.id));
+  const skippedOversizeDocuments: string[] = [];
   for (const row of localDocuments) {
     const storagePath = `${userId}/${row.id}.pdf`;
+    const fileSize = await getCloudFileSize(row);
+    if (fileSize !== null && fileSize > MAX_CLOUD_PDF_BYTES) {
+      skippedOversizeDocuments.push(row.display_name);
+      continue;
+    }
     if (!existingCloudIds.has(row.id))
       await uploadPdf(session, row, storagePath);
     const { error } = await supabase.from("cloud_pdf_documents").upsert(
@@ -329,7 +350,7 @@ export async function syncPremiumLibrary(
         normalized_name: row.normalized_name,
         original_name: row.original_name,
         storage_path: storagePath,
-        file_size: row.file_size,
+        file_size: fileSize,
         mime_type: row.mime_type,
         added_at: row.added_at,
         last_opened_at: row.last_opened_at,
@@ -392,6 +413,8 @@ export async function syncPremiumLibrary(
       updated_at: new Date().toISOString(),
     });
   throwIfError(settingsUpsertError);
+
+  return { skippedOversizeDocuments };
 }
 
 export async function deletePremiumCloudPdf(userId: string, pdfId: string) {

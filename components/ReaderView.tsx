@@ -1465,6 +1465,12 @@ const ReaderView = ({
             pointer-events: none;
             animation: reader-switch-pulse 1.05s ease-out forwards;
           }
+          .reader-switch-highlight-fragment {
+            position: absolute;
+            border-radius: 3px;
+            inset: 0;
+            background-color: inherit;
+          }
           @keyframes reader-switch-pulse {
             0% {
               background-color: color-mix(in srgb, var(--switch-highlight-color, #F59E0B) 88%, transparent);
@@ -1502,6 +1508,18 @@ const ReaderView = ({
             position: fixed;
             z-index: 30;
             pointer-events: none;
+            border-radius: 4px;
+            background: color-mix(in srgb, var(--guide-color, #F59E0B) 30%, transparent);
+            box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--guide-color, #F59E0B) 55%, transparent);
+            transition: left 90ms ease, top 90ms ease, width 90ms ease, height 90ms ease;
+          }
+          #reader-word-guide {
+            background: transparent;
+            box-shadow: none;
+            transition: none;
+          }
+          .reader-word-guide-fragment {
+            position: fixed;
             border-radius: 4px;
             background: color-mix(in srgb, var(--guide-color, #F59E0B) 30%, transparent);
             box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--guide-color, #F59E0B) 55%, transparent);
@@ -3222,20 +3240,29 @@ const ReaderView = ({
                 if (!explicit && existing?.dataset.explicit === 'true') return true;
                 clearReaderSwitchHighlight(false);
                 if (!range) return false;
-                const rect = Array.from(range.getClientRects()).find(function(item) {
+                const rects = Array.from(range.getClientRects()).filter(function(item) {
                   return item.width > 0 && item.height > 0;
                 });
-                if (!rect) return false;
+                if (!rects.length) return false;
                 const marker = document.createElement('div');
                 marker.id = 'reader-switch-highlight';
                 marker.dataset.explicit = explicit ? 'true' : 'false';
                 if (explicit && window.__activeProgrammaticTargetNonce != null) {
                   marker.style.animationPlayState = 'paused';
                 }
-                marker.style.left = (rect.left + window.scrollX) + 'px';
-                marker.style.top = (rect.top + window.scrollY) + 'px';
-                marker.style.width = rect.width + 'px';
-                marker.style.height = rect.height + 'px';
+                marker.style.left = '0px';
+                marker.style.top = '0px';
+                marker.style.width = '0px';
+                marker.style.height = '0px';
+                rects.forEach(function(rect) {
+                  const fragment = document.createElement('div');
+                  fragment.className = 'reader-switch-highlight-fragment';
+                  fragment.style.left = (rect.left + window.scrollX) + 'px';
+                  fragment.style.top = (rect.top + window.scrollY) + 'px';
+                  fragment.style.width = rect.width + 'px';
+                  fragment.style.height = rect.height + 'px';
+                  marker.appendChild(fragment);
+                });
                 marker.addEventListener('animationend', function() {
                   if (marker.isConnected) marker.remove();
                   window.__showReaderSwitchHighlight = false;
@@ -3539,19 +3566,29 @@ const ReaderView = ({
               function drawWordGuide(node, match) {
                 if (!wordGuide || !node || !match) return false;
                 const range = wordRange(node, match);
-                const rect = Array.from(range.getClientRects()).find(function(item) {
+                const rects = Array.from(range.getClientRects()).filter(function(item) {
                   return item.width > 0 && item.height > 0;
                 });
-                if (!rect) return false;
+                if (!rects.length) return false;
+                // Automatic hyphenation can split one word into multiple
+                // client rects. Paint each fragment separately so the guide
+                // stays tight to both parts instead of spanning the line gap.
+                wordGuide.replaceChildren();
+                rects.forEach(function(rect) {
+                  const fragment = document.createElement('div');
+                  fragment.className = 'reader-word-guide-fragment';
+                  fragment.style.left = Math.max(0, rect.left - 3) + 'px';
+                  fragment.style.top = Math.max(0, rect.top - 2) + 'px';
+                  fragment.style.width = Math.max(1, rect.width + 6) + 'px';
+                  fragment.style.height = Math.max(1, rect.height + 4) + 'px';
+                  wordGuide.appendChild(fragment);
+                });
+                const rect = rects[0];
                 currentWordNode = node;
                 currentWordStart = match.index;
                 currentWordEnd = match.index + match[0].length;
-                window.__drawReaderGuideDimming?.(rect);
+                window.__drawReaderGuideDimming?.(rects);
                 wordGuide.style.display = 'block';
-                wordGuide.style.left = Math.max(0, rect.left - 3) + 'px';
-                wordGuide.style.top = Math.max(0, rect.top - 2) + 'px';
-                wordGuide.style.width = Math.max(1, rect.width + 6) + 'px';
-                wordGuide.style.height = Math.max(1, rect.height + 4) + 'px';
                 return true;
               }
 

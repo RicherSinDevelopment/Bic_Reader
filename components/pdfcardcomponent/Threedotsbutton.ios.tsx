@@ -2,6 +2,7 @@ import { EditIcon, Icon, TrashIcon } from "@/components/ui/icon";
 import { GlassView, isGlassEffectAPIAvailable } from "expo-glass-effect";
 import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
+import Animated, { Easing, ZoomIn } from "react-native-reanimated";
 import React, { useRef, useState } from "react";
 import {
   Alert,
@@ -23,9 +24,9 @@ type ThreeDotsButtonProps = {
 };
 
 const BUTTON_SIZE = 44;
-const MENU_WIDTH = 176;
-const MENU_HEIGHT = 96;
-const MENU_GAP = 4;
+const MENU_WIDTH = 220;
+const MENU_HEIGHT = 128;
+const MENU_GAP = 10;
 const SCREEN_PADDING = 12;
 const MENU_DISMISS_DELAY = 140;
 
@@ -117,8 +118,9 @@ export default function ThreeDotsButton({ fileName, onDelete, onRename }: ThreeD
           style={StyleSheet.absoluteFill}
         />
 
-        <View
+        <Animated.View
           accessibilityRole="menu"
+          entering={ZoomIn.duration(180).easing(Easing.out(Easing.cubic))}
           style={[
             styles.menu,
             { top: menuPosition.top, left: menuPosition.left },
@@ -137,20 +139,20 @@ export default function ThreeDotsButton({ fileName, onDelete, onRename }: ThreeD
           <Pressable
             accessibilityRole="menuitem"
             onPress={openRenameDialog}
-            className="h-11 flex-row items-center gap-3 rounded-xl px-3 active:bg-black/5 dark:active:bg-white/10"
+            className="h-[52px] flex-row items-center gap-4 rounded-2xl px-4 active:bg-black/5 dark:active:bg-white/10"
           >
-            <Icon as={EditIcon} size="sm" className="text-black/70 dark:text-white/70" />
-            <Text className="text-base text-black dark:text-[#F4F5F1]">Rename</Text>
+            <Icon as={EditIcon} size="md" className="text-black/75 dark:text-white/75" />
+            <Text className="text-lg text-black dark:text-[#F4F5F1]">Rename</Text>
           </Pressable>
           <Pressable
             accessibilityRole="menuitem"
             onPress={confirmDelete}
-            className="h-11 flex-row items-center gap-3 rounded-xl px-3 active:bg-red-500/10"
+            className="h-[52px] flex-row items-center gap-4 rounded-2xl px-4 active:bg-red-500/10"
           >
-            <Icon as={TrashIcon} size="sm" className="text-red-600" />
-            <Text className="text-base text-red-600">Delete</Text>
+            <Icon as={TrashIcon} size="md" className="text-red-600" />
+            <Text className="text-lg text-red-600">Delete</Text>
           </Pressable>
-        </View>
+        </Animated.View>
       </Modal>
 
       <Modal animationType="fade" transparent visible={isRenameOpen} onRequestClose={() => setIsRenameOpen(false)}>
@@ -209,21 +211,21 @@ const styles = StyleSheet.create({
     height: MENU_HEIGHT,
     overflow: "hidden",
     borderRadius: 18,
-    padding: 4,
+    padding: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.25)",
+    borderColor: "rgba(255,255,255,0.55)",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.22,
+    shadowRadius: 24,
+    elevation: 16,
   },
   fallbackLight: {
-    backgroundColor: "rgba(248,248,248,0.96)",
+    backgroundColor: "rgba(248,248,248,0.72)",
     borderColor: "rgba(0,0,0,0.10)",
   },
   fallbackDark: {
-    backgroundColor: "rgba(28,28,30,0.96)",
+    backgroundColor: "rgba(28,28,30,0.78)",
     borderColor: "rgba(255,255,255,0.12)",
   },
 });

@@ -55,9 +55,13 @@ export function CloudSyncProvider({ children }: PropsWithChildren) {
           );
           if (verificationError) throw verificationError;
         }
-        await syncPremiumLibrary(db, session, restoreFirst);
+        const result = await syncPremiumLibrary(db, session, restoreFirst);
         restoredUser.current = session.user.id;
-        setLastError(null);
+        setLastError(
+          result.skippedOversizeDocuments.length
+            ? `Cloud sync skipped ${result.skippedOversizeDocuments.length} PDF${result.skippedOversizeDocuments.length === 1 ? "" : "s"} over the 100 MB limit.`
+            : null,
+        );
         setRevision((value) => value + 1);
       } catch (error) {
         setLastError(error instanceof Error ? error.message : "Cloud sync failed.");

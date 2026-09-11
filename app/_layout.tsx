@@ -102,10 +102,7 @@ function RootNavigator() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
-      <Stack.Screen
-        name="onboarding/index"
-        options={{ orientation: "portrait" }}
-      />
+      <Stack.Screen name="onboarding" options={{ orientation: "portrait" }} />
       <Stack.Screen name="auth" />
       <Stack.Protected guard={!session}>
         <Stack.Screen name="(auth)" />

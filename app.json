@@ -106,6 +106,7 @@
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "LSSupportsOpeningDocumentsInPlace": false,
         "CFBundleDocumentTypes": [
           {
             "CFBundleTypeName": "PDF Document",
@@ -161,13 +162,19 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/bic-reader-splash-mark.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
           "dark": {
             "backgroundColor": "#000000"
           }
+        }
+      ],
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "PORTRAIT"
         }
       ],
       "expo-font",
@@ -186,7 +193,7 @@
         "expo-build-properties",
         {
           "ios": {
-            "deploymentTarget": "16.4",
+            "deploymentTarget": "17.0",
             "privacyManifestAggregationEnabled": true
           }
         }

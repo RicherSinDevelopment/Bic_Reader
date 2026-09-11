@@ -23,7 +23,9 @@ download_pdfium simulator-arm64
 download_pdfium simulator-x64
 
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
-export IPHONEOS_DEPLOYMENT_TARGET="16.4"
+# The current prebuilt Pdfium device binary requires iOS 17.0. Keep this
+# aligned with the Expo iOS deployment target and Pdfium.framework plist.
+export IPHONEOS_DEPLOYMENT_TARGET="17.0"
 cargo build --manifest-path "$CRATE_DIR/Cargo.toml" --release --lib --features ios-static --target aarch64-apple-ios
 cargo build --manifest-path "$CRATE_DIR/Cargo.toml" --release --lib --features ios-static --target aarch64-apple-ios-sim
 cargo build --manifest-path "$CRATE_DIR/Cargo.toml" --release --lib --features ios-static --target x86_64-apple-ios
@@ -54,6 +56,9 @@ create_pdfium_framework() {
   plutil -insert CFBundleExecutable -string Pdfium "$framework/Info.plist"
   plutil -insert CFBundleIdentifier -string com.bicreader.pdfium "$framework/Info.plist"
   plutil -insert CFBundleInfoDictionaryVersion -string 6.0 "$framework/Info.plist"
+  # This framework is assembled outside an Xcode target, so Xcode cannot
+  # synthesize this required bundle value during the archive step.
+  plutil -insert MinimumOSVersion -string "$IPHONEOS_DEPLOYMENT_TARGET" "$framework/Info.plist"
   plutil -insert CFBundleName -string Pdfium "$framework/Info.plist"
   plutil -insert CFBundlePackageType -string FMWK "$framework/Info.plist"
   plutil -insert CFBundleShortVersionString -string 1.0.0 "$framework/Info.plist"

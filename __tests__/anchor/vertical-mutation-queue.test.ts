@@ -54,16 +54,32 @@ test('rotation blocks background delivery even while navigation is suppressed', 
   expect(apply).toHaveBeenCalledTimes(1);
 });
 
-test('queued batches drain individually rather than rebuilding the whole window at once', () => {
+test('queued batches share a bounded transaction and restore the viewport once', () => {
   const { window, listeners } = runtime();
-  const first = jest.fn(), second = jest.fn();
+  const restore = jest.fn();
+  const first = jest.fn(() => { window.__readerAppendBatch.restore = restore; });
+  const second = jest.fn(() => { window.__readerAppendBatch.restore = restore; });
   listeners.touchstart();
   window.__deferReaderAppend(1, first);
   window.__deferReaderAppend(2, second);
   listeners.touchend();
   jest.advanceTimersByTime(180);
   expect(first).toHaveBeenCalledTimes(1);
-  expect(second).not.toHaveBeenCalled();
-  jest.advanceTimersByTime(180);
   expect(second).toHaveBeenCalledTimes(1);
+  expect(restore).toHaveBeenCalledTimes(1);
+  expect(window.__readerAppendBatch).toBeNull();
+});
+
+
+test('a long backlog yields after four messages so touch handling can resume', () => {
+  const { window, listeners } = runtime();
+  const apply = jest.fn();
+  listeners.touchstart();
+  for (let revision = 0; revision < 9; revision++) window.__deferReaderAppend(revision, apply);
+  listeners.touchend();
+  jest.advanceTimersByTime(180);
+  expect(apply).toHaveBeenCalledTimes(4);
+  listeners.touchstart();
+  jest.advanceTimersByTime(360);
+  expect(apply).toHaveBeenCalledTimes(4);
 });

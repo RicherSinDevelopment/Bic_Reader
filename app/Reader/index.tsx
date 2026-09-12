@@ -290,6 +290,7 @@ function ReaderScreenContent() {
   const [readerContentReady, setReaderContentReady] = useState(false);
   const readerContentReadyRef = React.useRef(false);
   const originalContentReadyRef = React.useRef(false);
+  const horizontalPreparing = readerTransition === "pager" && readerBlocks.length === 0;
   const readerSkeletonOpacity = useSharedValue(1);
   const [readerCurrentPage, setReaderCurrentPage] = useState(1);
   const [readerDisplayCurrentPage, setReaderDisplayCurrentPage] = useState(1);
@@ -654,6 +655,7 @@ function ReaderScreenContent() {
               ? Math.max(0, requestedPage - 1 - CHAPTER_EXTRACTION_PAGES_ABOVE)
               : nextPage;
 
+          const preparingHorizontal = useReaderSettingsStore.getState().transition === "pager";
           const extractedPageCount = document?.pages.length ?? 0;
           const batchSize = requestIsMissing
             ? CHAPTER_EXTRACTION_PAGE_COUNT
@@ -683,7 +685,7 @@ function ReaderScreenContent() {
           const shouldSaveExtraction =
             (lastSavedPageCount === 0 && document.pages.length > 0) ||
             document.pages.length - lastSavedPageCount >=
-              EXTRACTION_CACHE_PAGE_INTERVAL ||
+              (preparingHorizontal ? 256 : EXTRACTION_CACHE_PAGE_INTERVAL) ||
             nextPage >= pageCount;
           if (shouldSaveExtraction) {
             await savePdfExtraction(db, pdfId, document);
@@ -1572,7 +1574,7 @@ function ReaderScreenContent() {
             opacity:
               visibleTab === "reader" &&
               readerBlocks.length > 0 &&
-              initialRestoreCompleteFor !== pdfId
+              initialRestoreCompleteFor !== pdfId && !horizontalPreparing
                 ? 0
                 : 1,
           }}
@@ -1591,6 +1593,13 @@ function ReaderScreenContent() {
                   (isLandscape || !readerChromeHidden)
                 }
                 blocks={readerBlocks}
+                extractedPageSizes={readerPageSizes}
+                extractionError={readerError}
+                onRequestPage={(page) => {
+                  if (!requestedExtractionPages.current.includes(page)) {
+                    requestedExtractionPages.current.push(page);
+                  }
+                }}
                 pageCount={readerPageCount}
                 destination={readerDestination}
                 stationarySwitchHighlight={readerSwitchHighlight}
@@ -1657,7 +1666,7 @@ function ReaderScreenContent() {
           ) : (
             <View className="flex-1 bg-[#F7F5EC] dark:bg-[#10120F]" />
           )}
-          {!readerError && (
+          {!readerError && !horizontalPreparing && (
             <Reanimated.View
               pointerEvents="none"
               style={[StyleSheet.absoluteFill, readerSkeletonStyle]}
@@ -1669,7 +1678,7 @@ function ReaderScreenContent() {
 
         {visibleTab === "reader" &&
           readerBlocks.length > 0 &&
-          initialRestoreCompleteFor !== pdfId && (
+          initialRestoreCompleteFor !== pdfId && !horizontalPreparing && (
             <View
               pointerEvents="none"
               className="absolute inset-0 z-[3] items-center justify-center bg-[#F7F5EC] dark:bg-[#10120F]"
@@ -1679,7 +1688,7 @@ function ReaderScreenContent() {
           )}
       </View>
 
-      {transitionMaskVisible && !rotationMaskVisible && (
+      {transitionMaskVisible && !rotationMaskVisible && !horizontalPreparing && (
         <View
           style={{
             position: "absolute",

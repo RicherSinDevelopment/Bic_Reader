@@ -1,3 +1,4 @@
+import { VERTICAL_LOADED_BOUNDARY } from "@/architecture/anchor/VerticalLoadedBoundary";
 import { VERTICAL_MUTATION_QUEUE } from "@/architecture/anchor/VerticalMutationQueue";
 import { VERTICAL_WORD_TARGET } from "@/architecture/anchor/VerticalWordTarget";
 import { READER_GUIDE_DIMMING_SCRIPT } from "@/architecture/ReaderGuideDimming";
@@ -118,6 +119,9 @@ type ReaderViewProps = {
   headerOverlayHeight?: number;
   topBarVisible?: boolean;
   blocks: ExtractedPdfBlock[];
+  extractedPageSizes?: Record<number, { width: number; height: number }>;
+  extractionError?: string | null;
+  onRequestPage?: (page: number) => void;
   pageCount: number;
   sourcePageCount?: number;
   destination?: ReaderDestination | null;
@@ -283,7 +287,9 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
 // content process. Nearby pages preserve ordinary scrolling while keeping a
 // rotation comfortably bounded.
 const APPEND_AHEAD_PAGES = 24;
-const APPEND_BEHIND_PAGES = 12;
+// Keep a real buffer behind distant table-of-contents destinations. A real
+// buffer is stable while the reader scrolls; fabricated gap pages are not.
+const APPEND_BEHIND_PAGES = 48;
 // Retain enough history that a normal reader does not repeatedly delete and
 // reinsert sections while moving a few pages backward. The previous tiny
 // threshold caused corrective scrolls often enough to feel like the viewport
@@ -302,6 +308,9 @@ const ReaderView = ({
   headerOverlayHeight = 0,
   topBarVisible = true,
   blocks,
+  extractedPageSizes,
+  extractionError,
+  onRequestPage,
   pageCount,
   sourcePageCount,
   destination,
@@ -366,6 +375,10 @@ const ReaderView = ({
     () => blocks.map((block) => block.text.trim()).join("\n\n"),
     [blocks],
   );
+  const confirmedBlankPages = useMemo(() => {
+    const textPages = new Set(blocks.map((block) => block.page));
+    return Object.keys(extractedPageSizes ?? {}).map(Number).filter((page) => !textPages.has(page));
+  }, [blocks, extractedPageSizes]);
   const [initialBlocks] = useState(() => {
     const firstPage = blocks[0]?.page ?? 1;
     return blocks.filter((block) => block.page < firstPage + 5);
@@ -578,7 +591,7 @@ const ReaderView = ({
   const activeModeDestination = destination;
 
   useEffect(() => {
-    if (!webViewReady) return;
+    if (!webViewReady || isPaged || !isActive) return;
     const revision = ++annotationDeliveryRevisionRef.current;
     // Only send the window of the book around the current position (plus any
     // pending navigation target). The JS prunes sections far behind the view;
@@ -622,6 +635,7 @@ const ReaderView = ({
       webViewRef.current?.postMessage(
         JSON.stringify({
           type: "readerWindowStatus",
+          blankPages: confirmedBlankPages,
           hasMore,
         }),
       );
@@ -630,6 +644,7 @@ const ReaderView = ({
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: "appendBlocks",
+        blankPages: confirmedBlankPages,
         revision,
         html: blocksToMarkup(appended),
         completePages: [...new Set(appended.map((block) => block.page))].filter((page) =>
@@ -649,6 +664,9 @@ const ReaderView = ({
       return () => clearTimeout(timer);
     }
   }, [
+    confirmedBlankPages,
+    isPaged,
+    isActive,
     appendPass,
     activeModeDestination,
     blocks,
@@ -1404,8 +1422,8 @@ const ReaderView = ({
           }
           body.reader-paged .page-divider { display: none; }
           #reader-loader {
-            min-height: 100vh;
-            padding: 28px 12px 150px;
+            display: none;
+            padding: 28px 12px;
             color: rgba(71, 85, 105, 0.7);
             font-size: 13px;
             text-align: center;
@@ -1632,6 +1650,9 @@ const ReaderView = ({
     try {
       const message = JSON.parse(event.data);
 
+      if (message.type === 'readerWindowStatus' || message.type === 'appendBlocks') {
+        if (message.blankPages) window.__readerBlankPages = new Set(message.blankPages);
+      }
       if (message.type === 'readerWindowStatus') {
         window.__readerHasMore = Boolean(message.hasMore);
         const loader = document.getElementById('reader-loader');
@@ -1679,7 +1700,15 @@ const ReaderView = ({
             return rect.bottom > anchorProbeY && rect.top < window.innerHeight;
           }) || null;
         }
-        const anchorTop = viewportAnchor?.getBoundingClientRect().top;
+        const batch = window.__readerAppendBatch;
+        if (batch?.anchor) viewportAnchor = batch.anchor;
+        const anchorTop = batch?.anchor
+          ? batch.anchorTop
+          : viewportAnchor?.getBoundingClientRect().top;
+        if (batch && !batch.anchor && viewportAnchor) {
+          batch.anchor = viewportAnchor;
+          batch.anchorTop = anchorTop;
+        }
         if (message.html) {
           const template = document.createElement('template');
           template.innerHTML = message.html;
@@ -1772,17 +1801,22 @@ const ReaderView = ({
           message.notes || []
         );
         // Include annotation layout in the compensation, after all DOM edits.
-        if (viewportAnchor && Number.isFinite(anchorTop)) {
-          const insertedOffset = viewportAnchor.getBoundingClientRect().top - anchorTop;
-          if (Math.abs(insertedOffset) > 0.5) {
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'readerScrollCorrection', revision: message.revision,
-              delta: insertedOffset, scrollY: window.scrollY,
-              runtimeId: window.__readerRuntimeId
-            }));
-            window.scrollBy(0, insertedOffset);
+        const restoreAppendPosition = function() {
+          if (viewportAnchor && Number.isFinite(anchorTop)) {
+            const insertedOffset = viewportAnchor.getBoundingClientRect().top - anchorTop;
+            if (Math.abs(insertedOffset) > 0.5) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'readerScrollCorrection', revision: message.revision,
+                delta: insertedOffset, scrollY: window.scrollY,
+                runtimeId: window.__readerRuntimeId
+              }));
+              window.__readerAppendCorrectionY = window.scrollY + insertedOffset;
+              window.scrollBy(0, insertedOffset);
+            }
           }
-        }
+        };
+        if (batch) batch.restore = restoreAppendPosition;
+        else restoreAppendPosition();
         if (window.__pendingSourceDestination) window.__tryPendingSourceDestination?.();
         // Ordinary append leaves scrolling and live reporting uninterrupted.
         return;
@@ -2620,6 +2654,11 @@ const ReaderView = ({
         return;
       }
 
+      if (data.type === "readerBoundaryPage" && !isPaged && isActive && Number.isFinite(data.page)) {
+        onRequestPage?.(Math.max(1, Math.min(pageCount, data.page)));
+        return;
+      }
+
       if (data.type === "readerWindowPage" && !isPaged && isActive && Number.isFinite(data.page)) {
         setCurrentSourcePage(Math.max(1, Math.min(pageCount, data.page)));
         return;
@@ -2998,6 +3037,11 @@ const ReaderView = ({
               {isPaged && (
                 <View style={StyleSheet.absoluteFill}>
                   <HorizontalReaderPager
+                    preparedPages={extractedPageSizes}
+                    onRequestPage={onRequestPage}
+                    extractedPageCount={extractedPageSizes ? Object.keys(extractedPageSizes).length : undefined}
+                    sourcePageCount={sourcePageCount ?? pageCount}
+                    extractionError={extractionError}
                     blocks={blocks}
                     isActive={isActive}
                     userHighlights={pagerHighlights}
@@ -3185,7 +3229,7 @@ const ReaderView = ({
               window.__readerRuntimeId = ${runtimeId};
               window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'readerRuntimeReady', runtimeId: window.__readerRuntimeId,
-                version: 'rotation-window-20260910'
+                version: 'owned-boundary-20260911'
               }));
               window.__readerAnchorDebug = ${ANCHOR_DEBUG};
               ${VERTICAL_NAVIGATION_RUNTIME}
@@ -4028,6 +4072,7 @@ const ReaderView = ({
               }
 
               function sourcePageAtViewport() {
+                window.__constrainReaderLoadedBoundary?.();
                 const sections = Array.from(
                   document.querySelectorAll('[data-source-page-section]')
                 );
@@ -4190,6 +4235,7 @@ const ReaderView = ({
               window.__applyReaderTransition = applyReaderTransition;
 
               ${VERTICAL_SCROLL_FLIP_SCRIPT}
+              ${VERTICAL_LOADED_BOUNDARY}
 
               let readerResizeFrame = 0;
               window.addEventListener('resize', function() {
@@ -4375,7 +4421,7 @@ const ReaderView = ({
                   ? visibleSection.getBoundingClientRect().top
                   : null;
 
-                const mutationToken = window.__readerNavigation?.begin();
+                // Pruning keeps section heights and must not disable scroll boundaries.
                 const prunedPages = [];
                 sections.forEach(function(section) {
                   const page = Number(section.dataset.sourcePageSection);
@@ -4391,7 +4437,7 @@ const ReaderView = ({
                     prunedPages.push(page);
                   }
                 });
-                if (!prunedPages.length) { window.__readerNavigation?.settle(mutationToken); return; }
+                if (!prunedPages.length) return;
 
                 // Keep the visible content from jumping when the sections
                 // above it are removed.
@@ -4407,7 +4453,6 @@ const ReaderView = ({
                   type: 'prunedPages',
                   pages: prunedPages
                 }));
-                window.__readerNavigation?.settle(mutationToken);
               }
 
               window.__prepareVerticalRotation = function() { pruneDistantSections(4); };
@@ -4425,6 +4470,14 @@ const ReaderView = ({
                 function() {
                   if (window.__readerNavigation?.suppressed || window.__verticalScrollFlipRestoring) return;
 
+                  // A prepend correction preserves the same words on screen;
+                  // it must not masquerade as a swipe and toggle reader chrome.
+                  const correctionY = window.__readerAppendCorrectionY;
+                  window.__readerAppendCorrectionY = null;
+                  if (Number.isFinite(correctionY) && Math.abs(window.scrollY - correctionY) <= 1) {
+                    redrawLineGuideDuringScroll();
+                    return;
+                  }
                   redrawLineGuideDuringScroll();
 
                   if (searchHighlightDismissArmed) {
@@ -4450,6 +4503,7 @@ const ReaderView = ({
                       function() {
 
                         if (window.__readerNavigation?.suppressed || window.__verticalScrollFlipRestoring) { scrollTimer = null; return; }
+                        window.__constrainReaderLoadedBoundary?.();
                         lastScrollMetrics.y = window.scrollY;
                         lastScrollMetrics.height =
                           document.documentElement.scrollHeight;

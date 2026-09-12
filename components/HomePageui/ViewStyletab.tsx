@@ -3,6 +3,7 @@ import { Animated, Pressable, Text, View } from "react-native";
 import { homepageDepth } from "@/components/HomePageui/depthStyles";
 
 interface PdfLayoutTabsProps {
+  initialColumns?: 1 | 2 | 3;
   onColumnsChange: (columns: 1 | 2 | 3) => void;
 }
 
@@ -10,9 +11,9 @@ const SEGMENT_WIDTH = 44;
 const SEGMENT_HEIGHT = 40;
 const CONTAINER_PADDING = 4;
 
-export default function PdfLayoutTabs({ onColumnsChange }: PdfLayoutTabsProps) {
-  const [selectedColumns, setSelectedColumns] = useState<1 | 2 | 3>(1);
-  const [indicatorX] = useState(() => new Animated.Value(0));
+export default function PdfLayoutTabs({ initialColumns = 1, onColumnsChange }: PdfLayoutTabsProps) {
+  const [selectedColumns, setSelectedColumns] = useState<1 | 2 | 3>(initialColumns);
+  const [indicatorX] = useState(() => new Animated.Value((initialColumns - 1) * SEGMENT_WIDTH));
 
   const selectColumns = (columns: 1 | 2 | 3) => {
     setSelectedColumns(columns);

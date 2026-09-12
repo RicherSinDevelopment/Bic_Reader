@@ -15,12 +15,16 @@ import { useAuth } from "@/providers/AuthProvider";
 import { authRoute } from "@/lib/authNavigation";
 import { addSafeBreadcrumb } from "@/services/errorReporting";
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import Storage from "expo-sqlite/kv-store";
+import React, { useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, Text, View } from "react-native";
 
 
 const HomePage = () => {
-  const [numColumns, setNumColumns] = useState<1 | 2 | 3>(1);
+  const [numColumns, setNumColumns] = useState<1 | 2 | 3>(() => {
+    const saved = Number(Storage.getItemSync("bic.home.layout"));
+    return saved === 2 || saved === 3 ? saved : 1;
+  });
   const { pdfs, importPdf, deletePdf, renamePdf } = usePdfLibrary();
   const { isPremium } = useRevenueCat();
   const { session } = useAuth();
@@ -30,6 +34,10 @@ const HomePage = () => {
   const [showLibraryLimit, setShowLibraryLimit] = useState(false);
   const freePdfUsage = Math.min(pdfs.length, FREE_PDF_LIMIT);
   const isAtFreeLimit = !isPremium && pdfs.length >= FREE_PDF_LIMIT;
+
+  useEffect(() => {
+    Storage.setItemSync("bic.home.layout", String(numColumns));
+  }, [numColumns]);
 
   const sortedPdfs = useMemo(() => {
     return [...pdfs].sort((firstPdf, secondPdf) => {
@@ -120,6 +128,7 @@ const HomePage = () => {
       {/* Column Layout Tabs */}
       <View className="shrink-0 items-end">
         <PdfLayoutTabs
+          initialColumns={numColumns}
           onColumnsChange={setNumColumns}
         />
       </View>

@@ -1,4 +1,4 @@
-import { buildPages } from '@/components/HorizontalReaderPager';
+import { buildPages, cachedBuildPages } from '@/components/HorizontalReaderPager';
 import type { ExtractedPdfBlock } from '@/modules/bic-pdf-reader';
 
 jest.mock('react-native-webview', () => ({ WebView: 'WebView' }));
@@ -49,4 +49,59 @@ test('multiple measured breaks in one source block retain every word in order', 
 test('a temporarily short viewport does not create one-character pages', () => {
   const pages = buildPages([block], 30, 1, 24, 20, 1);
   expect(pages.length).toBeLessThan(text.length / 4);
+});
+
+
+test('source-page caching preserves titles, paragraph context, and measured boundaries', () => {
+  const blocks = [
+    { ...block, id: 'heading', page: 1, kind: 'heading', text: 'First Chapter' },
+    { ...block, id: 'one', page: 1 },
+    { ...block, id: 'two', page: 2 },
+    { ...block, id: 'heading2', page: 3, kind: 'heading', text: 'Second Chapter' },
+    { ...block, id: 'three', page: 3 },
+  ] as ExtractedPdfBlock[];
+  const boundary = { blockId: 'two', blockOffset: text.indexOf('Espejo'), wordIndex: 10 };
+  const breaks = [{ blockId: 'three', blockOffset: text.indexOf('Justin'), wordIndex: 15 }];
+  expect(cachedBuildPages(blocks, 48, 160, 24, 20, 1, boundary, breaks))
+    .toEqual(buildPages(blocks, 48, 160, 24, 20, 1, boundary, breaks));
+});
+
+test('a fit correction in a 4000-page book reuses every unaffected source page', () => {
+  const blocks = Array.from({ length: 4000 }, (_, index) => ({
+    ...block, id: `page-${index + 1}`, page: index + 1,
+  }));
+  const initial = cachedBuildPages(blocks, 100, 1000, 24, 20, 1);
+  expect(initial).toHaveLength(4000);
+  const correction = { blockId: 'page-2000', blockOffset: text.indexOf('Espejo'), wordIndex: 10 };
+  const updated = cachedBuildPages(blocks, 100, 1000, 24, 20, 1, undefined, [correction]);
+  expect(updated).toHaveLength(4001);
+  for (let index = 0; index < 4000; index++) {
+    if (index === 1999) continue;
+    expect(updated[index < 1999 ? index : index + 1]).toBe(initial[index]);
+  }
+  expect(updated.flat().map(segment => segment.text).join(' ').replace(/\s+/g, ' '))
+    .toBe(initial.flat().map(segment => segment.text).join(' ').replace(/\s+/g, ' '));
+});
+
+test('typography changes invalidate cached source-page layout', () => {
+  const blocks = [block];
+  const initial = cachedBuildPages(blocks, 100, 1000, 24, 20, 1);
+  const smaller = cachedBuildPages(blocks, 30, 160, 24, 20, 1);
+  expect(smaller).toEqual(buildPages(blocks, 30, 160, 24, 20, 1));
+  expect(smaller[0]).not.toBe(initial[0]);
+});
+
+test('background extraction with cloned blocks preserves existing horizontal page objects', () => {
+  const session = {};
+  const first = Array.from({ length: 4000 }, (_, index) => ({ ...block, id: `source-${index}`, page: index + 1 }));
+  const before = cachedBuildPages(first, 100, 1000, 24, 20, 1, undefined, [], session);
+  const updated = [...first.map(item => ({ ...item })), { ...block, id: 'new-page', page: 4001 }];
+  const after = cachedBuildPages(updated, 100, 1000, 24, 20, 1, undefined, [], session);
+  expect(after.length).toBe(before.length + 1);
+  before.forEach((page, index) => expect(after[index]).toBe(page));
+  const changed = updated.map(item => item.page === 2000 ? { ...item, text: 'Revised content.' } : { ...item });
+  const revised = cachedBuildPages(changed, 100, 1000, 24, 20, 1, undefined, [], session);
+  expect(revised[1999]).not.toBe(after[1999]);
+  expect(revised[1998]).toBe(after[1998]);
+  expect(revised[2000]).toBe(after[2000]);
 });

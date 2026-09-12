@@ -5,6 +5,7 @@ import * as Haptics from "expo-haptics";
 import { SymbolView } from "expo-symbols";
 
 interface PdfLayoutTabsProps {
+  initialColumns?: 1 | 2 | 3;
   onColumnsChange: (columns: 1 | 2 | 3) => void;
 }
 
@@ -31,9 +32,9 @@ const COLUMN_OPTIONS = [
   },
 ] as const;
 
-export default function PdfLayoutTabs({ onColumnsChange }: PdfLayoutTabsProps) {
-  const [selectedColumns, setSelectedColumns] = useState<1 | 2 | 3>(1);
-  const [indicatorX] = useState(() => new Animated.Value(0));
+export default function PdfLayoutTabs({ initialColumns = 1, onColumnsChange }: PdfLayoutTabsProps) {
+  const [selectedColumns, setSelectedColumns] = useState<1 | 2 | 3>(initialColumns);
+  const [indicatorX] = useState(() => new Animated.Value((initialColumns - 1) * SEGMENT_WIDTH));
   const canUseGlass = isGlassEffectAPIAvailable();
   const isDark = useColorScheme() === "dark";
 

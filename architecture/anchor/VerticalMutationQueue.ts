@@ -12,10 +12,20 @@ export const VERTICAL_MUTATION_QUEUE = String.raw`
   }
   function flush() {
     if (busy()) { schedule(); return; }
-    const next = pending.entries().next().value;
-    if (!next) return;
-    pending.delete(next[0]);
-    next[1]();
+    // Bound the main-thread work while avoiding a visible correction for
+    // every queued message. All four mutations share one viewport anchor.
+    const entries = Array.from(pending.entries()).slice(0, 4);
+    if (!entries.length) return;
+    const batch = window.__readerAppendBatch = {};
+    try {
+      entries.forEach(function(entry) {
+        pending.delete(entry[0]);
+        entry[1]();
+      });
+    } finally {
+      try { batch.restore?.(); }
+      finally { window.__readerAppendBatch = null; }
+    }
     if (pending.size) schedule();
   }
   window.__deferReaderAppend = function(revision, apply) {

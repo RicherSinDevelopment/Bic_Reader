@@ -84,6 +84,11 @@ export type ReaderNote = TextRange & { id: string; text: string };
 type MarginPreset = "compact" | "comfortable" | "relaxed";
 
 type Props = {
+  extractedPageCount?: number;
+  preparedPages?: Record<number, unknown>;
+  onRequestPage?: (page: number) => void;
+  sourcePageCount?: number;
+  extractionError?: string | null;
   blocks: ExtractedPdfBlock[];
   isActive?: boolean;
   userHighlights?: Array<{
@@ -169,6 +174,48 @@ function escapeHtml(value: string) {
     .replaceAll('"', "&quot;");
 }
 
+function sameRenderedSegment(left: Segment, right: Segment) {
+  return (
+    left.blockId === right.blockId &&
+    left.startOffset === right.startOffset &&
+    left.text === right.text &&
+    left.kind === right.kind &&
+    left.spacingBefore === right.spacingBefore &&
+    left.spacingAfter === right.spacingAfter &&
+    left.paragraphStart === right.paragraphStart &&
+    left.sectionOpening === right.sectionOpening &&
+    left.sourcePage === right.sourcePage &&
+    left.runningTitle === right.runningTitle
+  );
+}
+
+// True when `next` renders as a prefix of `rendered`: the same page with some
+// of its own tail removed. The pager only rewrites a document when the visible
+// text actually changes, and a removed tail sat below the page's reserved
+// footer space.
+function isRenderedPagePrefix(rendered: Segment[], next: Segment[]) {
+  if (!next.length || next.length > rendered.length) return false;
+  for (let index = 0; index < next.length - 1; index += 1) {
+    if (!sameRenderedSegment(rendered[index], next[index])) return false;
+  }
+  const last = next[next.length - 1];
+  const replaced = rendered[next.length - 1];
+  if (!replaced) return false;
+  return (
+    last.blockId === replaced.blockId &&
+    last.startOffset === replaced.startOffset &&
+    replaced.text.startsWith(last.text) &&
+    last.kind === replaced.kind &&
+    last.spacingBefore === replaced.spacingBefore &&
+    last.paragraphStart === replaced.paragraphStart &&
+    last.sectionOpening === replaced.sectionOpening &&
+    last.sourcePage === replaced.sourcePage &&
+    last.runningTitle === replaced.runningTitle
+  );
+  // spacingAfter intentionally differs: a trimmed segment is no longer the end
+  // of its block. That margin only affected the removed tail.
+}
+
 function HorizontalSelectablePage({
   page,
   userHighlights,
@@ -204,6 +251,7 @@ function HorizontalSelectablePage({
   onOverflow,
   layoutKey,
   topContentInset,
+  horizontalContentInset,
   onGuideLines,
   guideWord,
   onGuideWordRects,
@@ -250,6 +298,7 @@ function HorizontalSelectablePage({
   onOverflow?: (anchor: PageAnchor) => void;
   layoutKey: string;
   topContentInset: number;
+  horizontalContentInset: number;
   onGuideLines?: (lines: GuideLine[]) => void;
   guideWord?: TextRange;
   onGuideWordRects?: (rects: GuideLine[], target?: TextRange) => void;
@@ -259,9 +308,10 @@ function HorizontalSelectablePage({
   pageBottomMargin: number;
 }) {
   const webViewRef = useRef<WebView>(null);
+  const recoveryAttempts = useRef(0);
+  const [processFailed, setProcessFailed] = useState(false);
   const runningHeader =
     page.find((segment) => segment.runningTitle)?.runningTitle ?? "";
-  const pageNumber = String(readerPageNumber);
   const selectionRangesRef = useRef<TextRange[]>([]);
   const [selectionHasHighlight, setSelectionHasHighlight] = useState(false);
   const horizontalReaderMenuItems = [
@@ -386,7 +436,7 @@ function HorizontalSelectablePage({
   const html = useMemo(
     () => `<!doctype html><html dir="${readingDirection}"><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
     ${fontFaceCss}
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:${topContentInset}px 0 ${bottomPadding}px;color:${textColor};font-family:${webFontFamily},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.page-running-header,.page-number{position:fixed;z-index:2;left:0;right:0;color:${textColor};opacity:.48;text-align:center;pointer-events:none}.page-running-header{top:${pageTopMargin}px;padding:0 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${Math.max(11, fontSize * 0.58)}px;font-weight:600;letter-spacing:.025em}.page-number{bottom:${pageBottomMargin}px;font-size:${Math.max(11, fontSize * 0.62)}px;font-variant-numeric:tabular-nums}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.segment.paragraph-start{text-indent:1.35em}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.05s ease-out forwards}@keyframes readerSwitchPulse{0%{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent);box-shadow:0 0 0 0 color-mix(in srgb,${switchHighlightColor} 24%,transparent)}30%{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,${switchHighlightColor} 18%,transparent)}58%{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,${switchHighlightColor} 10%,transparent)}100%{background-color:transparent;box-shadow:0 0 0 0 transparent}}@keyframes readerSwitchFade{from{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent)}to{background-color:transparent}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body><div class="page-running-header">${escapeHtml(runningHeader)}</div>${markup}<div class="page-number">${pageNumber}</div><script>
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:${backgroundColor}}body{padding:${topContentInset}px ${horizontalContentInset}px ${bottomPadding}px;color:${textColor};font-family:${webFontFamily},sans-serif;font-weight:${bold ? 700 : 400};letter-spacing:${letterSpacing}px;word-spacing:${wordSpacing}px;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;${automaticHyphenation ? "-webkit-hyphens:manual;hyphens:manual" : "-webkit-hyphens:none;hyphens:none"}}.page-running-header,.page-number{position:fixed;z-index:2;left:${horizontalContentInset}px;right:${horizontalContentInset}px;color:${textColor};opacity:.48;text-align:center;pointer-events:none}.page-running-header{top:${pageTopMargin}px;padding:0 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${Math.max(11, fontSize * 0.58)}px;font-weight:600;letter-spacing:.025em}.page-number{bottom:${pageBottomMargin}px;font-size:${Math.max(11, fontSize * 0.62)}px;font-variant-numeric:tabular-nums}.segment{white-space:pre-wrap;overflow-wrap:break-word;text-align:${readingDirection === "rtl" ? "right" : "left"};direction:${readingDirection};unicode-bidi:plaintext}.segment.paragraph-start{text-indent:1.35em}.reader-user-highlight,.reader-search-highlight,.reader-switch-highlight,.tts-word-active{border-radius:3px;color:inherit;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}.reader-switch-highlight{animation:readerSwitchPulse 1.05s ease-out forwards}@keyframes readerSwitchPulse{0%{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent);box-shadow:0 0 0 0 color-mix(in srgb,${switchHighlightColor} 24%,transparent)}30%{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent);box-shadow:0 0 0 4px color-mix(in srgb,${switchHighlightColor} 18%,transparent)}58%{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,${switchHighlightColor} 10%,transparent)}100%{background-color:transparent;box-shadow:0 0 0 0 transparent}}@keyframes readerSwitchFade{from{background-color:color-mix(in srgb,${switchHighlightColor} 88%,transparent)}to{background-color:transparent}}@media(prefers-reduced-motion:reduce){.reader-switch-highlight{animation:readerSwitchFade .8s ease-out forwards}}.reader-note{text-decoration-line:underline;text-decoration-color:#dc2626;text-decoration-thickness:2px;text-underline-offset:3px}.reader-note-marker{display:inline-flex;width:18px;height:18px;margin:0 3px;padding:0;align-items:center;justify-content:center;border:0;border-radius:9px;background:#dc2626;color:#fff;font-size:17px;line-height:14px;vertical-align:middle}::selection{background:#93c5fd;color:#1e293b}</style></head><body><div class="page-running-header">${escapeHtml(runningHeader)}</div><main id="reader-page-content">${markup}</main><div class="page-number"></div><script>
     window.__selectionRanges=[];
     function cleanLength(value){return String(value||'').replace(/\\u00ad/g,'').length}
     function rawIndexForClean(value,target){let clean=0;for(let index=0;index<value.length;index++){if(value[index]!=='\\u00ad'){if(clean===target)return index;clean++}}return value.length}
@@ -426,6 +476,7 @@ function HorizontalSelectablePage({
     document.addEventListener('click',function(event){const marker=event.target.closest('[data-open-note]');if(marker)window.ReactNativeWebView.postMessage(JSON.stringify({type:'openNote',noteId:marker.dataset.openNote}))});
   </script></body></html>`,
     [
+      horizontalContentInset,
       automaticHyphenation,
       backgroundColor,
       bold,
@@ -435,7 +486,6 @@ function HorizontalSelectablePage({
       letterSpacing,
       markup,
       pageBottomMargin,
-      pageNumber,
       pageTopMargin,
       readingDirection,
       runningHeader,
@@ -447,13 +497,106 @@ function HorizontalSelectablePage({
     ],
   );
 
-  const source = useMemo(() => ({ html }), [html]);
+  // `html` is exactly `head + markup + tail`, which lets the parts that do not
+  // depend on this page's own text be compared between renders.
+  const [htmlHead, htmlTail] = useMemo(() => {
+    if (!markup) return [html, ""];
+    const marker = html.indexOf(markup);
+    return marker < 0
+      ? [html, ""]
+      : [html.slice(0, marker), html.slice(marker + markup.length)];
+  }, [html, markup]);
+  // WKWebView navigates whenever `source` changes (`setSource:` calls
+  // `loadHTMLString:`), which blanks the page for a frame or two. A measured
+  // reflow that only shortens this page's own tail removes text below the page's
+  // reserved footer space — the fit script drops it in place — so the loaded
+  // document already renders what the new page would. Replacing it is what made
+  // every page flash a moment after it appeared.
+  const pushedDocumentRef = useRef<{
+    head: string;
+    tail: string;
+    layoutKey: string;
+    renderSignature: string;
+    page: Segment[];
+    source: { html: string };
+  } | null>(null);
+  // Highlights and notes reach a page as fresh arrays on every render, so the
+  // render inputs have to be compared by value.
+  const renderSignature = useMemo(
+    () =>
+      JSON.stringify([
+        fontSize,
+        lineHeight,
+        searchHighlight ?? null,
+        userHighlights ?? [],
+        userNotes ?? [],
+      ]),
+    [fontSize, lineHeight, searchHighlight, userHighlights, userNotes],
+  );
+  const desiredSource = useMemo(() => {
+    const previous = pushedDocumentRef.current;
+    if (
+      previous &&
+      previous.head === htmlHead &&
+      previous.tail === htmlTail &&
+      previous.layoutKey === layoutKey &&
+      previous.renderSignature === renderSignature &&
+      isRenderedPagePrefix(previous.page, page)
+    ) {
+      // Keep the loaded document but remember the page it now represents, so a
+      // revisit does not replace it a second time.
+      previous.page = page;
+      return previous.source;
+    }
+    const next = {
+      head: htmlHead,
+      tail: htmlTail,
+      layoutKey,
+      renderSignature,
+      page,
+      source: { html },
+    };
+    pushedDocumentRef.current = next;
+    return next.source;
+  }, [
+    html,
+    htmlHead,
+    htmlTail,
+    layoutKey,
+    page,
+    renderSignature,
+  ]);
+  // Keep the native document identity fixed for this mounted cell. Updates
+  // belong inside the document, not in WKWebView's navigation lifecycle.
+  const source = useRef(desiredSource).current;
+  const deliveredHtml = useRef(source.html);
+  // Pagination before this page can change its number without changing its
+  // text. Update the label in place instead of rebuilding the HTML, which would
+  // navigate the WKWebView and flash the whole page.
+  //
+  // WKWebView evaluates `injectJavaScript` immediately, so this runs before the
+  // page document exists whenever the native view is still on about:blank.
+  // `document.querySelector('.page-number').textContent = ...` then throws
+  // "TypeError: null is not an object" for every page that mounts ahead of its
+  // first document — hundreds of failed bridge round trips while swiping a long
+  // book. The lookup therefore has to tolerate a missing node.
+  const pageNumberInjection = `(function(){var label=document.querySelector('.page-number');if(label)label.textContent=${JSON.stringify(String(readerPageNumber))};return true;})();true;`;
+  // Scripts that address this page's DOM are only meaningful once the document
+  // has parsed. Until then onLoadEnd owns the delivery, so a cold mount pushes
+  // nothing across the bridge and each mounted page stops producing errors.
+  const contentLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!contentLoadedRef.current) return;
+    webViewRef.current?.injectJavaScript(pageNumberInjection);
+  }, [pageNumberInjection]);
+
   const ttsInjection = useMemo(
     () =>
       `window.__setTtsHighlight?.(${JSON.stringify(spokenWordHighlight?.blockId ?? "")},${spokenWordHighlight?.offset ?? 0},${spokenWordHighlight?.length ?? 0});true;`,
     [spokenWordHighlight],
   );
   useEffect(() => {
+    if (!contentLoadedRef.current) return;
     webViewRef.current?.injectJavaScript(ttsInjection);
   }, [ttsInjection]);
   const switchHighlightInjection = useMemo(
@@ -462,6 +605,7 @@ function HorizontalSelectablePage({
     [switchHighlight],
   );
   useEffect(() => {
+    if (!contentLoadedRef.current) return;
     webViewRef.current?.injectJavaScript(switchHighlightInjection);
   }, [switchHighlightInjection]);
   const guideWordInjection = useMemo(
@@ -470,14 +614,57 @@ function HorizontalSelectablePage({
     [guideWord],
   );
   useEffect(() => {
+    if (!contentLoadedRef.current) return;
     webViewRef.current?.injectJavaScript(guideWordInjection);
   }, [guideWordInjection]);
   useEffect(() => {
+    if (!contentLoadedRef.current) return;
     if (!guideActive) return;
     webViewRef.current?.injectJavaScript(
       "window.__reportGuideGeometry?.();true;",
     );
   }, [guideActive]);
+  const updateDocument = () => {
+    if (!contentLoadedRef.current || deliveredHtml.current === desiredSource.html) return;
+    deliveredHtml.current = desiredSource.html;
+    webViewRef.current?.injectJavaScript(`
+      (function() {
+        const next = new DOMParser().parseFromString(${JSON.stringify(desiredSource.html)}, 'text/html');
+        const content = document.getElementById('reader-page-content');
+        const incoming = next.getElementById('reader-page-content');
+        if (!content || !incoming) return;
+        if (document.head.innerHTML !== next.head.innerHTML) document.head.innerHTML = next.head.innerHTML;
+        if (content.innerHTML !== incoming.innerHTML) content.innerHTML = incoming.innerHTML;
+        document.querySelector('.page-running-header').textContent = next.querySelector('.page-running-header').textContent;
+        window.__readerFitLayoutKey = ${JSON.stringify(layoutKey)};
+        ${pageNumberInjection}
+        ${ttsInjection}
+        ${switchHighlightInjection}
+        ${guideWordInjection}
+        Promise.resolve(document.fonts && document.fonts.ready).then(function() {
+          requestAnimationFrame(function() {
+            window.__reportHorizontalPageFit?.(${bottomPadding});
+            requestAnimationFrame(function() {
+              window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'horizontalPagePainted', layoutKey: window.__readerFitLayoutKey }));
+            });
+          });
+        });
+      })();true;
+    `);
+  };
+  useEffect(updateDocument, [desiredSource, layoutKey, bottomPadding, pageNumberInjection,
+    ttsInjection, switchHighlightInjection, guideWordInjection]);
+  if (processFailed) return (
+    <View style={{ flex: 1, backgroundColor, alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <Text style={{ color: textColor, textAlign: "center" }}>This page could not stay open.</Text>
+      <Pressable accessibilityRole="button" onPress={() => {
+        recoveryAttempts.current = 0;
+        contentLoadedRef.current = false;
+        deliveredHtml.current = source.html;
+        setProcessFailed(false);
+      }}><Text style={{ color: textColor, padding: 16 }}>Retry page</Text></Pressable>
+    </View>
+  );
   return (
     <WebView
       ref={webViewRef}
@@ -485,6 +672,8 @@ function HorizontalSelectablePage({
       style={[StyleSheet.absoluteFill, { backgroundColor }]}
       containerStyle={{ backgroundColor }}
       scrollEnabled={false}
+      automaticallyAdjustContentInsets={false}
+      contentInsetAdjustmentBehavior="never"
       bounces={false}
       overScrollMode="never"
       showsHorizontalScrollIndicator={false}
@@ -494,9 +683,19 @@ function HorizontalSelectablePage({
           ? horizontalReaderMenuItems
           : horizontalReaderMenuItemsWithoutRemove
       }
+      onLoadStart={() => {
+        // The document is being replaced, so DOM-driven injections wait for the
+        // matching onLoadEnd instead of evaluating against a half-built page.
+        contentLoadedRef.current = false;
+        deliveredHtml.current = source.html;
+      }}
       onLoadEnd={() => {
+        contentLoadedRef.current = true;
+        updateDocument();
+        webViewRef.current?.injectJavaScript(pageNumberInjection);
         webViewRef.current?.injectJavaScript(ttsInjection);
         webViewRef.current?.injectJavaScript(switchHighlightInjection);
+        webViewRef.current?.injectJavaScript(guideWordInjection);
         webViewRef.current?.injectJavaScript(`
         window.__reportGuideGeometry = function() {
           setTimeout(function() {
@@ -585,12 +784,20 @@ function HorizontalSelectablePage({
         if (${guideActive ? "true" : "false"}) window.__reportGuideGeometry();
         true;
       `);
-        onReady?.();
         webViewRef.current?.injectJavaScript(`
           window.__readerFitLayoutKey = ${JSON.stringify(layoutKey)};
           ${HORIZONTAL_PAGE_FIT_SCRIPT}
           Promise.resolve(document.fonts && document.fonts.ready).then(function() {
-            requestAnimationFrame(function() { window.__reportHorizontalPageFit(${bottomPadding}); });
+            requestAnimationFrame(function() {
+              window.__reportHorizontalPageFit(${bottomPadding});
+              requestAnimationFrame(function() {
+                requestAnimationFrame(function() {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'horizontalPagePainted', layoutKey: window.__readerFitLayoutKey
+                  }));
+                });
+              });
+            });
           });
           true;
         `);
@@ -606,12 +813,15 @@ function HorizontalSelectablePage({
           surface: "horizontal-reader",
           recovery: "reload",
         });
-        webViewRef.current?.reload();
+        if (recoveryAttempts.current++ === 0) webViewRef.current?.reload();
+        else setProcessFailed(true);
       }}
       onMessage={(event) => {
         try {
           const message = JSON.parse(event.nativeEvent.data);
-          if (message.type === "horizontalPageOverflow" && message.layoutKey === layoutKey && typeof message.blockId === "string" && Number.isInteger(message.blockOffset)) {
+          if (message.type === "horizontalPagePainted" && message.layoutKey === layoutKey) {
+            onReady?.();
+          } else if (message.type === "horizontalPageOverflow" && message.layoutKey === layoutKey && typeof message.blockId === "string" && Number.isInteger(message.blockOffset)) {
             onOverflow?.({ blockId: message.blockId, blockOffset: message.blockOffset, wordIndex: 0 });
           } else if (message.type === "selection") {
             const hadSelection = selectionRangesRef.current.length > 0;
@@ -729,12 +939,32 @@ const MemoizedHorizontalSelectablePage = React.memo(
     previous.textColor === next.textColor &&
     previous.bottomPadding === next.bottomPadding &&
     previous.topContentInset === next.topContentInset &&
+    previous.horizontalContentInset === next.horizontalContentInset &&
     previous.guideWord === next.guideWord &&
     previous.guideActive === next.guideActive &&
     previous.readerPageNumber === next.readerPageNumber &&
     previous.pageTopMargin === next.pageTopMargin &&
     previous.pageBottomMargin === next.pageBottomMargin,
 );
+
+function isRunningTitle(block: ExtractedPdfBlock) {
+  const text = block.text.trim();
+  if (
+    (block.kind !== "title" && block.kind !== "heading") ||
+    !text ||
+    text.length > 100 ||
+    (text.match(/\S+/g)?.length ?? 0) > 12
+  )
+    return false;
+  const firstLetter = text.match(/\p{L}/u)?.[0];
+  const hasLetterCase =
+    firstLetter &&
+    firstLetter.toLocaleUpperCase() !== firstLetter.toLocaleLowerCase();
+  return Boolean(
+    firstLetter &&
+    (!hasLetterCase || firstLetter === firstLetter.toLocaleUpperCase()),
+  );
+}
 
 export function buildPages(
   blocks: ExtractedPdfBlock[],
@@ -745,6 +975,7 @@ export function buildPages(
   paragraphSpacing: number,
   boundary?: PageAnchor,
   measuredBreaks: PageAnchor[] = [],
+  context?: { runningTitle: string; previousKind?: ExtractedPdfBlock["kind"] },
 ) {
   const breaksByBlock = new Map<string, number[]>();
   for (const item of [...measuredBreaks, ...(boundary ? [boundary] : [])]) {
@@ -756,25 +987,7 @@ export function buildPages(
   for (const offsets of breaksByBlock.values()) offsets.sort((a, b) => a - b);
   const pages: Segment[][] = [[]];
   let usedHeight = 0;
-  const isRunningTitle = (block: ExtractedPdfBlock) => {
-    const text = block.text.trim();
-    if (
-      (block.kind !== "title" && block.kind !== "heading") ||
-      !text ||
-      text.length > 100 ||
-      (text.match(/\S+/g)?.length ?? 0) > 12
-    )
-      return false;
-    const firstLetter = text.match(/\p{L}/u)?.[0];
-    const hasLetterCase =
-      firstLetter &&
-      firstLetter.toLocaleUpperCase() !== firstLetter.toLocaleLowerCase();
-    return Boolean(
-      firstLetter &&
-      (!hasLetterCase || firstLetter === firstLetter.toLocaleUpperCase()),
-    );
-  };
-  let runningTitle = blocks.find(isRunningTitle)?.text.trim() ?? "";
+  let runningTitle = context?.runningTitle ?? blocks.find(isRunningTitle)?.text.trim() ?? "";
   let paginatedSourcePage: number | undefined;
 
   blocks.forEach((block, blockIndex) => {
@@ -798,10 +1011,10 @@ export function buildPages(
       runningTitle = block.text.trim();
     }
     let sourceOffset = 0;
-    const previousKind = blocks[blockIndex - 1]?.kind;
+    const previousKind = blockIndex === 0 ? context?.previousKind : blocks[blockIndex - 1]?.kind;
     const sectionOpening =
       block.kind === "paragraph" &&
-      (blockIndex === 0 ||
+      ((blockIndex === 0 && !context?.previousKind) ||
         previousKind === "title" ||
         previousKind === "heading");
     // Keep the pagination estimate identical to the rendered heading sizes;
@@ -901,15 +1114,18 @@ export function buildPages(
   return pages.filter((page) => page.length > 0);
 }
 
-// ReaderView stays mounted while its horizontal child is swapped out. Keep a
-// small pagination cache keyed by that stable blocks array so returning to the
-// pager does not synchronously lay out the whole book again.
-const paginationCache = new WeakMap<
-  ExtractedPdfBlock[],
-  Map<string, Segment[][]>
->();
+// Source pages are independent pagination units. A measured break on one
+// page must not recreate thousands of unrelated pages and their WebViews.
+const paginationCache = new WeakMap<ExtractedPdfBlock[], {
+  groups: Array<{
+    blocks: ExtractedPdfBlock[];
+    ids: Set<string>;
+    context: { runningTitle: string; previousKind?: ExtractedPdfBlock["kind"] };
+    entries: Map<string, Segment[][]>;
+  }>;
+}>();
 
-function cachedBuildPages(
+export function cachedBuildPages(
   blocks: ExtractedPdfBlock[],
   charactersPerLine: number,
   pageHeight: number,
@@ -918,43 +1134,57 @@ function cachedBuildPages(
   paragraphSpacing: number,
   boundary?: PageAnchor,
   measuredBreaks: PageAnchor[] = [],
+  session?: { previous?: ExtractedPdfBlock[] },
 ) {
-  const key = [
-    "source-bounded-pages-v5",
-    JSON.stringify(boundary ?? null),
-    JSON.stringify(measuredBreaks),
-    blocks.length,
-    blocks[blocks.length - 1]?.id ?? "empty",
-    blocks[blocks.length - 1]?.text.length ?? 0,
-    charactersPerLine,
-    Math.round(pageHeight * 10),
-    Math.round(baseLineHeight * 100),
-    Math.round(baseFontSize * 100),
-    Math.round(paragraphSpacing * 100),
-  ].join(":");
-  let entries = paginationCache.get(blocks);
-  if (!entries) {
-    entries = new Map();
-    paginationCache.set(blocks, entries);
+  let cache = paginationCache.get(blocks);
+  if (!cache) {
+    const groups: NonNullable<ReturnType<typeof paginationCache.get>>["groups"] = [];
+    let runningTitle = blocks.find(isRunningTitle)?.text.trim() ?? "";
+    let previousKind: ExtractedPdfBlock["kind"] | undefined;
+    for (const block of blocks) {
+      let group = groups[groups.length - 1];
+      if (!group || group.blocks[0].page !== block.page) {
+        group = { blocks: [], ids: new Set(), context: { runningTitle, previousKind }, entries: new Map() };
+        groups.push(group);
+      }
+      group.blocks.push(block);
+      group.ids.add(block.id);
+      if (isRunningTitle(block)) runningTitle = block.text.trim();
+      previousKind = block.kind;
+    }
+    // Extraction republishes cloned blocks as the page count grows. Array
+    // identity alone must not invalidate already rendered source pages.
+    const previous = session?.previous && paginationCache.get(session.previous);
+    const oldGroups = new Map(previous?.groups.map(group => [group.blocks[0].page, group]));
+    for (const group of groups) {
+      const old = oldGroups.get(group.blocks[0].page);
+      if (old && old.context.runningTitle === group.context.runningTitle &&
+          old.context.previousKind === group.context.previousKind &&
+          old.blocks.length === group.blocks.length && group.blocks.every((block, index) => {
+            const prior = old.blocks[index];
+            return block.id === prior.id && block.page === prior.page &&
+              block.kind === prior.kind && block.text === prior.text;
+          })) group.entries = old.entries;
+    }
+    cache = { groups };
+    paginationCache.set(blocks, cache);
   }
-  const cached = entries.get(key);
-  if (cached) return cached;
-
-  const pages = buildPages(
-    blocks,
-    charactersPerLine,
-    pageHeight,
-    baseLineHeight,
-    baseFontSize,
-    paragraphSpacing,
-    boundary,
-    measuredBreaks,
-  );
-  if (entries.size >= 8) {
-    const oldestKey = entries.keys().next().value;
-    if (oldestKey !== undefined) entries.delete(oldestKey);
+  if (session) session.previous = blocks;
+  const layout = [charactersPerLine, pageHeight, baseLineHeight, baseFontSize, paragraphSpacing];
+  const pages: Segment[][] = [];
+  for (const group of cache.groups) {
+    const localBoundary = boundary && group.ids.has(boundary.blockId) ? boundary : undefined;
+    const localBreaks = measuredBreaks.filter((item) => group.ids.has(item.blockId));
+    const key = JSON.stringify([layout, localBoundary, localBreaks]);
+    let generated = group.entries.get(key);
+    if (!generated) {
+      generated = buildPages(group.blocks, charactersPerLine, pageHeight, baseLineHeight,
+        baseFontSize, paragraphSpacing, localBoundary, localBreaks, group.context);
+      if (group.entries.size >= 4) group.entries.delete(group.entries.keys().next().value!);
+      group.entries.set(key, generated);
+    }
+    pages.push(...generated);
   }
-  entries.set(key, pages);
   return pages;
 }
 
@@ -969,10 +1199,7 @@ function pageIndexForAnchor(pages: Segment[][], anchor?: PageAnchor) {
   return horizontalPageForFlipAnchor(pages, anchor);
 }
 
-// FlatList may retain viewability tokens when the same content is rebuilt.
-function renderedPageKey(page: Segment[]) {
-  return JSON.stringify(page.map(({ blockId, startOffset, text }) => [blockId, startOffset, text.length]));
-}
+
 function sameRenderedPage(page: Segment[] | undefined, visible: Segment[] | undefined) {
   if (!page || !visible) return false;
   return page === visible || (
@@ -984,8 +1211,62 @@ function sameRenderedPage(page: Segment[] | undefined, visible: Segment[] | unde
   );
 }
 
-export default function HorizontalReaderPager({
+export default function HorizontalReaderPager(props: Props) {
+  const requested = props.destination?.readerPage ?? props.destination?.page;
+  const [focus, setFocus] = useState(requested ?? props.blocks[0]?.page ?? 1);
+  const destinationNonce = useRef(props.destination?.nonce);
+  const commandChanged = destinationNonce.current !== props.destination?.nonce;
+  const center = commandChanged && requested !== undefined ? requested : focus;
+  useEffect(() => {
+    destinationNonce.current = props.destination?.nonce;
+    if (commandChanged && requested !== undefined) setFocus(requested);
+  }, [commandChanged, requested, props.destination?.nonce]);
+  const windowed = props.sourcePageCount !== undefined;
+  const start = Math.max(1, center - 20);
+  const end = Math.min(props.sourcePageCount ?? Infinity, center + 20);
+  const nearby = useMemo(() => {
+    if (!windowed) return props.blocks;
+    let first = start, last = end;
+    if (props.preparedPages) {
+      if (!props.preparedPages[center]) return [];
+      first = center; last = center;
+      while (first > start && props.preparedPages[first - 1]) first--;
+      while (last < end && props.preparedPages[last + 1]) last++;
+    }
+    return props.blocks.filter(block => block.page >= first && block.page <= last);
+  }, [props.blocks, props.preparedPages, windowed, center, start, end]);
+  useEffect(() => {
+    if (!windowed || !props.onRequestPage) return;
+    // Current page first; then closest neighbors. Extraction remains bounded.
+    for (let distance = 0; distance <= 20; distance++) {
+      for (const page of distance ? [center + distance, center - distance] : [center]) {
+        if (page >= start && page <= end && !props.preparedPages?.[page]) props.onRequestPage(page);
+      }
+    }
+  }, [center, start, end, windowed, props.preparedPages, props.onRequestPage]);
+  const reportWindowPage = useCallback((page: number, total: number, source: number, anchor?: PageAnchor) => {
+    if (windowed && Math.abs(source - center) >= 15) setFocus(source);
+    props.onPageChange?.(windowed ? source : page, props.sourcePageCount ?? total, source, anchor);
+  }, [windowed, center, props.onPageChange, props.sourcePageCount]);
+  const reportWindowMap = useCallback(() => props.onPageMapChange?.(Object.fromEntries(
+    nearby.map(block => [block.page, block.page]))), [nearby, props.onPageMapChange]);
+  if (!nearby.length) return (
+    <View style={{ flex: 1, backgroundColor: props.backgroundColor, justifyContent: "center", alignItems: "center" }}>
+      <Text style={{ color: props.textColor }}>{props.extractionError || "Loading this page…"}</Text>
+    </View>
+  );
+  const destination = windowed && props.destination?.readerPage !== undefined
+    ? { ...props.destination, page: props.destination.readerPage, readerPage: undefined, pageTop: true }
+    : props.destination;
+  return <CompleteHorizontalReaderPager {...props} blocks={nearby} destination={destination}
+    onPageChange={reportWindowPage}
+    onPageMapChange={windowed ? reportWindowMap : props.onPageMapChange}
+  />;
+}
+
+function CompleteHorizontalReaderPager({
   blocks,
+  sourcePageCount,
   isActive = true,
   userHighlights = [],
   onSelectionHighlightRequest,
@@ -1035,6 +1316,9 @@ export default function HorizontalReaderPager({
   const currentPageRef = useRef(0);
   const visiblePageAnchorRef = useRef<PageAnchor | undefined>(undefined);
   const readyReportedRef = useRef(false);
+  const initialAlignmentPendingRef = useRef(true);
+  const startupUserDraggedRef = useRef(false);
+  const pagePaintHandlerRef = useRef<(page: Segment[]) => void>(() => {});
   const navigatedDestinationKeyRef = useRef<string | null>(null);
   const programmaticDestinationPageRef = useRef<number | null>(null);
   const scrollDiagnosticsRef = useRef(new ReaderScrollDiagnostics());
@@ -1118,6 +1402,7 @@ export default function HorizontalReaderPager({
   const touchStart = useRef({ x: 0, y: 0, time: 0 });
   const hyphenationCache = useRef(new Map<string, string>());
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const [viewportMeasured, setViewportMeasured] = useState(false);
   const [viewport, setViewport] = useState(() => ({
     width: windowWidth,
     height: windowHeight,
@@ -1140,8 +1425,18 @@ export default function HorizontalReaderPager({
     setPagerWarm(true);
     if (readyReportedRef.current) return;
     readyReportedRef.current = true;
+    // Initial native layout/visible-position maintenance can leave the restored
+    // cell between page boundaries. Snap once after text paints, before exposing
+    // the reader; subsequent prefetch paints must not fight native anchoring.
+    if (initialAlignmentPendingRef.current) {
+      initialAlignmentPendingRef.current = false;
+      pagerRef.current?.scrollToOffset({
+        animated: false,
+        offset: currentPageRef.current * width,
+      });
+    }
     onReady?.();
-  }, [onReady]);
+  }, [onReady, width]);
   // Pagination and WebView text must use the same typography in each commit.
   const typographyKey = [
     fontFamily,
@@ -1214,6 +1509,7 @@ export default function HorizontalReaderPager({
   latestLayoutKey.current = layoutKey;
   const [measuredFit, setMeasuredFit] = useState<{ key: string; breaks: PageAnchor[] }>({ key: layoutKey, breaks: [] });
   const measuredBreaks = measuredFit.key === layoutKey ? measuredFit.breaks : undefined;
+  const paginationSession = useRef<{ previous?: ExtractedPdfBlock[] }>({});
   const pages = useMemo(
     () =>
       cachedBuildPages(
@@ -1225,6 +1521,7 @@ export default function HorizontalReaderPager({
         paragraphSpacing,
         pageBoundary,
         measuredBreaks,
+        paginationSession.current,
       ),
     [
       baseLineHeight,
@@ -1270,6 +1567,18 @@ export default function HorizontalReaderPager({
     // Report its rendered first word, never substitute the requested word.
     reportPageChange(viewablePage.index);
   }, [destination, pages, reportPageChange, viewablePage, viewportSettling]);
+
+  // Memoized cells can survive insertion before them. Never use the index
+  // captured when that cell mounted to acknowledge its first paint.
+  pagePaintHandlerRef.current = (paintedPage) => {
+    const index = currentPageRef.current;
+    if (pendingViewportRestoreRef.current || !sameRenderedPage(pages[index], paintedPage)) return;
+    reportReady();
+    // A restore to the already-visible cell does not necessarily produce a new
+    // native viewability event. Its painted content still needs to acknowledge
+    // the transition, otherwise verification waits and eventually fails.
+    if (programmaticDestinationPageRef.current === index) reportPageChange(index);
+  };
 
   const guideWords = useMemo(() => {
     if (guideMode !== "word") return [];
@@ -1393,13 +1702,18 @@ export default function HorizontalReaderPager({
   useLayoutEffect(() => {
     if (viewportSettling || (!pendingViewportRestoreRef.current && restoredPagesRef.current === pages) || !pages.length || destinationIsPending) return;
 
+    // Native visible-position maintenance handles insertion/reflow before an
+    // unchanged cell. Issuing another JS scroll here races that adjustment and
+    // briefly exposes the old index after every TOC prefetch batch.
+    const needsScrollRestore = !pagerWarm || pendingViewportRestoreRef.current ||
+      !sameRenderedPage(restoredPagesRef.current?.[currentPageRef.current], pages[preservedViewportPage]);
     pendingViewportRestoreRef.current = false;
     restoredPagesRef.current = pages;
     currentPageRef.current = preservedViewportPage;
     if (programmaticDestinationAnchorRef.current) {
       programmaticDestinationPageRef.current = preservedViewportPage;
     }
-    pagerRef.current?.scrollToOffset({
+    if (needsScrollRestore) pagerRef.current?.scrollToOffset({
       animated: false,
       offset: preservedViewportPage * width,
     });
@@ -1411,6 +1725,7 @@ export default function HorizontalReaderPager({
     onViewportSettled?.();
   }, [
     onViewportSettled,
+    pagerWarm,
     typographyKey,
     viewportSettling,
     destinationIsPending,
@@ -1421,7 +1736,7 @@ export default function HorizontalReaderPager({
   ]);
 
   useLayoutEffect(() => {
-    if (viewportSettling || !destination || !pages.length) return;
+    if (!viewportMeasured || viewportSettling || !destination || !pages.length || !pagerRef.current) return;
     if (!destinationIsPending || !destinationNavigationKey) return;
     // Target content not generated yet. Stay put and wait for
     // `pages` to grow; do NOT consume the destination so this effect retries.
@@ -1462,6 +1777,7 @@ export default function HorizontalReaderPager({
     // Publish only after native viewability confirms the destination.
   }, [
     destination,
+    viewportMeasured,
     viewportSettling,
     destinationIsPending,
     destinationNavigationKey,
@@ -2305,6 +2621,7 @@ export default function HorizontalReaderPager({
         if (!widthChanged && !meaningfulHeightChange) {
           pendingViewportRestoreRef.current = false;
           setViewportSettling(false);
+          setViewportMeasured(true);
           return;
         }
 
@@ -2325,6 +2642,7 @@ export default function HorizontalReaderPager({
             setPaginationAnchor(programmaticDestinationAnchorRef.current ?? viewportAnchor);
           }
           setViewport({ width: nextWidth, height: nextHeight });
+          setViewportMeasured(true);
           setViewportSettling(false);
         }, HORIZONTAL_FLIP_SETTLE_MS);
       }}
@@ -2346,7 +2664,7 @@ export default function HorizontalReaderPager({
         }
       }}
     >
-      <FlatList
+      {viewportMeasured && (<FlatList
         key={`horizontal-pager-${Math.round(width)}-${Math.round(usableHeight)}`}
         ref={pagerRef}
         style={{ flex: 1, backgroundColor }}
@@ -2354,6 +2672,11 @@ export default function HorizontalReaderPager({
         horizontal
         inverted={isRtl}
         pagingEnabled
+        // Do not capture an anchor while the initial cell is being positioned.
+        // Once painted, keep native anchoring for background page insertion.
+        maintainVisibleContentPosition={pagerWarm ? { minIndexForVisible: 0 } : undefined}
+        automaticallyAdjustContentInsets={false}
+        contentInsetAdjustmentBehavior="never"
         initialScrollIndex={pages.length ? preservedViewportPage : undefined}
         bounces={false}
         overScrollMode="never"
@@ -2364,13 +2687,15 @@ export default function HorizontalReaderPager({
         showsHorizontalScrollIndicator={false}
         onViewableItemsChanged={onViewablePagesChanged}
         viewabilityConfig={pageViewabilityConfig}
-        keyExtractor={(page, pageIndex) => `reader-page-${pageIndex}:${renderedPageKey(page)}`}
+        keyExtractor={(page) => `reader-page:${page[0].blockId}:${page[0].startOffset}`}
         getItemLayout={(_, pageIndex) => ({
           index: pageIndex,
           length: width,
           offset: width * pageIndex,
         })}
         onScrollBeginDrag={(event) => {
+          initialAlignmentPendingRef.current = false;
+          startupUserDraggedRef.current = true;
           programmaticDestinationPageRef.current = null;
           programmaticDestinationAnchorRef.current = undefined;
                 onSwipeStart?.();
@@ -2398,6 +2723,18 @@ export default function HorizontalReaderPager({
               Math.round(event.nativeEvent.contentOffset.x / width),
             ),
           );
+          const offset = event.nativeEvent.contentOffset.x;
+          if (!startupUserDraggedRef.current && readyReportedRef.current) {
+            const expected = currentPageRef.current * width;
+            const error = Math.abs(offset - expected);
+            // Correct a partially aligned initial cell using the actual native
+            // offset, including layout changes arriving after first paint.
+            // Leave full-page moves to destination/window anchoring.
+            if (error > 1 && error < width / 2) {
+              pagerRef.current?.scrollToOffset({ animated: false, offset: expected });
+              return;
+            }
+          }
           if (programmaticDestinationPageRef.current !== null) return;
           if (position === currentPageRef.current) return;
           currentPageRef.current = position;
@@ -2465,8 +2802,8 @@ export default function HorizontalReaderPager({
             <View
               style={{
                 position: "absolute",
-                left: horizontalPadding,
-                right: horizontalPadding,
+                left: 0,
+                right: 0,
                 top: 0,
                 bottom: 0,
               }}
@@ -2508,6 +2845,7 @@ export default function HorizontalReaderPager({
                 bold={bold}
                 automaticHyphenation={automaticHyphenation}
                 topContentInset={topContentInset}
+                horizontalContentInset={horizontalPadding}
                 backgroundColor={backgroundColor}
                 textColor={textColor}
                 bottomPadding={bottomContentInset}
@@ -2519,7 +2857,7 @@ export default function HorizontalReaderPager({
                 findWordItems={findWordItems ?? []}
                 onFindWord={onFindWord}
                 onReaderReveal={onReaderReveal}
-                onReady={reportReady}
+                onReady={() => pagePaintHandlerRef.current(page)}
                 onSwitchHighlightReady={
                   activeSwitchHighlight && pageIndex === activeSwitchPage
                     ? () => setPaintedSwitchNonce(activeSwitchHighlight.nonce)
@@ -2528,7 +2866,7 @@ export default function HorizontalReaderPager({
                 guideActive={
                   Boolean(guideMode) && pageIndex === currentPageRef.current
                 }
-                readerPageNumber={pageIndex + 1}
+                readerPageNumber={sourcePageCount !== undefined ? page[0].sourcePage : pageIndex + 1}
                 pageTopMargin={verticalMargin}
                 pageBottomMargin={pageBottomMargin}
                 guideWord={
@@ -2539,7 +2877,7 @@ export default function HorizontalReaderPager({
                 onGuideLines={(lines) => {
                   const pageLines = lines.map((line) => ({
                     ...line,
-                    left: line.left + horizontalPadding,
+                    left: line.left,
                   }));
                   setWebGuideLinesByPage((current) => {
                     const previous = current[pageIndex] ?? [];
@@ -2565,7 +2903,7 @@ export default function HorizontalReaderPager({
                   const key = `${pageIndex}:${target.blockId}:${target.offset}:${target.length}`;
                   const adjusted = rects.map((rect) => ({
                     ...rect,
-                    left: rect.left + horizontalPadding,
+                    left: rect.left,
                   }));
                   setWebGuideWordRects((current) => {
                     const previous = current[key] ?? [];
@@ -2589,7 +2927,7 @@ export default function HorizontalReaderPager({
             </View>
           </View>
         )}
-      />
+      />)}
       {guideMode === "word" && activeWordMeasurementTarget && (
         <View
           pointerEvents="none"

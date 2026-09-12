@@ -33,6 +33,7 @@ export const VERTICAL_NAVIGATION_RUNTIME = String.raw`
         }) ? stable + 1 : 0;
         previous = sample;
         if (stable >= 3 || ++frames >= 120) {
+          window.__captureReaderLoadedBoundary?.();
           state.suppressed = false;
           if (window.__readerAnchorDebug) console.info("[Reader navigation] settled", { id: state.id, generation, frames, stable: stable >= 3 });
           if (complete) complete(stable >= 3);

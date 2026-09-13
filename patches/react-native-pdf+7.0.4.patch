@@ -4,7 +4,7 @@ index 43fea3b..d3bf976 100644
 +++ b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js
 @@ -35,14 +35,28 @@
   |}>;
-
+ 
   interface NativeCommands {
 -  +setNativePage: (
 + +setNativePage: (
@@ -26,12 +26,12 @@ index 43fea3b..d3bf976 100644
 +  ) => void;
 +  +clearNativeHighlight: (viewRef: React.ElementRef<ComponentType>) => void;
  }
-
+ 
  export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
 -  supportedCommands: ['setNativePage'],
 +  supportedCommands: ['setNativePage', 'setNativeHighlight', 'clearNativeHighlight'],
  });
-
+ 
   export default codegenNativeComponent<NativeProps>('RNPDFPdfView');
 diff --git a/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js.rej b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js.rej
 new file mode 100644
@@ -41,7 +41,7 @@ index 0000000..cebbf6e
 @@ -0,0 +1,31 @@
 +@@ -35,14 +35,28 @@
 +  |}>;
-+
++ 
 +  interface NativeCommands {
 +-  +setNativePage: (
 ++ +setNativePage: (
@@ -63,12 +63,12 @@ index 0000000..cebbf6e
 ++  ) => void;
 ++  +clearNativeHighlight: (viewRef: React.ElementRef<ComponentType>) => void;
 + }
-+
++ 
 + export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
 +-  supportedCommands: ['setNativePage'],
 ++  supportedCommands: ['setNativePage', 'setNativeHighlight', 'clearNativeHighlight'],
 + });
-+
++ 
 +  export default codegenNativeComponent<NativeProps>('RNPDFPdfView');
 diff --git a/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js.rej.orig b/node_modules/react-native-pdf/fabric/RNPDFPdfNativeComponent.js.rej.orig
 new file mode 100644
@@ -78,7 +78,7 @@ index 0000000..cebbf6e
 @@ -0,0 +1,31 @@
 +@@ -35,14 +35,28 @@
 +  |}>;
-+
++ 
 +  interface NativeCommands {
 +-  +setNativePage: (
 ++ +setNativePage: (
@@ -100,12 +100,12 @@ index 0000000..cebbf6e
 ++  ) => void;
 ++  +clearNativeHighlight: (viewRef: React.ElementRef<ComponentType>) => void;
 + }
-+
++ 
 + export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
 +-  supportedCommands: ['setNativePage'],
 ++  supportedCommands: ['setNativePage', 'setNativeHighlight', 'clearNativeHighlight'],
 + });
-+
++ 
 +  export default codegenNativeComponent<NativeProps>('RNPDFPdfView');
 diff --git a/node_modules/react-native-pdf/index.d.ts b/node_modules/react-native-pdf/index.d.ts
 index cfcea72..fc79079 100644
@@ -113,14 +113,14 @@ index cfcea72..fc79079 100644
 +++ b/node_modules/react-native-pdf/index.d.ts
 @@ -66,7 +66,9 @@ export interface PdfProps {
  }
-
+ 
  export interface PdfRef {
 -    setPage(pageNumber: number): void
 +    setPage(pageNumber: number): void;
 +    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number, pageWidth: number, pageHeight: number, red: number, green: number, blue: number): void;
 +    clearHighlight(): void;
  }
-
+ 
  declare const Pdf: React.ForwardRefExoticComponent<PdfProps & React.RefAttributes<PdfRef>>
 diff --git a/node_modules/react-native-pdf/index.d.ts.rej b/node_modules/react-native-pdf/index.d.ts.rej
 new file mode 100644
@@ -130,14 +130,14 @@ index 0000000..3812dc5
 @@ -0,0 +1,11 @@
 +@@ -66,7 +66,9 @@
 + }
-+
++ 
 + export interface PdfRef {
 +-    setPage(pageNumber: number): void
 ++    setPage(pageNumber: number): void;
 ++    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number, pageWidth: number, pageHeight: number, red: number, green: number, blue: number): void;
 ++    clearHighlight(): void;
 + }
-+
++ 
 + declare const Pdf: React.ForwardRefExoticComponent<PdfProps & React.RefAttributes<PdfRef>>
 diff --git a/node_modules/react-native-pdf/index.d.ts.rej.orig b/node_modules/react-native-pdf/index.d.ts.rej.orig
 new file mode 100644
@@ -147,23 +147,23 @@ index 0000000..3812dc5
 @@ -0,0 +1,11 @@
 +@@ -66,7 +66,9 @@
 + }
-+
++ 
 + export interface PdfRef {
 +-    setPage(pageNumber: number): void
 ++    setPage(pageNumber: number): void;
 ++    setHighlight(pageNumber: number, left: number, top: number, right: number, bottom: number, pageWidth: number, pageHeight: number, red: number, green: number, blue: number): void;
 ++    clearHighlight(): void;
 + }
-+
++ 
 + declare const Pdf: React.ForwardRefExoticComponent<PdfProps & React.RefAttributes<PdfRef>>
 diff --git a/node_modules/react-native-pdf/index.js b/node_modules/react-native-pdf/index.js
 index f807178..069f182 100644
 --- a/node_modules/react-native-pdf/index.js
 +++ b/node_modules/react-native-pdf/index.js
 @@ -368,6 +368,18 @@ export default class Pdf extends Component {
-
+         
      }
-
+ 
 +    setHighlight(pageNumber, left, top, right, bottom, pageWidth, pageHeight, red, green, blue) {
 +        if (!this._root) return;
 +        PdfViewCommands.setNativeHighlight(
@@ -186,9 +186,9 @@ index 0000000..7ab04a6
 +++ b/node_modules/react-native-pdf/index.js.rej
 @@ -0,0 +1,19 @@
 +@@ -368,6 +368,18 @@
-+
++         
 +     }
-+
++ 
 ++    setHighlight(pageNumber, left, top, right, bottom, pageWidth, pageHeight, red, green, blue) {
 ++        if (!this._root) return;
 ++        PdfViewCommands.setNativeHighlight(
@@ -211,9 +211,9 @@ index 0000000..7ab04a6
 +++ b/node_modules/react-native-pdf/index.js.rej.orig
 @@ -0,0 +1,19 @@
 +@@ -368,6 +368,18 @@
-+
++         
 +     }
-+
++ 
 ++    setHighlight(pageNumber, left, top, right, bottom, pageWidth, pageHeight, red, green, blue) {
 ++        if (!this._root) return;
 ++        PdfViewCommands.setNativeHighlight(
@@ -234,9 +234,9 @@ index 723ca7b..a9e09c9 100644
 --- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
 +++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h
 @@ -60,6 +60,18 @@ UIView
-
+ 
  @property(nonatomic, copy) RCTBubblingEventBlock onTextSelectionChange;
-
+ 
 +- (void)setNativeHighlight:(NSInteger)page
 +                      left:(float)left
 +                       top:(float)top
@@ -250,7 +250,7 @@ index 723ca7b..a9e09c9 100644
 +- (void)clearNativeHighlight;
 +
  @end
-
+ 
  #endif /* RNPDFPdfView_h */
 diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h.rej b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h.rej
 new file mode 100644
@@ -259,9 +259,9 @@ index 0000000..af8531b
 +++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.h.rej
 @@ -0,0 +1,19 @@
 +@@ -60,6 +60,18 @@
-+
++ 
 + @property(nonatomic, copy) RCTBubblingEventBlock onTextSelectionChange;
-+
++ 
 ++- (void)setNativeHighlight:(NSInteger)page
 ++                      left:(float)left
 ++                       top:(float)top
@@ -275,13 +275,21 @@ index 0000000..af8531b
 ++- (void)clearNativeHighlight;
 ++
 + @end
-+
++ 
 + #endif /* RNPDFPdfView_h */
 diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
-index de46c98..66aa0ac 100644
+index de46c98..e1e6c9d 100644
 --- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
 +++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
-@@ -75,6 +75,12 @@ @implementation RNPDFPdfView
+@@ -66,6 +66,7 @@ @implementation RNPDFPdfView
+     RCTBridge *_bridge;
+     PDFDocument *_pdfDocument;
+     PDFView *_pdfView;
++    UIView *_switchHighlightOverlay;
+     PDFOutline *root;
+     float _fixScaleFactor;
+     bool _initialed;
+@@ -75,6 +76,12 @@ @implementation RNPDFPdfView
      UIPinchGestureRecognizer *_pinchRecognizer;
      UILongPressGestureRecognizer *_longPressRecognizer;
      UITapGestureRecognizer *_doubleTapEmptyRecognizer;
@@ -292,12 +300,12 @@ index de46c98..66aa0ac 100644
 +    CFTimeInterval _switchHighlightPulseStart;
 +    UIColor *_switchHighlightColor;
  }
-
+ 
  #ifdef RCT_NEW_ARCH_ENABLED
-@@ -234,6 +240,209 @@ - (void)setNativePage:(NSInteger)page
+@@ -234,6 +241,211 @@ - (void)setNativePage:(NSInteger)page
      [self didSetProps:[NSArray arrayWithObject:@"page"]];
  }
-
+ 
 +- (void)setNativeHighlight:(NSInteger)page
 +                      left:(float)left
 +                       top:(float)top
@@ -388,12 +396,18 @@ index de46c98..66aa0ac 100644
 +    annotation.color = [_switchHighlightColor colorWithAlphaComponent:0.88];
 +    annotation.shouldDisplay = YES;
 +    annotation.shouldPrint = NO;
-+    [pdfPage addAnnotation:annotation];
++    // Keep highlight geometry detached from PDFKit's page annotations. Changing
++    // an annotation invalidates expensive scanned-page tiles on every frame.
++    _switchHighlightOverlay = [[UIView alloc] initWithFrame:CGRectZero];
++    _switchHighlightOverlay.userInteractionEnabled = NO;
++    _switchHighlightOverlay.backgroundColor = _switchHighlightColor;
++    _switchHighlightOverlay.alpha = 0.88;
++    [_pdfView addSubview:_switchHighlightOverlay];
 +    _switchHighlightAnnotation = annotation;
 +    _switchHighlightPage = pdfPage;
 +
-+    // Animate only the annotation color. Keeping its bounds fixed avoids the
-+    // word marker drifting or changing size while PDFKit scrolls into place.
++    // Animate the lightweight overlay; PDF page tiles remain unchanged. Its
++    // frame follows PDFKit coordinates while the destination scrolls into place.
 +    _switchHighlightPulseStart = 0.0;
 +    _switchHighlightDisplayLink = [CADisplayLink
 +        displayLinkWithTarget:self
@@ -473,9 +487,9 @@ index de46c98..66aa0ac 100644
 +        alpha = 0.95 * (1.0 - easedFade);
 +    }
 +
-+    _switchHighlightAnnotation.color =
-+        [_switchHighlightColor colorWithAlphaComponent:alpha];
-+    [_pdfView setNeedsDisplay];
++    _switchHighlightOverlay.frame = [_pdfView convertRect:_switchHighlightAnnotation.bounds
++                                                 fromPage:_switchHighlightPage];
++    _switchHighlightOverlay.alpha = alpha;
 +
 +    if (progress >= 1.0) {
 +        [self clearNativeHighlight];
@@ -487,27 +501,24 @@ index de46c98..66aa0ac 100644
 +    [_switchHighlightDisplayLink invalidate];
 +    _switchHighlightDisplayLink = nil;
 +    _switchHighlightPulseStart = 0.0;
-+    BOOL hadHighlight = _switchHighlightSelection || _switchHighlightAnnotation;
-+    if (_switchHighlightAnnotation && _switchHighlightPage) {
-+        [_switchHighlightPage removeAnnotation:_switchHighlightAnnotation];
-+    }
++    [_switchHighlightOverlay removeFromSuperview];
++    _switchHighlightOverlay = nil;
 +    _switchHighlightAnnotation = nil;
 +    _switchHighlightPage = nil;
 +    if (_switchHighlightSelection) {
 +        _switchHighlightSelection = nil;
 +    }
-+    if (hadHighlight) {
-+        [_pdfView setNeedsDisplay];
-+    }
++
 +}
 +
  #endif
-
+ 
  - (instancetype)initWithBridge:(RCTBridge *)bridge
-@@ -600,5 +809,6 @@ - (void)notifyOnChangeWithMessage:(NSString *)message
-
+@@ -600,6 +812,7 @@ - (void)notifyOnChangeWithMessage:(NSString *)message
+ 
  - (void)dealloc{
-
+ 
 +    [self clearNativeHighlight];
      _pdfDocument = Nil;
      _pdfView = Nil;
+ 

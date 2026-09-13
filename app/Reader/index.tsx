@@ -1,3 +1,4 @@
+import { extractionRangeForDocument, nextOcrPrefetchPage, prioritizeHorizontalRequests, extractionFocusPage } from "@/architecture/PdfExtractionScheduling";
 import { pageStartAnchor, resolveAnchor } from "@/architecture/anchor/AnchorResolution";
 import BackButton from "@/components/Backbutton";
 import { AppErrorBoundary } from "@/components/errors/AppErrorBoundary";
@@ -314,6 +315,10 @@ function ReaderScreenContent() {
   // Preserve the exact source anchor used to enter Original so returning to a
   // text renderer does not fall back to an older, debounced canonical anchor.
   const originalHandoffAnchorRef = React.useRef<CanonicalAnchor | null>(null);
+  // "Find in Original" is a lookup, not a request to move Reader Mode. Keep
+  // the reader's live viewport separately while Original temporarily navigates
+  // to the selected word, then use it for the return trip in either layout.
+  const readerReturnAnchorRef = React.useRef<CanonicalAnchor | null>(null);
   const [originalPageCount, setOriginalPageCount] = useState(0);
   const [originalDestination, setOriginalDestination] = useState<{
     page: number;
@@ -457,6 +462,7 @@ function ReaderScreenContent() {
     setReaderSwitchHighlight(null);
     setOriginalDestination(null);
     originalHandoffAnchorRef.current = null;
+    readerReturnAnchorRef.current = null;
     pendingLayoutAnchor.current = null;
     readerContentReadyRef.current = false;
     setActiveTab("reader");
@@ -640,6 +646,14 @@ function ReaderScreenContent() {
 
         while (!cancelled && nextPage < pageCount) {
           let requestedPage: number | null = null;
+          const extractionFocus = extractionFocusPage(
+            useAnchorStore.getState().desiredAnchor, anchorController.current(),
+          );
+          if (useReaderSettingsStore.getState().transition === "pager") {
+            requestedExtractionPages.current = prioritizeHorizontalRequests(
+              requestedExtractionPages.current, extractionFocus,
+            );
+          }
           while (
             requestedPage === null &&
             requestedExtractionPages.current.length > 0
@@ -648,6 +662,16 @@ function ReaderScreenContent() {
             if (!document?.pages.some((page) => page.page === candidate)) {
               requestedPage = candidate;
             }
+          }
+          if (requestedPage === null && activeTabRef.current === "reader") {
+            requestedPage = nextOcrPrefetchPage(document, extractionFocus);
+          }
+          // Give PDFKit the device's rendering budget while Original is visible.
+          // Explicit destination requests above still take priority.
+          if (requestedPage === null && activeTabRef.current === "original" &&
+              document?.pages.some(page => page.ocrPerformed || page.requiresOcr)) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 150));
+            continue;
           }
           const requestIsMissing = requestedPage !== null;
           const firstPage =
@@ -664,11 +688,19 @@ function ReaderScreenContent() {
               : firstPage < WARM_READER_PAGE_COUNT
                 ? WARM_READER_PAGE_COUNT - firstPage
                 : BACKGROUND_READER_PAGE_BATCH;
+          const range = extractionRangeForDocument(document, requestedPage, firstPage, batchSize);
           const chunk = await extractPdfDocumentRange(
             pdf.uri,
-            firstPage,
-            batchSize,
+            range.firstPage,
+            range.batchSize,
           );
+          // A native OCR range may yield early. Keep the destination queued
+          // until its own page is available, ahead of sequential background work.
+          if (requestedPage !== null && !chunk.pages.some(page => page.page === requestedPage)) {
+            if (!requestedExtractionPages.current.includes(requestedPage)) {
+              requestedExtractionPages.current.unshift(requestedPage);
+            }
+          }
           const pagesByNumber = new Map(
             document?.pages.map((page) => [page.page, page]) ?? [],
           );
@@ -1030,7 +1062,23 @@ function ReaderScreenContent() {
     (value: ReaderMode) => {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       if (value !== "reader") setReaderChromeHidden(false);
-      void runAnchorTransition(value);
+      const returnAnchor =
+        value === "reader" && activeTabRef.current === "original"
+          ? readerReturnAnchorRef.current
+          : null;
+      void runAnchorTransition(
+        value,
+        undefined,
+        undefined,
+        returnAnchor ? { suppressSwitchHighlight: true } : undefined,
+        returnAnchor,
+      ).then((succeeded) => {
+        // Clear only after a verified return. Keeping it on a failed handoff
+        // lets a retry restore the reader viewport instead of the lookup word.
+        if (succeeded && returnAnchor === readerReturnAnchorRef.current) {
+          readerReturnAnchorRef.current = null;
+        }
+      });
     },
     [runAnchorTransition],
   );
@@ -1044,6 +1092,12 @@ function ReaderScreenContent() {
   const handleFindWordInOtherTab = useCallback(
     (target: FindWordTarget, selected: FindWordAnchor) => {
       if (!pdfId || target === activeTabRef.current) return;
+      // Capture before the selected word becomes the temporary Original
+      // destination. This preserves the exact Reader viewport, including its
+      // page and top-left reading position, for both scroll and pager modes.
+      if (target === "original" && activeTabRef.current === "reader") {
+        readerReturnAnchorRef.current = captureCanonicalAnchor();
+      }
       const sourceBlock = latestReaderBlocks.current.find(
         (block) => block.id === selected.sourceBlockId,
       );
@@ -1075,7 +1129,7 @@ function ReaderScreenContent() {
       void Haptics.selectionAsync();
       void runAnchorTransition(target);
     },
-    [pdfId, runAnchorTransition],
+    [captureCanonicalAnchor, pdfId, runAnchorTransition],
   );
 
   const handleReaderUserInteraction = useCallback(() => {

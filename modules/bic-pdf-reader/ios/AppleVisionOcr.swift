@@ -4,16 +4,30 @@ import UIKit
 import Vision
 
 enum AppleVisionOcr {
-  static func fillPagesRequiringOcr(in json: String, pdfPath: String) throws -> String {
+  static func fillPagesRequiringOcr(in json: String, pdfPath: String, maxOcrPages: Int? = nil) throws -> String {
     guard
       let input = json.data(using: .utf8),
       var response = try JSONSerialization.jsonObject(with: input) as? [String: Any],
       var document = response["data"] as? [String: Any],
-      var pages = document["pages"] as? [[String: Any]],
-      let pdf = PDFDocument(url: URL(fileURLWithPath: pdfPath))
+      var pages = document["pages"] as? [[String: Any]]
     else {
       return json
     }
+
+    // Digital ranges need no PDFKit document or second JSON serialization.
+    guard pages.contains(where: { $0["requiresOcr"] as? Bool == true }) else { return json }
+    if let limit = maxOcrPages {
+      var count = 0
+      for index in pages.indices where pages[index]["requiresOcr"] as? Bool == true {
+        count += 1
+        if count > limit {
+          pages = Array(pages.prefix(index))
+          break
+        }
+      }
+    }
+
+    guard let pdf = PDFDocument(url: URL(fileURLWithPath: pdfPath)) else { return json }
 
     // Keep PDFium's native extraction for digital PDFs. Rust scores page and
     // document structure, flagging likely scans even when hidden OCR text exists.
@@ -23,7 +37,10 @@ enum AppleVisionOcr {
         let pdfPage = pdf.page(at: pageNumber - 1)
       else { continue }
 
-      let result = try recognize(page: pdfPage, pageNumber: pageNumber)
+      pages[index]["ocrPerformed"] = true
+      let result = try autoreleasepool {
+        try recognize(page: pdfPage, pageNumber: pageNumber)
+      }
       guard !result.blocks.isEmpty else { continue }
 
       pages[index]["blocks"] = result.blocks

@@ -49,7 +49,8 @@ public final class BicPdfReaderModule: Module {
       defer { bic_pdf_free_string(result) }
       return try AppleVisionOcr.fillPagesRequiringOcr(
         in: String(cString: result),
-        pdfPath: path
+        pdfPath: path,
+        maxOcrPages: 1
       )
 #else
       throw ExtractionException("The Rust/PDFium iOS library has not been built. Run pdf_reader/scripts/build-ios.sh on macOS before the native build.")

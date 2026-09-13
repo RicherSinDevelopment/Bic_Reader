@@ -1314,10 +1314,10 @@ function CompleteHorizontalReaderPager({
   latestDestinationRef.current = destination;
   const pagerRef = useRef<FlatList<Segment[]>>(null);
   const currentPageRef = useRef(0);
+  const swipeActiveRef = useRef(false);
+  const [swipeActive, setSwipeActive] = useState(false);
   const visiblePageAnchorRef = useRef<PageAnchor | undefined>(undefined);
   const readyReportedRef = useRef(false);
-  const initialAlignmentPendingRef = useRef(true);
-  const startupUserDraggedRef = useRef(false);
   const pagePaintHandlerRef = useRef<(page: Segment[]) => void>(() => {});
   const navigatedDestinationKeyRef = useRef<string | null>(null);
   const programmaticDestinationPageRef = useRef<number | null>(null);
@@ -1425,18 +1425,8 @@ function CompleteHorizontalReaderPager({
     setPagerWarm(true);
     if (readyReportedRef.current) return;
     readyReportedRef.current = true;
-    // Initial native layout/visible-position maintenance can leave the restored
-    // cell between page boundaries. Snap once after text paints, before exposing
-    // the reader; subsequent prefetch paints must not fight native anchoring.
-    if (initialAlignmentPendingRef.current) {
-      initialAlignmentPendingRef.current = false;
-      pagerRef.current?.scrollToOffset({
-        animated: false,
-        offset: currentPageRef.current * width,
-      });
-    }
     onReady?.();
-  }, [onReady, width]);
+  }, [onReady]);
   // Pagination and WebView text must use the same typography in each commit.
   const typographyKey = [
     fontFamily,
@@ -1510,7 +1500,7 @@ function CompleteHorizontalReaderPager({
   const [measuredFit, setMeasuredFit] = useState<{ key: string; breaks: PageAnchor[] }>({ key: layoutKey, breaks: [] });
   const measuredBreaks = measuredFit.key === layoutKey ? measuredFit.breaks : undefined;
   const paginationSession = useRef<{ previous?: ExtractedPdfBlock[] }>({});
-  const pages = useMemo(
+  const computedPages = useMemo(
     () =>
       cachedBuildPages(
         blocks,
@@ -1534,6 +1524,22 @@ function CompleteHorizontalReaderPager({
       measuredBreaks,
     ],
   );
+
+  useLayoutEffect(() => {
+    // A TOC/search command cancels the previous gesture, including a drag whose
+    // momentum-end event was swallowed when the navigation menu opened.
+    swipeActiveRef.current = false;
+    setSwipeActive(false);
+  }, [destination?.nonce, isActive]);
+
+  const gesturePages = useRef({ pages: computedPages, key: "" });
+  const gestureKey = `${layoutKey}:${destination?.nonce ?? "none"}`;
+  // OCR may prepend many generated pages while native momentum still refers
+  // to the old offsets. Commit that new index space only after the swipe ends.
+  if (!swipeActive || gesturePages.current.key !== gestureKey) {
+    gesturePages.current = { pages: computedPages, key: gestureKey };
+  }
+  const pages = gesturePages.current.pages;
 
   useLayoutEffect(() => {
     if (previousDestinationNonceRef.current === destination?.nonce) return;
@@ -1705,7 +1711,7 @@ function CompleteHorizontalReaderPager({
     // Native visible-position maintenance handles insertion/reflow before an
     // unchanged cell. Issuing another JS scroll here races that adjustment and
     // briefly exposes the old index after every TOC prefetch batch.
-    const needsScrollRestore = !pagerWarm || pendingViewportRestoreRef.current ||
+    const needsScrollRestore = pendingViewportRestoreRef.current ||
       !sameRenderedPage(restoredPagesRef.current?.[currentPageRef.current], pages[preservedViewportPage]);
     pendingViewportRestoreRef.current = false;
     restoredPagesRef.current = pages;
@@ -2672,9 +2678,7 @@ function CompleteHorizontalReaderPager({
         horizontal
         inverted={isRtl}
         pagingEnabled
-        // Do not capture an anchor while the initial cell is being positioned.
-        // Once painted, keep native anchoring for background page insertion.
-        maintainVisibleContentPosition={pagerWarm ? { minIndexForVisible: 0 } : undefined}
+        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
         initialScrollIndex={pages.length ? preservedViewportPage : undefined}
@@ -2694,8 +2698,8 @@ function CompleteHorizontalReaderPager({
           offset: width * pageIndex,
         })}
         onScrollBeginDrag={(event) => {
-          initialAlignmentPendingRef.current = false;
-          startupUserDraggedRef.current = true;
+          swipeActiveRef.current = true;
+          setSwipeActive(true);
           programmaticDestinationPageRef.current = null;
           programmaticDestinationAnchorRef.current = undefined;
                 onSwipeStart?.();
@@ -2709,6 +2713,7 @@ function CompleteHorizontalReaderPager({
         scrollEventThrottle={16}
         onScroll={(event) => {
           scrollDiagnosticsRef.current.sample(event.nativeEvent.contentOffset.x);
+          if (!swipeActiveRef.current) return;
           if (
             pendingViewportRestoreRef.current ||
             Math.abs(measuredViewportRef.current.width - width) > 1 ||
@@ -2723,24 +2728,23 @@ function CompleteHorizontalReaderPager({
               Math.round(event.nativeEvent.contentOffset.x / width),
             ),
           );
-          const offset = event.nativeEvent.contentOffset.x;
-          if (!startupUserDraggedRef.current && readyReportedRef.current) {
-            const expected = currentPageRef.current * width;
-            const error = Math.abs(offset - expected);
-            // Correct a partially aligned initial cell using the actual native
-            // offset, including layout changes arriving after first paint.
-            // Leave full-page moves to destination/window anchoring.
-            if (error > 1 && error < width / 2) {
-              pagerRef.current?.scrollToOffset({ animated: false, offset: expected });
-              return;
-            }
-          }
           if (programmaticDestinationPageRef.current !== null) return;
           if (position === currentPageRef.current) return;
           currentPageRef.current = position;
           reportPageChange(position);
         }}
+        onScrollEndDrag={(event) => {
+          const target = event.nativeEvent.targetContentOffset?.x;
+          if (event.nativeEvent.velocity?.x === 0 &&
+              (target === undefined || Math.abs(target - event.nativeEvent.contentOffset.x) < 1)) {
+            swipeActiveRef.current = false;
+            setSwipeActive(false);
+          }
+        }}
         onMomentumScrollEnd={(event) => {
+          if (!swipeActiveRef.current) return;
+          swipeActiveRef.current = false;
+          setSwipeActive(false);
           scrollDiagnosticsRef.current.end(event.nativeEvent.contentOffset.x);
           if (
             pendingViewportRestoreRef.current ||

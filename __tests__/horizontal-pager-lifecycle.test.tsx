@@ -448,14 +448,14 @@ test('TOC prefetch preserves the visible cell as several earlier extraction batc
 });
 
 
-test('reopened destination snaps to its measured boundary once after paint', () => {
+test('page paint does not issue another scroll over native anchoring', () => {
   const destination = { page: 20, blockId: 'block-19', pageTop: true, nonce: 1400 };
   act(() => { tree = create(<HorizontalReaderPager {...defaults} destination={destination} />); });
   layout(756, 390);
   const index = list().props.data.findIndex((page: any[]) => page[0].blockId === 'block-19');
   const page = tree.root.findByType('NativeWebView');
   const selectable = tree.root.findAll((node: any) => node.props.layoutKey && node.props.onOverflow)[0];
-  expect(list().props.maintainVisibleContentPosition).toBeUndefined();
+  expect(list().props.maintainVisibleContentPosition).toEqual({ minIndexForVisible: 0 });
   expect(list().props.automaticallyAdjustContentInsets).toBe(false);
   expect(page.props.automaticallyAdjustContentInsets).toBe(false);
   expect(page.props.contentInsetAdjustmentBehavior).toBe('never');
@@ -463,9 +463,9 @@ test('reopened destination snaps to its measured boundary once after paint', () 
   const paint = () => act(() => page.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'horizontalPagePainted', layoutKey: selectable.props.layoutKey }) } }));
   paint();
   expect(list().props.maintainVisibleContentPosition).toEqual({ minIndexForVisible: 0 });
-  expect(mockScrollOffsets).toEqual([index * 756]);
+  expect(mockScrollOffsets).toEqual([]);
   paint();
-  expect(mockScrollOffsets).toEqual([index * 756]);
+  expect(mockScrollOffsets).toEqual([]);
 });
 
 test('first paint still completes restore when prefetch moves the memoized page index', () => {
@@ -482,11 +482,11 @@ test('first paint still completes restore when prefetch moves the memoized page 
   act(() => page.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'horizontalPagePainted', layoutKey: selectable.props.layoutKey }) } }));
   expect(onReady).toHaveBeenCalledTimes(1);
   const index = list().props.data.findIndex((item: any[]) => item[0].blockId === 'block-19');
-  expect(mockScrollOffsets[mockScrollOffsets.length - 1]).toBe(index * 756);
+  expect(index).toBeGreaterThan(0);
 });
 
 
-test('startup corrects native partial-page drift after paint but leaves user drags alone', () => {
+test('startup scroll events do not fight native page anchoring', () => {
   const destination = { page: 20, blockId: 'block-19', pageTop: true, nonce: 1600 };
   act(() => { tree = create(<HorizontalReaderPager {...defaults} destination={destination} />); });
   layout(756, 390);
@@ -495,7 +495,7 @@ test('startup corrects native partial-page drift after paint but leaves user dra
   const index = list().props.data.findIndex((page: any[]) => page[0].blockId === 'block-19');
   mockScrollOffsets.length = 0;
   act(() => list().props.onScroll({ nativeEvent: { contentOffset: { x: index * 756 + 30 } } }));
-  expect(mockScrollOffsets).toEqual([index * 756]);
+  expect(mockScrollOffsets).toEqual([]);
   act(() => list().props.onScrollBeginDrag({ nativeEvent: { contentOffset: { x: index * 756 } } }));
   mockScrollOffsets.length = 0;
   act(() => list().props.onScroll({ nativeEvent: { contentOffset: { x: index * 756 + 30 } } }));
@@ -524,4 +524,37 @@ test('opening page owns its margins inside a full-width document', () => {
   const html = tree.root.findByType('NativeWebView').props.source.html;
   expect(html).toContain('body{padding:68px 30px');
   expect(html).toContain('position:fixed;z-index:2;left:30px;right:30px');
+});
+
+test('OCR prepends wait for swipe completion and stale idle offsets cannot change the page', () => {
+  const onPageChange = jest.fn();
+  const props = { ...defaults, onPageChange, destination: { page: 20, blockId: 'block-19', pageTop: true, nonce: 1900 } };
+  act(() => { tree = create(<HorizontalReaderPager {...props} blocks={blocks.slice(18)} />); });
+  layout(756, 390);
+  const before = list().props.data;
+  const index = before.findIndex((page: any[]) => page[0].blockId === 'block-19');
+  act(() => list().props.onScrollBeginDrag({ nativeEvent: { contentOffset: { x: index * 756 } } }));
+  act(() => tree.update(<HorizontalReaderPager {...props} blocks={blocks.slice(8)} />));
+  expect(list().props.data).toBe(before);
+  act(() => list().props.onMomentumScrollEnd({ nativeEvent: { contentOffset: { x: (index + 1) * 756 } } }));
+  expect(list().props.data.length).toBeGreaterThan(before.length);
+  onPageChange.mockClear();
+  act(() => list().props.onScroll({ nativeEvent: { contentOffset: { x: (index + 1) * 756 } } }));
+  expect(onPageChange).not.toHaveBeenCalled();
+});
+
+
+test('TOC cancels an unfinished swipe and accepts destination pages arriving later', () => {
+  const initial = { page: 1, pageTop: true, nonce: 2000 };
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} blocks={blocks.slice(0, 3)} destination={initial} />); });
+  layout(756, 390);
+  act(() => list().props.onScrollBeginDrag({ nativeEvent: { contentOffset: { x: 0 } } }));
+  const target = { page: 20, blockId: 'block-19', pageTop: true, nonce: 2001 };
+  act(() => tree.update(<HorizontalReaderPager {...defaults} blocks={blocks.slice(0, 3)} destination={target} />));
+  act(() => tree.update(<HorizontalReaderPager {...defaults} blocks={blocks} destination={target} />));
+  const selectable = tree.root.findAll((node: any) => node.props.layoutKey && node.props.onOverflow)[0];
+  expect(selectable.props.page[0].sourcePage).toBe(20);
+  const source = tree.root.findByType('NativeWebView').props.source;
+  act(() => list().props.onMomentumScrollEnd({ nativeEvent: { contentOffset: { x: 756 } } }));
+  expect(tree.root.findByType('NativeWebView').props.source).toBe(source);
 });

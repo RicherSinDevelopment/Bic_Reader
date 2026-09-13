@@ -28,6 +28,7 @@ export type ExtractedPdfPage = {
   blocks: ExtractedPdfBlock[];
   confidence: number;
   requiresOcr: boolean;
+  ocrPerformed?: boolean;
 };
 
 export type ExtractedPdfDocument = {

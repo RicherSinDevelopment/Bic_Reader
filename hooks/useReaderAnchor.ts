@@ -104,5 +104,16 @@ export function useReaderAnchor(input: {
     [documentId, isRotationInProgress],
   );
 
-  return { actualReaderAnchor, reportReaderAnchor };
+  const flushReaderAnchor = useCallback(() => {
+    if (publishTimer.current) clearTimeout(publishTimer.current);
+    publishTimer.current = null;
+    const latest = actualReaderAnchor.current;
+    const state = useAnchorStore.getState();
+    if (!active.current || !latest || latest.documentId !== documentId ||
+        state.transition.status === "running" || state.desiredAnchor) return;
+    const committed = anchorController.publish({ ...latest, revision: undefined }, "reader-user");
+    if (committed) actualReaderAnchor.current = committed;
+  }, [documentId]);
+
+  return { actualReaderAnchor, reportReaderAnchor, flushReaderAnchor };
 }

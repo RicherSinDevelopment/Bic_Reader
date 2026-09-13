@@ -1,3 +1,4 @@
+import { ttsPositionForBlock, spokenWordForTtsOffset } from "@/architecture/TtsPosition";
 import { VERTICAL_LOADED_BOUNDARY } from "@/architecture/anchor/VerticalLoadedBoundary";
 import { VERTICAL_MUTATION_QUEUE } from "@/architecture/anchor/VerticalMutationQueue";
 import { VERTICAL_WORD_TARGET } from "@/architecture/anchor/VerticalWordTarget";
@@ -186,55 +187,7 @@ function containsRightToLeftText(blocks: ExtractedPdfBlock[]) {
   return letterCharacters > 0 && rtlCharacters / letterCharacters >= 0.3;
 }
 
-function ttsPositionForBlock(
-  blocks: ExtractedPdfBlock[],
-  blockId: string,
-  blockOffset: number,
-) {
-  let globalOffset = 0;
-  for (const block of blocks) {
-    const text = block.text.trim();
-    if (block.id === blockId) {
-      const leadingWhitespace =
-        block.text.length - block.text.trimStart().length;
-      return (
-        globalOffset +
-        Math.max(0, Math.min(text.length, blockOffset - leadingWhitespace))
-      );
-    }
-    globalOffset += text.length + 2;
-  }
-  return 0;
-}
 
-function spokenWordForTtsOffset(
-  blocks: ExtractedPdfBlock[],
-  charIndex: number,
-  charLength: number,
-) {
-  let globalOffset = 0;
-  for (const block of blocks) {
-    const text = block.text.trim();
-    const blockEnd = globalOffset + text.length;
-    if (charIndex >= globalOffset && charIndex < blockEnd) {
-      const leadingWhitespace =
-        block.text.length - block.text.trimStart().length;
-      const localOffset = charIndex - globalOffset;
-      const word = Array.from(text.matchAll(/\S+/g)).find(
-        (match) =>
-          localOffset >= (match.index ?? 0) &&
-          localOffset < (match.index ?? 0) + match[0].length,
-      );
-      return {
-        blockId: block.id,
-        offset: leadingWhitespace + (word?.index ?? localOffset),
-        length: word?.[0].length ?? charLength,
-      };
-    }
-    globalOffset = blockEnd + 2;
-  }
-  return null;
-}
 
 function escapeHtml(value: string) {
   return value
@@ -359,12 +312,14 @@ const ReaderView = ({
   >("presets");
   const [ttsStartOffset, setTtsStartOffset] = useState(0);
   const ttsStartOffsetRef = useRef(0);
+  const ttsVisibleAnchorRef = useRef<{ blockId: string; blockOffset: number } | null>(null);
   const [spokenWordHighlight, setSpokenWordHighlight] = useState<{
     blockId: string;
     offset: number;
     length: number;
   } | null>(null);
   const speechStartOffsetRef = useRef(0);
+  const speechBlocksRef = useRef<ExtractedPdfBlock[]>([]);
   const originalTextIsRtl = useMemo(
     () => containsRightToLeftText(blocks),
     [blocks],
@@ -705,18 +660,12 @@ const ReaderView = ({
 
   const highlightSpokenWord = useCallback(
     (charIndex: number, charLength: number) => {
-      setSpokenWordHighlight(
-        spokenWordForTtsOffset(blocks, charIndex, charLength),
-      );
-      webViewRef.current?.postMessage(
-        JSON.stringify({
-          type: "ttsHighlight",
-          charIndex,
-          charLength,
-        }),
-      );
+      const word = spokenWordForTtsOffset(speechBlocksRef.current, charIndex, charLength);
+      if (!word) return;
+      setSpokenWordHighlight(word);
+      webViewRef.current?.postMessage(JSON.stringify({ type: "ttsHighlight", ...word }));
     },
-    [blocks],
+    [],
   );
 
   const clearSpokenWordHighlight = useCallback(() => {
@@ -1004,6 +953,7 @@ const ReaderView = ({
       lastSourcePageRef.current = sourcePage;
       setCurrentSourcePage(sourcePage);
       if (anchor) {
+        ttsVisibleAnchorRef.current = { blockId: anchor.blockId, blockOffset: anchor.blockOffset };
         const nextTtsOffset = ttsPositionForBlock(
           blocks,
           anchor.blockId,
@@ -1909,7 +1859,7 @@ const ReaderView = ({
           type: 'readerText',
           text: allText
         }));
-        window.__reportSwitchAnchor?.();
+        window.__reportSwitchAnchor?.(true);
         return;
       }
 
@@ -2073,20 +2023,11 @@ const ReaderView = ({
         return;
       }
        if (message.type === 'ttsHighlight') {
-         const readerBlocks = Array.from(
-           document.querySelectorAll('[data-reader-block]')
-         );
-         let targetBlock = readerBlocks.find(function(block) {
-           const start = Number(block.dataset.ttsStart);
-           const end = Number(block.dataset.ttsEnd);
-           return message.charIndex >= start && message.charIndex < end;
-         });
-         if (!targetBlock) {
-           targetBlock = readerBlocks.find(function(block) {
-             return Number(block.dataset.ttsStart) >= message.charIndex;
-           }) || readerBlocks[readerBlocks.length - 1];
-         }
-
+         const targetBlock = Array.from(document.querySelectorAll('[data-reader-block]'))
+           .find(function(block) { return block.dataset.blockId === message.blockId; });
+         // Never substitute another block when the spoken page is not mounted.
+         if (!targetBlock) return;
+         const charIndex = message.offset;
          if (targetBlock && window.__activeTtsBlock !== targetBlock) {
            if (window.__activeTtsBlock) {
              const previousText = window.__activeTtsBlock.textContent || '';
@@ -2096,7 +2037,7 @@ const ReaderView = ({
            }
 
            const blockText = targetBlock.textContent || '';
-           const blockStart = Number(targetBlock.dataset.ttsStart);
+           const blockStart = 0;
            const fragment = document.createDocumentFragment();
            const wordPattern = /\\S+/g;
            let cursor = 0;
@@ -2136,11 +2077,11 @@ const ReaderView = ({
           const start = Number(word.dataset.ttsStart);
           const end = Number(word.dataset.ttsEnd);
 
-          return message.charIndex >= start && message.charIndex < end;
+          return charIndex >= start && charIndex < end;
         });
         if (!activeWord && words.length) {
           activeWord = words.find(function(word) {
-            return Number(word.dataset.ttsStart) >= message.charIndex;
+            return Number(word.dataset.ttsStart) >= charIndex;
           }) || words[words.length - 1];
         }
 
@@ -2167,8 +2108,7 @@ const ReaderView = ({
           } else {
             const isNearBottom =
               bounds.bottom > window.innerHeight * 0.78;
-            const isAboveView =
-              bounds.top < window.innerHeight * 0.12;
+            const isAboveView = bounds.bottom < 0;
 
             if (isNearBottom || isAboveView) {
               const nextScrollTop =
@@ -2714,8 +2654,12 @@ const ReaderView = ({
         }
         const wordIndex =
           typeof data.wordIndex === "number" ? Math.max(0, data.wordIndex) : 0;
-        if (typeof data.ttsOffset === "number") {
-          const nextTtsOffset = Math.max(0, data.ttsOffset);
+        if (sourceBlock) {
+          const words = Array.from(sourceBlock.text.matchAll(/\S+/g));
+          const blockOffset = typeof data.blockOffset === "number"
+            ? Math.max(0, data.blockOffset) : words[wordIndex]?.index ?? 0;
+          ttsVisibleAnchorRef.current = { blockId: sourceBlock.id, blockOffset };
+          const nextTtsOffset = ttsPositionForBlock(blocks, sourceBlock.id, blockOffset);
           ttsStartOffsetRef.current = nextTtsOffset;
           setTtsStartOffset(nextTtsOffset);
         }
@@ -2803,9 +2747,14 @@ const ReaderView = ({
           <TTS
             text={ttsText}
             startOffset={ttsStartOffset}
-            getStartOffset={() => ttsStartOffsetRef.current}
+            getStartOffset={() => {
+              const anchor = ttsVisibleAnchorRef.current;
+              return anchor ? ttsPositionForBlock(blocks, anchor.blockId, anchor.blockOffset)
+                : ttsStartOffsetRef.current;
+            }}
             onSpeechStartOffsetChange={(offset) => {
               speechStartOffsetRef.current = offset;
+              speechBlocksRef.current = blocks.map(block => ({ ...block }));
             }}
             onClearHighlight={clearSpokenWordHighlight}
           />

@@ -9,9 +9,9 @@ type ReaderPositionRow = {
 };
 
 export async function loadReaderPosition(db: SQLiteDatabase, pdfId: string): Promise<CanonicalAnchor | null> {
-  const row = await db.getFirstAsync<ReaderPositionRow>(
+  const row = await withSerializedWrite(db, database => database.getFirstAsync<ReaderPositionRow>(
     "SELECT * FROM reader_positions WHERE pdf_id = ? LIMIT 1", pdfId,
-  );
+  ));
   return row ? {
     documentId: row.pdf_id,
     sourcePage: row.source_page,
@@ -37,7 +37,8 @@ export async function saveReaderPosition(db: SQLiteDatabase, anchor: CanonicalAn
       character_offset = excluded.character_offset,
       block_progress = excluded.block_progress,
       revision = excluded.revision,
-      updated_at = excluded.updated_at`,
+      updated_at = excluded.updated_at
+    WHERE excluded.revision >= reader_positions.revision`,
     anchor.documentId, anchor.sourcePage, anchor.sourceBlockId ?? null,
     anchor.wordIndex ?? null, anchor.characterOffset ?? null,
     anchor.blockProgress ?? null, anchor.revision, anchor.updatedAt,

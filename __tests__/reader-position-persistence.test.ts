@@ -29,3 +29,16 @@ describe("reader position persistence", () => {
     ]);
   });
 });
+
+test('immediate reopen waits for the preceding close save to finish', async () => {
+  let finish!: () => void;
+  const db = { runAsync: jest.fn(() => new Promise<void>(resolve => { finish = resolve; })), getFirstAsync: jest.fn().mockResolvedValue(null) } as any;
+  const saving = saveReaderPosition(db, { documentId: 'book', sourcePage: 117, revision: 12, updatedAt: '2026-09-13T00:00:00Z' });
+  const loading = loadReaderPosition(db, 'book');
+  await Promise.resolve();
+  expect(db.getFirstAsync).not.toHaveBeenCalled();
+  finish();
+  await saving;
+  await loading;
+  expect(db.getFirstAsync).toHaveBeenCalledTimes(1);
+});

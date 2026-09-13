@@ -1,3 +1,5 @@
+import { useIsFocused } from "@react-navigation/native";
+import { captureVisiblePosition } from "@/architecture/anchor/VisiblePosition";
 import { extractionRangeForDocument, nextOcrPrefetchPage, prioritizeHorizontalRequests, extractionFocusPage } from "@/architecture/PdfExtractionScheduling";
 import { pageStartAnchor, resolveAnchor } from "@/architecture/anchor/AnchorResolution";
 import BackButton from "@/components/Backbutton";
@@ -47,6 +49,7 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   AppState,
   StyleSheet,
@@ -214,6 +217,9 @@ function BookPageSkeleton() {
 }
 
 function ReaderScreenContent() {
+  const router = useRouter();
+  const isFocused = useIsFocused();
+  const closingRef = React.useRef(false);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { pdfId } = useLocalSearchParams<{ pdfId?: string }>();
   const db = useSQLiteContext();
@@ -354,6 +360,7 @@ function ReaderScreenContent() {
   const latestReaderPageCount = React.useRef(readerPageCount);
   const positionRestoreApplied = React.useRef(false);
   const initialOpenIsNew = React.useRef(true);
+  const hydratedPosition = React.useRef<CanonicalAnchor | null>(null);
   const recoveryAnchorRef = React.useRef<CanonicalAnchor | null>(null);
   const previousReaderTransition = React.useRef(readerTransition);
   const pendingLayoutAnchor = React.useRef<CanonicalAnchor | null>(null);
@@ -367,21 +374,45 @@ function ReaderScreenContent() {
   > | null>(null);
   const {
     actualReaderAnchor,
+    flushReaderAnchor,
     reportReaderAnchor: handleReaderSwitchAnchorChange,
   } = useReaderAnchor({
     documentId: pdfId,
-    isActive: activeTab === "reader" && positionHydratedFor === pdfId,
+    isActive: activeTab === "reader" && positionHydratedFor === pdfId &&
+      (initialRestoreCompleteFor === pdfId || anchorTransition.status === "running"),
     blocks: readerBlocks,
     isRotationInProgress,
   });
-  const canonicalOriginalHighlight = useMemo(
-    () =>
-      originalHighlightTarget(
-        anchorTransition.status === "running" && anchorTransition.target?.mode === "original"
-          ? desiredAnchor ?? canonicalAnchor : canonicalAnchor,
-        readerBlocks, readerPageSizes),
-    [canonicalAnchor, desiredAnchor, anchorTransition.status, anchorTransition.target?.mode, readerBlocks, readerPageSizes],
-  );
+  const [canonicalOriginalHighlight, setOriginalHighlightSnapshot] = useState<ReturnType<typeof originalHighlightTarget>>(null);
+
+  const captureExitPosition = useCallback(() => {
+    return captureVisiblePosition(pdfId, activeTabRef.current,
+      actualReaderAnchor.current, originalHandoffAnchorRef.current, anchorController.current());
+  }, [actualReaderAnchor, pdfId]);
+
+  const closeReader = useCallback(async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    const visible = captureExitPosition();
+    transitionController.cancel("reader closed");
+    if (positionPersistenceTimer.current) clearTimeout(positionPersistenceTimer.current);
+    positionPersistenceTimer.current = null;
+    try {
+      if (visible && visible.documentId === pdfId) {
+        const committed = anchorController.publish({ ...visible, revision: undefined }, "explicit-navigation");
+        if (committed) {
+          await saveReaderPosition(db, committed);
+          console.info("[Reader Position]", { action: "saved-on-close", mode: activeTabRef.current,
+            page: committed.sourcePage, blockId: committed.sourceBlockId, offset: committed.characterOffset });
+        }
+      }
+      router.back();
+    } catch (error) {
+      closingRef.current = false;
+      console.error("Unable to save reading position before closing", error);
+      Alert.alert("Could not save your place", "Please try closing the PDF again.");
+    }
+  }, [captureExitPosition, db, pdfId, router]);
 
   const beginRotationMask = useCallback(() => {
     if (activeTabRef.current === "original") return;
@@ -457,10 +488,12 @@ function ReaderScreenContent() {
     setInitialRestoreCompleteFor(null);
     positionRestoreApplied.current = false;
     initialOpenIsNew.current = true;
+    hydratedPosition.current = null;
     transitionController.cancel("document changed");
     setReaderDestination(null);
     setReaderSwitchHighlight(null);
     setOriginalDestination(null);
+    setOriginalHighlightSnapshot(null);
     originalHandoffAnchorRef.current = null;
     readerReturnAnchorRef.current = null;
     pendingLayoutAnchor.current = null;
@@ -480,6 +513,9 @@ function ReaderScreenContent() {
       .then((anchor) => {
         if (cancelled) return;
         initialOpenIsNew.current = !anchor;
+        hydratedPosition.current = anchor;
+        console.info("[Reader Position]", { action: "loaded", page: anchor?.sourcePage,
+          blockId: anchor?.sourceBlockId, offset: anchor?.characterOffset });
         anchorController.initialize(
           anchor ?? {
             documentId: pdfId,
@@ -516,10 +552,15 @@ function ReaderScreenContent() {
     });
     return () => {
       cancelled = true;
+      transitionController.cancel("reader unmounted");
+      anchorController.setPersistenceScheduler(undefined);
+      flushReaderAnchor();
       const pending = positionPersistenceTimer.current;
       if (pending) clearTimeout(pending);
       positionPersistenceTimer.current = null;
-      const anchor = anchorController.current();
+      const visible = captureExitPosition();
+      const anchor = visible && visible.documentId === pdfId
+        ? anchorController.publish({ ...visible, revision: undefined }, "explicit-navigation") : null;
       if (anchor?.documentId === pdfId) void saveReaderPosition(db, anchor);
       anchorController.setPersistenceScheduler(undefined);
     };
@@ -529,7 +570,10 @@ function ReaderScreenContent() {
     if (!pdfId) return;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") return;
-      const anchor = anchorController.current();
+      flushReaderAnchor();
+      const visible = captureExitPosition();
+      const anchor = visible && visible.documentId === pdfId
+        ? anchorController.publish({ ...visible, revision: undefined }, "explicit-navigation") : null;
       if (anchor?.documentId === pdfId) void saveReaderPosition(db, anchor);
     });
     return () => subscription.remove();
@@ -773,15 +817,13 @@ function ReaderScreenContent() {
     }
     const live =
       activeTabRef.current === "reader" ? actualReaderAnchor.current : null;
-    // Explicit navigation (TOC/search/page picker) commits a newer revision
-    // immediately before starting its transition. It must outrank the old live
-    // viewport. For ordinary tab switches revisions are equal, so the precise
-    // live word remains the preferred capture.
+    // Pending navigation was handled above. Otherwise the live viewport owns
+    // the handoff: completing startup increments the canonical revision without
+    // changing the visible word, so revision ordering cannot choose between them.
     if (
       live &&
       live.documentId === pdfId &&
-      live.sourceBlockId &&
-      (!current || live.revision >= current.revision)
+      live.sourceBlockId
     )
       return live;
     if (!current || current.documentId !== pdfId) return null;
@@ -927,7 +969,11 @@ function ReaderScreenContent() {
         capture: () => capturedAnchor ?? captureCanonicalAnchor(),
         prepare: async (anchor, transitionId) => {
           if (targetMode === "original") {
-            originalHandoffAnchorRef.current = anchor;
+            console.info("[Reader Position]", { action: "handoff-to-original", page: anchor.sourcePage,
+              blockId: anchor.sourceBlockId, offset: anchor.characterOffset });
+            originalHandoffAnchorRef.current = { ...anchor };
+            setOriginalHighlightSnapshot(originalHighlightTarget(anchor,
+              latestReaderBlocks.current, latestReaderPageSizes.current));
             return waitForCurrentTransition(
               transitionId,
               () => originalContentReadyRef.current,
@@ -990,7 +1036,7 @@ function ReaderScreenContent() {
       { suppressSwitchHighlight: true },
       initialOpenIsNew.current
         ? { ...canonicalAnchor, ...pageStartAnchor(pdfId, readerBlocks[0].page, readerBlocks) }
-        : canonicalAnchor,
+        : hydratedPosition.current ?? canonicalAnchor,
     ).finally(() => setInitialRestoreCompleteFor(pdfId));
   }, [
     canonicalAnchor,
@@ -1206,12 +1252,12 @@ function ReaderScreenContent() {
         const firstBlock = latestReaderBlocks.current.find(
           (block) => block.page === page && block.text.trim(),
         );
-        if (firstBlock) {
+        {
           originalHandoffAnchorRef.current = {
             documentId: pdfId,
             sourcePage: page,
-            sourceBlockId: firstBlock.id,
-            wordIndex: 0,
+            sourceBlockId: firstBlock?.id,
+            wordIndex: firstBlock ? 0 : undefined,
             characterOffset: 0,
             blockProgress: 0,
             revision: anchorController.current()?.revision ?? 0,
@@ -1468,7 +1514,7 @@ function ReaderScreenContent() {
   if (!pdf || loadError) {
     return (
       <View className="flex-1 bg-[#F7F5EC] px-6 pt-12 dark:bg-[#10120F]">
-        <BackButton />
+        <BackButton onPress={() => { void closeReader(); }} />
         <View className="flex-1 items-center justify-center pb-20">
           <Text className="text-center font-lato-bold text-lg text-black dark:text-[#F4F5F1]">
             PDF unavailable
@@ -1483,11 +1529,10 @@ function ReaderScreenContent() {
 
   return (
     <Box className="flex-1 bg-[#F7F5EC] dark:bg-[#10120F]">
-      <StatusBar
-        animated
-        hidden={visibleTab === "reader" && (isLandscape || readerChromeHidden)}
-        style="auto"
-      />
+      {isFocused && <StatusBar
+        hidden={isLandscape || (visibleTab === "reader" && readerChromeHidden)}
+        style={isDark ? "light" : "dark"}
+      />}
       <Animated.View
         pointerEvents={isLandscape ? "none" : "auto"}
         accessibilityElementsHidden={isLandscape}
@@ -1525,7 +1570,7 @@ function ReaderScreenContent() {
         >
           <View className="relative h-14 w-full items-center justify-center px-5">
             <View className="absolute left-4 top-1/2 -translate-y-1/2">
-              <BackButton />
+              <BackButton onPress={() => { void closeReader(); }} />
             </View>
 
             <View className="absolute right-4 top-1/2 -translate-y-1/2 flex-row">

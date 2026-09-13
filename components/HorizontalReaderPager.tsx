@@ -1567,12 +1567,18 @@ function CompleteHorizontalReaderPager({
   );
 
   useEffect(() => {
-    if (viewportSettling || !viewablePage || !sameRenderedPage(pages[viewablePage.index], viewablePage.item) ||
-        programmaticDestinationPageRef.current !== viewablePage.index) return;
-    // A visible item from an older pagination cannot confirm the new command.
-    // Report its rendered first word, never substitute the requested word.
+    if (viewportSettling || !viewablePage ||
+        !sameRenderedPage(pages[viewablePage.index], viewablePage.item)) return;
+    const pendingIndex = programmaticDestinationPageRef.current;
+    if (pendingIndex !== null && pendingIndex !== viewablePage.index) return;
+    // After native confirmation, the visible cell owns the handoff anchor.
+    // Keeping the navigation index locked ignored later native position changes
+    // as neighboring pages were inserted during cold-open extraction.
+    programmaticDestinationPageRef.current = null;
+    currentPageRef.current = viewablePage.index;
+    programmaticDestinationAnchorRef.current = pageAnchor(viewablePage.item, blocks);
     reportPageChange(viewablePage.index);
-  }, [destination, pages, reportPageChange, viewablePage, viewportSettling]);
+  }, [destination, pages, blocks, reportPageChange, viewablePage, viewportSettling]);
 
   // Memoized cells can survive insertion before them. Never use the index
   // captured when that cell mounted to acknowledge its first paint.
@@ -1716,7 +1722,7 @@ function CompleteHorizontalReaderPager({
     pendingViewportRestoreRef.current = false;
     restoredPagesRef.current = pages;
     currentPageRef.current = preservedViewportPage;
-    if (programmaticDestinationAnchorRef.current) {
+    if (programmaticDestinationPageRef.current !== null) {
       programmaticDestinationPageRef.current = preservedViewportPage;
     }
     if (needsScrollRestore) pagerRef.current?.scrollToOffset({
@@ -1825,10 +1831,14 @@ function CompleteHorizontalReaderPager({
       ),
     );
     if (pageIndex < 0 || pageIndex === currentPageRef.current) return;
-    pagerRef.current?.scrollToIndex({ animated: true, index: pageIndex });
+    // Keep insertion/reflow anchored to the spoken page while native paging
+    // animates. A leftover restore anchor must not pull playback backward.
+    programmaticDestinationAnchorRef.current = pageAnchor(pages[pageIndex], blocks);
+    programmaticDestinationPageRef.current = pageIndex;
     currentPageRef.current = pageIndex;
+    pagerRef.current?.scrollToIndex({ animated: true, index: pageIndex });
     reportPageChange(pageIndex);
-  }, [pages, reportPageChange, spokenWordHighlight]);
+  }, [blocks, pages, reportPageChange, spokenWordHighlight]);
 
   const textForDisplay = useCallback(
     (text: string) => {

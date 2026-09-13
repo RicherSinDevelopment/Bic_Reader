@@ -558,3 +558,14 @@ test('TOC cancels an unfinished swipe and accepts destination pages arriving lat
   act(() => list().props.onMomentumScrollEnd({ nativeEvent: { contentOffset: { x: 756 } } }));
   expect(tree.root.findByType('NativeWebView').props.source).toBe(source);
 });
+
+test('confirmed opening navigation follows the native visible text for tab handoff', () => {
+  const onPageChange = jest.fn();
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} onPageChange={onPageChange} destination={{ page: 20, blockId: 'block-19', pageTop: true, nonce: 2100 }} />); });
+  layout(756, 390);
+  const data = list().props.data;
+  const visibleIndex = data.findIndex((page: any[]) => page[0].sourcePage === 18);
+  onPageChange.mockClear();
+  act(() => list().props.onViewableItemsChanged({ viewableItems: [{ index: visibleIndex, isViewable: true, item: data[visibleIndex] }] }));
+  expect(onPageChange).toHaveBeenLastCalledWith(visibleIndex + 1, data.length, 18, expect.objectContaining({ blockId: 'block-17' }));
+});

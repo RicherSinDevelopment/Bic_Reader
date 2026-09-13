@@ -2,13 +2,13 @@ import ReaderGlassIconButton from "@/components/readerui/ReaderGlassIconButton";
 import { ArrowLeftIcon, Icon } from "@/components/ui/icon";
 import { useRouter } from "expo-router";
 
-export default function BackButton() {
+export default function BackButton({ onPress }: { onPress?: () => void } = {}) {
   const router = useRouter();
 
   return (
     <ReaderGlassIconButton
       accessibilityLabel="Go back"
-      onPress={() => router.back()}
+      onPress={onPress ?? (() => router.back())}
     >
       <Icon as={ArrowLeftIcon} size="lg" className="text-[#242424] dark:text-[#F4F5F1]" />
     </ReaderGlassIconButton>

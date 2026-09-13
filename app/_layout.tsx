@@ -50,7 +50,7 @@ function RootLayout() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
           <GluestackUIProvider mode={appearancePreference}>
-            <StatusBar style="auto" />
+            <StatusBar hidden={false} style="auto" />
             <AuthProvider>
               <RevenueCatProvider>
                 <Suspense fallback={<StartupLoadingScreen />}>

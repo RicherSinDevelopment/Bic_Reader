@@ -569,3 +569,54 @@ test('confirmed opening navigation follows the native visible text for tab hando
   act(() => list().props.onViewableItemsChanged({ viewableItems: [{ index: visibleIndex, isViewable: true, item: data[visibleIndex] }] }));
   expect(onPageChange).toHaveBeenLastCalledWith(visibleIndex + 1, data.length, 18, expect.objectContaining({ blockId: 'block-17' }));
 });
+
+const guideTap = (forward = true) => act(() => {
+  const button = tree.root.findAll((node: any) =>
+    node.props.accessibilityLabel?.startsWith('Move reading guide') && node.props.onPress)[0];
+  button.props.onPress({ nativeEvent: { locationY: forward ? 350 : 10, pageY: 900 } });
+});
+const guideCell = () => tree.root.findAll((node: any) => node.props.layoutKey && node.props.onGuideLines)[0];
+
+test('line guide waits for WebView geometry and visits the bottom line before turning', () => {
+  const onPageChange = jest.fn();
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} guideMode="line" onPageChange={onPageChange} />); });
+  layout(756, 390);
+  onPageChange.mockClear();
+  guideTap();
+  expect(onPageChange).not.toHaveBeenCalled();
+  act(() => guideCell().props.onGuideLines([0, 1, 2].map(index => ({ left: 20, top: 30 + index * 30, width: 100, height: 25 }))));
+  guideTap();
+  guideTap(false); // Local coordinates mean backward despite pageY being 900.
+  guideTap();
+  guideTap();
+  expect(onPageChange).not.toHaveBeenCalled();
+  guideTap();
+  expect(onPageChange).toHaveBeenLastCalledWith(2, expect.any(Number), expect.any(Number), expect.any(Object));
+});
+
+test('word guide preserves its word when background pages are appended', () => {
+  const initialBlocks = blocks.slice(0, 3);
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} blocks={initialBlocks} guideMode="word" />); });
+  layout(756, 390);
+  guideTap();
+  guideTap();
+  const before = guideCell().props.guideWord;
+  expect(before.offset).toBeGreaterThan(0);
+  act(() => tree.update(<HorizontalReaderPager {...defaults} blocks={blocks.slice(0, 5)} guideMode="word" />));
+  expect(guideCell().props.guideWord).toMatchObject({ blockId: before.blockId, offset: before.offset });
+});
+
+test('horizontal word guide paints both wrapped fragments and advances once per word', () => {
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} guideMode="word" />); });
+  layout(756, 390);
+  const word = guideCell().props.guideWord;
+  act(() => guideCell().props.onGuideWordRects([
+    { left: 600, top: 30, width: 50, height: 24 },
+    { left: 20, top: 60, width: 40, height: 24 },
+  ], word));
+  expect(tree.root.findAllByProps({ testID: 'horizontal-word-guide-fragment' }).length).toBeGreaterThanOrEqual(2);
+  guideTap();
+  expect(guideCell().props.guideWord.offset).toBeGreaterThan(word.offset);
+  guideTap(false);
+  expect(guideCell().props.guideWord.offset).toBe(word.offset);
+});

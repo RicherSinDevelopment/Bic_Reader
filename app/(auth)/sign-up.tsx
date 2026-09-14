@@ -26,6 +26,17 @@ import {
 
 const logo = require('../../assets/images/Bicreaderlogo-large.png');
 
+function formatSignUpError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('504') || message.toLowerCase().includes('gateway timeout')) {
+    return 'Supabase took too long to respond. Check your connection and try again in a moment.';
+  }
+  if (message.toLowerCase().includes('rate limit')) {
+    return 'Too many attempts. Please wait a few minutes and try again.';
+  }
+  return message;
+}
+
 export default function SignUp() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -34,6 +45,7 @@ export default function SignUp() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isResendingConfirmation, setIsResendingConfirmation] = useState(false);
   const router = useRouter();
   const params = useLocalSearchParams<{ returnTo?: string | string[] }>();
   const returnTo = authReturnTarget(params.returnTo);
@@ -62,7 +74,7 @@ export default function SignUp() {
     setIsSubmitting(false);
 
     if (error) {
-      setErrorMessage(error.message);
+      setErrorMessage(formatSignUpError(error));
       return;
     }
 
@@ -72,6 +84,20 @@ export default function SignUp() {
     }
 
     setSuccessMessage('Account created. Check your email to confirm your address, then sign in.');
+  };
+
+  const handleResendConfirmation = async () => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail || isResendingConfirmation) return;
+    setErrorMessage(null);
+    setIsResendingConfirmation(true);
+    const { error } = await supabase.auth.resend({ type: 'signup', email: normalizedEmail });
+    setIsResendingConfirmation(false);
+    if (error) {
+      setErrorMessage(formatSignUpError(error));
+      return;
+    }
+    setSuccessMessage('Confirmation email sent again. Check your inbox and spam folder.');
   };
 
   return (
@@ -184,7 +210,21 @@ export default function SignUp() {
                   {errorMessage}
                 </Text>
               ) : null}
-              {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
+              {successMessage ? (
+                <View>
+                  <Text style={styles.successText}>{successMessage}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={isResendingConfirmation}
+                    onPress={() => void handleResendConfirmation()}
+                    style={styles.resendButton}
+                  >
+                    <Text style={styles.resendButtonText}>
+                      {isResendingConfirmation ? 'Sending…' : 'Resend confirmation email'}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
 
             <SocialAuthButtons
@@ -313,6 +353,18 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
     fontFamily: 'Lato_400Regular',
     fontSize: 13,
     lineHeight: 18,
+    textAlign: 'center',
+  },
+  resendButton: {
+    alignSelf: 'center',
+    marginTop: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  resendButtonText: {
+    color: isDark ? '#B5D889' : '#4F7D1A',
+    fontFamily: 'Lato_700Bold',
+    fontSize: 13,
     textAlign: 'center',
   },
   switchRow: {

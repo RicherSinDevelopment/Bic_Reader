@@ -10,7 +10,7 @@ import { Stack } from "expo-router";
 import { SQLiteProvider } from "expo-sqlite";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, useColorScheme, View } from "react-native";
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
   configureReanimatedLogger,
@@ -32,14 +32,6 @@ configureReanimatedLogger({
 
 function RootLayout() {
   const appearancePreference = useAppearanceStore((state) => state.preference);
-  // Start loading fonts without blocking the auth provider and router. Waiting
-  // here previously delayed session restoration and left the app empty during
-  // every development reload.
-  useFonts({
-    Lato_400Regular,
-    Lato_700Bold,
-    SourceSans3_400Regular,
-  });
   
  return (
     <AppErrorBoundary
@@ -93,9 +85,21 @@ function StartupLoadingScreen() {
 }
 
 function RootNavigator() {
+  // Keep font state below SQLiteProvider: its memo comparator ignores children,
+  // so passing readiness from above it can permanently retain the initial false.
+  // Providers can initialize in parallel, but text must mount after its fonts.
+  const [fontsLoaded, fontError] = useFonts({
+    Lato_400Regular,
+    Lato_700Bold,
+    SourceSans3_400Regular,
+  });
+  useEffect(() => {
+    if (fontError) console.warn("App fonts failed to load", fontError);
+  }, [fontError]);
+
   const { isLoading, session } = useAuth();
 
-  if (isLoading) {
+  if (isLoading || (!fontsLoaded && !fontError)) {
     return <StartupLoadingScreen />;
   }
 

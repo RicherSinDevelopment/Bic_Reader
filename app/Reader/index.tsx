@@ -78,7 +78,6 @@ import {
 } from "@/architecture/anchor/VerticalAnchorAdapter";
 import {
   createHorizontalAnchorAdapter,
-  generatedPageDestination,
 } from "@/architecture/anchor/HorizontalAnchorAdapter";
 import {
   createOriginalAnchorAdapter,
@@ -1484,12 +1483,9 @@ function ReaderScreenContent() {
         return;
       }
       if (readerTransition === "pager") {
-        const destination = generatedPageDestination(
-          page,
-          anchorController.current()?.sourcePage ?? readerCurrentPage,
-        );
-        setReaderDestination(destination);
-        setReaderSwitchHighlight(null);
+        // The windowed pager displays source page numbers. Use canonical
+        // navigation so OCR extraction follows the typed destination as well.
+        goToNavigationPage(page);
         return;
       }
       goToReaderPage(page);
@@ -1498,7 +1494,6 @@ function ReaderScreenContent() {
       activeTab,
       goToNavigationPage,
       goToReaderPage,
-      readerCurrentPage,
       readerTransition,
     ],
   );

@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 import Storage from 'expo-sqlite/kv-store';
 
+export const MIN_READER_FONT_SIZE = 10;
+export const MAX_READER_FONT_SIZE = 65;
+
 const readerSettingsStorage: StateStorage = {
   getItem: (name) => Storage.getItemSync(name),
   setItem: (name, value) => Storage.setItemSync(name, value),
@@ -111,12 +114,12 @@ export const useReaderSettingsStore = create<ReaderSettingsState>()(
 
     increaseFontSize: () =>
       set((state) => ({
-        fontSize: Math.min(state.fontSize + 2, 40),
+        fontSize: Math.min(state.fontSize + 2, MAX_READER_FONT_SIZE),
       })),
 
     decreaseFontSize: () =>
       set((state) => ({
-        fontSize: Math.max(state.fontSize - 2, 10),
+        fontSize: Math.max(state.fontSize - 2, MIN_READER_FONT_SIZE),
       })),
 
     increaseLineHeight: () =>

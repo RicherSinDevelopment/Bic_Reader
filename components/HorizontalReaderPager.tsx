@@ -1,3 +1,4 @@
+import { guideFragmentDimming } from "@/architecture/GuideFragmentDimming";
 import { HORIZONTAL_PAGE_FIT_SCRIPT } from "@/architecture/HorizontalPageFit";
 import {
   hyphenateText,
@@ -1606,15 +1607,28 @@ function CompleteHorizontalReaderPager({
     );
   }, [guideMode, pages]);
 
-  useEffect(() => {
-    if (!guideMode) return;
-    setLineGuideIndex(0);
+  const guideProgressRef = useRef<{
+    mode: typeof guideMode;
+    word?: { blockId: string; offset: number };
+  }>({ mode: null });
+  useLayoutEffect(() => {
+    const previous = guideProgressRef.current;
+    const modeChanged = previous.mode !== guideMode;
+    if (modeChanged) setLineGuideIndex(0);
     if (guideMode === "word") {
-      const firstVisibleWord = guideWords.findIndex(
-        (word) => word.pageIndex >= currentPageRef.current,
-      );
-      setWordGuideIndex(Math.max(0, firstVisibleWord));
-      setWordGuideFragmentIndex(0);
+      // Window growth changes array indices, not the word being read.
+      const preserved = !modeChanged && previous.word
+        ? guideWords.findIndex((word) =>
+            word.blockId === previous.word!.blockId &&
+            word.offset === previous.word!.offset)
+        : -1;
+      const next = preserved >= 0 ? preserved : Math.max(0,
+        guideWords.findIndex((word) => word.pageIndex >= currentPageRef.current));
+      setWordGuideIndex(next);
+      if (preserved < 0) setWordGuideFragmentIndex(0);
+      guideProgressRef.current = { mode: guideMode, word: guideWords[next] };
+    } else {
+      guideProgressRef.current = { mode: guideMode };
     }
   }, [guideMode, guideWords]);
 
@@ -2112,11 +2126,13 @@ function CompleteHorizontalReaderPager({
       ? webGuideWordRects[guideWordKey]
       : undefined;
     if (exactRects?.length) {
-      const index =
-        wordGuideFragmentIndex < 0
-          ? exactRects.length - 1
-          : Math.min(wordGuideFragmentIndex, exactRects.length - 1);
-      return exactRects[index];
+      const left = Math.min(...exactRects.map(rect => rect.left));
+      const top = Math.min(...exactRects.map(rect => rect.top));
+      return {
+        left, top,
+        width: Math.max(...exactRects.map(rect => rect.left + rect.width)) - left,
+        height: Math.max(...exactRects.map(rect => rect.top + rect.height)) - top,
+      };
     }
     // Once a page has supplied its browser layout, never briefly fall back to
     // the native Text measurement. Its font metrics differ just enough to
@@ -2144,6 +2160,9 @@ function CompleteHorizontalReaderPager({
           },
     );
   }, [activeWordMeasurementTarget]);
+  const wordGuideFragments = guideMode === "word" && guideWordKey
+    ? webGuideWordRects[guideWordKey] ?? [] : [];
+  const hasMultipleWordFragments = wordGuideFragments.length > 1;
   const activeGuideRect =
     guideMode === "word" ? activeGuideWordRect : activeGuideLine;
   useEffect(() => {
@@ -2177,70 +2196,48 @@ function CompleteHorizontalReaderPager({
     (pageIndex: number) => {
       const target = Math.max(0, Math.min(pages.length - 1, pageIndex));
       if (target === currentPageRef.current) return;
-      pagerRef.current?.scrollToIndex({ animated: true, index: target });
+      programmaticDestinationAnchorRef.current = pageAnchor(pages[target], blocks);
+      programmaticDestinationPageRef.current = target;
       currentPageRef.current = target;
+      pagerRef.current?.scrollToIndex({ animated: true, index: target });
       reportPageChange(target);
     },
-    [pages.length, reportPageChange],
+    [blocks, pages, reportPageChange],
   );
 
   const moveGuide = useCallback(
     (direction: -1 | 1) => {
       if (guideMode === "word") {
-        const exactFragments = guideWordKey
-          ? webGuideWordRects[guideWordKey]
-          : undefined;
-        const selectedFragment = exactFragments?.length
-          ? wordGuideFragmentIndex < 0
-            ? exactFragments.length - 1
-            : Math.min(wordGuideFragmentIndex, exactFragments.length - 1)
-          : (activeWordMeasurementTarget?.selectedFragmentIndex ?? 0);
-        const fragmentCount =
-          exactFragments?.length ??
-          activeWordMeasurementTarget?.fragmentCount ??
-          1;
-        if (direction > 0 && selectedFragment < fragmentCount - 1) {
-          setWordGuideFragmentIndex(selectedFragment + 1);
-          return;
-        }
-        if (direction < 0 && selectedFragment > 0) {
-          setWordGuideFragmentIndex(selectedFragment - 1);
-          return;
-        }
+        // A wrapped/hyphenated word is one step, just as in vertical mode.
         const next = Math.max(
           0,
           Math.min(guideWords.length - 1, wordGuideIndex + direction),
         );
         if (next === wordGuideIndex) return;
+        guideProgressRef.current = { mode: guideMode, word: guideWords[next] };
         setWordGuideIndex(next);
         setWordGuideFragmentIndex(direction < 0 ? -1 : 0);
         const nextPage = guideWords[next]?.pageIndex;
         if (nextPage !== undefined) moveToPage(nextPage);
         return;
       }
-      const currentLines =
-        webGuideLinesByPage[currentPageRef.current] ??
-        guideLinesByPage[currentPageRef.current] ??
-        [];
+      // Only the visible WebView knows the final line wraps. Native fallback
+      // measurements can be partial and must never trigger a page turn.
+      const currentLines = webGuideLinesByPage[currentPageRef.current];
+      if (!currentLines?.length) return;
       const maximumLine = Math.max(0, currentLines.length - 1);
-      const next = lineGuideIndex + direction;
+      const next = Math.min(lineGuideIndex, maximumLine) + direction;
       if (next > maximumLine) {
+        if (currentPageRef.current >= pages.length - 1) return;
         setLineGuideIndex(0);
         moveToPage(currentPageRef.current + 1);
         return;
       }
       if (next < 0) {
-        const previousPage = Math.max(0, currentPageRef.current - 1);
-        setLineGuideIndex(
-          Math.max(
-            0,
-            ((
-              webGuideLinesByPage[previousPage] ??
-              guideLinesByPage[previousPage]
-            )?.length ?? 1) - 1,
-          ),
-        );
-        moveToPage(previousPage);
+        if (currentPageRef.current === 0) return;
+        // Resolve to the final line once the previous page reports geometry.
+        setLineGuideIndex(Number.MAX_SAFE_INTEGER);
+        moveToPage(currentPageRef.current - 1);
         return;
       }
       setLineGuideIndex(next);
@@ -2252,6 +2249,7 @@ function CompleteHorizontalReaderPager({
       guideWordKey,
       guideWords,
       lineGuideIndex,
+      pages.length,
       moveToPage,
       webGuideLinesByPage,
       webGuideWordRects,
@@ -3002,7 +3000,7 @@ function CompleteHorizontalReaderPager({
           </Text>
         </View>
       )}
-      {guideMode && visibleGuideRect && (
+      {guideMode && visibleGuideRect && !hasMultipleWordFragments && (
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>
           <View
             style={{
@@ -3024,9 +3022,9 @@ function CompleteHorizontalReaderPager({
             <View
               style={{
                 width: visibleGuideRect.width,
-                backgroundColor: `${guideColor}47`,
+                backgroundColor: hasMultipleWordFragments ? "transparent" : `${guideColor}47`,
                 borderColor: `${guideColor}8C`,
-                borderWidth: 1,
+                borderWidth: hasMultipleWordFragments ? 0 : 1,
                 borderRadius: 4,
               }}
             />
@@ -3047,13 +3045,31 @@ function CompleteHorizontalReaderPager({
           />
         </View>
       )}
+      {hasMultipleWordFragments && (
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          {guideFragmentDimming(width, usableHeight, wordGuideFragments).map((rect, index) => (
+            <View key={`dim-${index}`} testID="horizontal-word-guide-dimming" style={{
+              position: "absolute", ...rect, backgroundColor,
+              opacity: guideBackgroundDimming / 100,
+            }} />
+          ))}
+          {wordGuideFragments.map((rect, index) => (
+            <View key={index} testID="horizontal-word-guide-fragment" style={{
+              position: "absolute", left: rect.left, top: rect.top,
+              width: rect.width, height: rect.height,
+              backgroundColor: `${guideColor}47`, borderColor: `${guideColor}8C`,
+              borderWidth: 1, borderRadius: 4,
+            }} />
+          ))}
+        </View>
+      )}
       {guideMode && (
         <>
           <Pressable
             accessibilityLabel="Move reading guide. Tap upper half for back, lower half for forward"
             accessibilityRole="button"
             onPress={(event) =>
-              moveGuide(event.nativeEvent.pageY < usableHeight / 2 ? -1 : 1)
+              moveGuide(event.nativeEvent.locationY < usableHeight / 2 ? -1 : 1)
             }
             style={StyleSheet.absoluteFill}
           />

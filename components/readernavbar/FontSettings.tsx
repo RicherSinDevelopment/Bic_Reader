@@ -1,6 +1,6 @@
 import { BottomSheetScrollView } from "@/components/ui/bottomsheet";
 import { Switch } from "@/components/ui/switch";
-import { useReaderSettingsStore } from "@/stores/readerSettingsStore";
+import { MAX_READER_FONT_SIZE, MIN_READER_FONT_SIZE, useReaderSettingsStore } from "@/stores/readerSettingsStore";
 import { Check, ChevronDown, Minus, Plus } from "lucide-react-native";
 import React, { useState } from "react";
 import {
@@ -142,7 +142,7 @@ export default function FontSettings() {
           </Pressable>
         </View>
 
-        <AdjustmentControl label="Font Size" valueLabel={`${fontSize} pt`} decreaseLabel="Smaller" increaseLabel="Larger" decreaseDisabled={fontSize <= 10} increaseDisabled={fontSize >= 40} onDecrease={decreaseFontSize} onIncrease={increaseFontSize} />
+        <AdjustmentControl label="Font Size" valueLabel={`${fontSize} pt`} decreaseLabel="Smaller" increaseLabel="Larger" decreaseDisabled={fontSize <= MIN_READER_FONT_SIZE} increaseDisabled={fontSize >= MAX_READER_FONT_SIZE} onDecrease={decreaseFontSize} onIncrease={increaseFontSize} />
 
         <View style={styles.presetSection}>
           <View style={styles.settingHeading}>

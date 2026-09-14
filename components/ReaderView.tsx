@@ -1761,6 +1761,7 @@ const ReaderView = ({
                 runtimeId: window.__readerRuntimeId
               }));
               window.__readerAppendCorrectionY = window.scrollY + insertedOffset;
+              window.__correctReaderGuideForAppend?.(insertedOffset);
               window.scrollBy(0, insertedOffset);
             }
           }
@@ -3531,6 +3532,14 @@ const ReaderView = ({
               let readerGuideMode = null;
               let currentGuideDocumentTop = null;
               let currentGuideLeft = null;
+              // Append compensation moves the document and viewport together.
+              // Move the line's stored coordinate before the scroll event can
+              // resolve it against the newly expanded document.
+              window.__correctReaderGuideForAppend = function(delta) {
+                if (readerGuideMode === 'line' && currentGuideDocumentTop !== null && Number.isFinite(delta)) {
+                  currentGuideDocumentTop += delta;
+                }
+              };
               const lineGuide = document.getElementById('reader-line-guide');
               const wordGuide = document.getElementById('reader-word-guide');
               let currentWordNode = null;

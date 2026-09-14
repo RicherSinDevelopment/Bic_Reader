@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 export function useScreenRotation(setIsLandscape: (value: boolean) => void) {
   const lastLandscape = useRef<boolean | null>(null);
+  const orientationWork = useRef(Promise.resolve());
 
   // Commit the orientation change immediately. The native viewport has already
   // rotated by the time the orientation event arrives, so deferring the state
@@ -23,17 +24,42 @@ export function useScreenRotation(setIsLandscape: (value: boolean) => void) {
     (state) => state.disableRotation,
   );
 
+  const guideEnabled = useReaderSettingsStore(
+    (state) => state.lineGuideEnabled || state.wordGuideEnabled,
+  );
+
   useEffect(() => {
     let subscription: ScreenOrientation.Subscription | undefined;
     let isActive = true;
 
     const setupOrientation = async () => {
+      if (!isActive) return;
       if (disableRotation) {
         await ScreenOrientation.lockAsync(
           ScreenOrientation.OrientationLock.PORTRAIT_UP,
         );
 
         if (isActive) updateLandscape(false);
+        return;
+      }
+
+      if (guideEnabled) {
+        const orientation = await ScreenOrientation.getOrientationAsync();
+        if (!isActive) return;
+        const locks = {
+          [ScreenOrientation.Orientation.PORTRAIT_UP]: ScreenOrientation.OrientationLock.PORTRAIT_UP,
+          [ScreenOrientation.Orientation.PORTRAIT_DOWN]: ScreenOrientation.OrientationLock.PORTRAIT_DOWN,
+          [ScreenOrientation.Orientation.LANDSCAPE_LEFT]: ScreenOrientation.OrientationLock.LANDSCAPE_LEFT,
+          [ScreenOrientation.Orientation.LANDSCAPE_RIGHT]: ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
+        };
+        const lock = locks[orientation as keyof typeof locks];
+        if (lock !== undefined) {
+          await ScreenOrientation.lockAsync(lock);
+          if (isActive) updateLandscape(
+            orientation === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+            orientation === ScreenOrientation.Orientation.LANDSCAPE_RIGHT,
+          );
+        }
         return;
       }
 
@@ -58,22 +84,27 @@ export function useScreenRotation(setIsLandscape: (value: boolean) => void) {
       });
     };
 
-    void setupOrientation();
+    // Serialize toggles so an older native lock cannot finish after unlocking.
+    orientationWork.current = orientationWork.current
+      .then(setupOrientation)
+      .catch((error) => console.warn("Reader orientation update failed", error));
 
     return () => {
       isActive = false;
       subscription?.remove();
     };
-  }, [disableRotation, updateLandscape]);
+  }, [disableRotation, guideEnabled, updateLandscape]);
 
   // Leaving the reader returns the rest of the app to its portrait contract.
   // Keep this separate from the reactive effect above: its old cleanup ran on
   // every guide toggle and caused an unwanted portrait frame before relocking.
   useEffect(
     () => () => {
-      void ScreenOrientation.lockAsync(
-        ScreenOrientation.OrientationLock.PORTRAIT_UP,
-      );
+      orientationWork.current = orientationWork.current
+        .then(() => ScreenOrientation.lockAsync(
+          ScreenOrientation.OrientationLock.PORTRAIT_UP,
+        ))
+        .catch((error) => console.warn("Reader orientation reset failed", error));
     },
     [],
   );

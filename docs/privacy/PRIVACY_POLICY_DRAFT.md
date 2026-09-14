@@ -1,12 +1,13 @@
-# Bic Reader Privacy Policy — draft
+# Bic Reader Privacy Policy
 
-**Effective date:** [ADD DATE]
+**Effective date:** September 14, 2026  
+**Last updated:** September 14, 2026
 
-This draft is ready for content review. Replace every bracketed placeholder and publish it at a public website URL before submitting Bic Reader to the App Store.
+This Privacy Policy explains how Bic Reader collects, uses, shares, stores, and protects information when you use the Bic Reader mobile application and related services (collectively, the “Service”). Have this policy reviewed for the jurisdictions where you operate before publishing it as legal terms.
 
 ## Who we are
 
-Bic Reader is operated by **[LEGAL NAME OR BUSINESS NAME]** ("Bic Reader," "we," "us," or "our"). Contact us about privacy at **[PRIVACY EMAIL]**.
+Bic Reader is operated by **[INSERT YOUR LEGAL NAME OR REGISTERED BUSINESS NAME]** ("Bic Reader," "we," "us," or "our"). Contact us about privacy at **support@bicreader.com**. Our website is **https://bicreader.com**. Our postal address is **[INSERT BUSINESS POSTAL ADDRESS, IF REQUIRED]**.
 
 ## Information we collect
 
@@ -69,7 +70,7 @@ We retain account and synced content while your account remains active and as ne
 
 You can choose whether to use cloud sync, social login, and the AI assistant. You can delete your account inside **Profile → Delete account**. Account deletion removes the account and associated cloud data and attempts to delete the RevenueCat customer record. It does not cancel an Apple subscription; manage or cancel billing through your Apple ID subscription settings.
 
-Depending on where you live, you may have rights to access, correct, delete, restrict, or receive a copy of personal information, or object to certain processing. Contact **[PRIVACY EMAIL]** to make a request. We may need to verify your identity.
+Depending on where you live, you may have rights to access, correct, delete, restrict, or receive a copy of personal information, or object to certain processing. Contact **support@bicreader.com** to make a request. We may need to verify your identity. You may also contact your local data-protection authority where permitted by law.
 
 ## Security
 
@@ -77,7 +78,7 @@ We use reasonable technical and organizational safeguards, including authenticat
 
 ## Children
 
-Bic Reader is **[STATE THE INTENDED MINIMUM AGE AND CHILDREN'S PRIVACY APPROACH]**. If you believe a child provided personal information contrary to this policy, contact us at **[PRIVACY EMAIL]**.
+Bic Reader is intended for users aged **[INSERT MINIMUM AGE]** and is not directed to children under that age. If you believe a child provided personal information contrary to this policy, contact us at **support@bicreader.com**.
 
 ## International processing
 
@@ -89,7 +90,7 @@ We may update this policy as Bic Reader changes. We will update the effective da
 
 ## Contact
 
-**[LEGAL NAME OR BUSINESS NAME]**  
-**[POSTAL ADDRESS, IF REQUIRED]**  
-**[PRIVACY EMAIL]**  
-**[WEBSITE URL — ADD LATER]**
+**[INSERT YOUR LEGAL NAME OR REGISTERED BUSINESS NAME]**  
+**[INSERT BUSINESS POSTAL ADDRESS, IF REQUIRED]**  
+**support@bicreader.com**  
+**https://bicreader.com**

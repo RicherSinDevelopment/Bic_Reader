@@ -20,7 +20,7 @@ import { useRevenueCat } from '@/providers/RevenueCatProvider';
 import { authRoute } from '@/lib/authNavigation';
 
 const TERMS_URL = process.env.EXPO_PUBLIC_TERMS_URL;
-const PRIVACY_URL = process.env.EXPO_PUBLIC_PRIVACY_URL;
+const PRIVACY_URL = 'https://bicreader.com/#/privacy';
 
 const premiumBenefits = [
   'Unlimited PDF library',

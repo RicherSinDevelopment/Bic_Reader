@@ -620,3 +620,130 @@ test('horizontal word guide paints both wrapped fragments and advances once per 
   guideTap(false);
   expect(guideCell().props.guideWord.offset).toBe(word.offset);
 });
+
+// Execute the actual injected guide bridge against a small text DOM so startup
+// ordering is tested, including the delayed geometry callback.
+test.each([[false, false], [true, false], [false, true], [true, true]])('first word-guide activation uses the current target (pending: %s, slow fonts: %s)', async (pending, slowFonts) => {
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} />); });
+  layout(756, 390);
+  act(() => tree.root.findByType('NativeWebView').props.onLoadEnd());
+  const messages: any[] = [];
+  const textNode = { textContent: blocks[0].text };
+  const segment = { dataset: { blockId: 'block-0', start: '0', prefix: '0' }, textContent: blocks[0].text };
+  const rect = { left: 20, top: 30, width: 45, height: 24 };
+  let finishFonts!: () => void;
+  const fontsReady = new Promise<void>(resolve => { finishFonts = resolve; });
+  const document = {
+    fonts: { ready: slowFonts ? fontsReady : Promise.resolve() },
+    documentElement: { dir: 'ltr' },
+    querySelectorAll: () => [segment],
+    createRange: () => ({ selectNodeContents() {}, setStart() {}, setEnd() {}, getClientRects: () => [rect] }),
+    createTreeWalker: () => { let visited = false; return { nextNode: () => visited ? null : (visited = true, textNode) }; },
+  };
+  const bridge: any = { ReactNativeWebView: { postMessage: (data: string) => messages.push(JSON.parse(data)) } };
+  const run = (script: string) => new Function('window', 'document', 'NodeFilter', 'cleanLength', 'rawIndexForClean', 'setTimeout', 'requestAnimationFrame', script)(
+    bridge, document, { SHOW_TEXT: 4 }, (value: string) => value.length,
+    (_value: string, offset: number) => offset, setTimeout, (callback: () => void) => setTimeout(callback, 16),
+  );
+  injectedScripts.filter(script => script.startsWith('window.__readerGuideWord =')).forEach(run);
+  run(injectedScripts.find(script => script.includes('window.__reportGuideGeometry = function'))!);
+  if (pending) {
+    // Reproduce activation while a geometry pass still holds the opening state.
+    bridge.__reportGuideGeometry();
+  }
+  const openingSource = tree.root.findByType('NativeWebView').props.source;
+  injectedScripts.length = 0;
+  act(() => tree.update(<HorizontalReaderPager {...defaults} guideMode="word" />));
+  const word = guideCell().props.guideWord;
+  injectedScripts.filter(script => script.startsWith('window.__readerGuideWord =') || script.startsWith('window.__readerGuideActive =')).forEach(run);
+  if (slowFonts) {
+    await Promise.resolve();
+    act(() => jest.advanceTimersByTime(200));
+    expect(messages).toEqual([]);
+    finishFonts();
+  }
+  await Promise.resolve();
+  act(() => jest.advanceTimersByTime(80));
+  expect(messages).toContainEqual({ type: 'guideLines', lines: [rect] });
+  expect(messages).toContainEqual({ type: 'guideWordRects', target: word, rects: [rect] });
+  expect(tree.root.findByType('NativeWebView').props.source).toBe(openingSource);
+});
+
+test.each(['line', 'word'])('repeated opens restore %s guide ownership before native viewability', (mode) => {
+  mockDelayViewability = true;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    act(() => { tree = create(<HorizontalReaderPager {...defaults} guideMode={mode as 'line' | 'word'}
+      destination={{ page: 20, blockId: 'block-19', pageTop: true, nonce: 2200 + attempt }} />); });
+    layout(756, 390);
+    expect(guideCell().props.page[0].sourcePage).toBe(20);
+    expect(guideCell().props.guideActive).toBe(true);
+    if (mode === 'word') expect(guideCell().props.guideWord.blockId).toBe('block-19');
+    act(() => tree.unmount());
+    tree = null;
+  }
+});
+
+test('a memoized line guide reports into its current page after earlier pages arrive', () => {
+  const onPageChange = jest.fn();
+  const props = { ...defaults, guideMode: 'line' as const, onPageChange,
+    destination: { page: 20, blockId: 'block-19', pageTop: true, nonce: 2300 } };
+  act(() => { tree = create(<HorizontalReaderPager {...props} blocks={blocks.slice(19)} />); });
+  layout(756, 390);
+  const originalHandler = guideCell().props.onGuideLines;
+  act(() => tree.update(<HorizontalReaderPager {...props} blocks={blocks.slice(15)} />));
+  act(() => originalHandler([{ left: 20, top: 30, width: 100, height: 24 }]));
+  onPageChange.mockClear();
+  guideTap();
+  expect(onPageChange).toHaveBeenCalled();
+});
+
+test.each(['line', 'word'])('enabling %s guide during load is replayed on paint and reload', (mode) => {
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} />); });
+  layout(756, 390);
+  act(() => tree.root.findByType('NativeWebView').props.onLoadStart());
+  injectedScripts.length = 0;
+  act(() => tree.update(<HorizontalReaderPager {...defaults} guideMode={mode as 'line' | 'word'} />));
+  expect(injectedScripts).toHaveLength(0);
+  for (let reload = 0; reload < 2; reload++) {
+    act(() => tree.root.findByType('NativeWebView').props.onLoadEnd());
+    expect(injectedScripts.some(script => script.includes('window.__readerGuideActive = true'))).toBe(true);
+    injectedScripts.length = 0;
+    const cell = guideCell();
+    act(() => tree.root.findByType('NativeWebView').props.onMessage({ nativeEvent: { data: JSON.stringify({
+      type: 'horizontalPagePainted', layoutKey: cell.props.layoutKey,
+    }) } }));
+    expect(injectedScripts).toContain('window.__reportGuideGeometry?.();true;');
+    act(() => tree.root.findByType('NativeWebView').props.onLoadStart());
+    injectedScripts.length = 0;
+  }
+});
+
+test.each([1, -1])('leaving a split word preserves its separate fragments until the next rect arrives (%s)', (direction) => {
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} guideMode="word" />); });
+  layout(756, 390);
+  if (direction < 0) guideTap();
+  const word = guideCell().props.guideWord;
+  const fragments = [
+    { left: 600, top: 30, width: 50, height: 24 },
+    { left: 20, top: 60, width: 40, height: 24 },
+  ];
+  act(() => guideCell().props.onGuideLines([
+    { left: 20, top: 30, width: 630, height: 24 },
+    { left: 20, top: 60, width: 630, height: 24 },
+  ]));
+  act(() => guideCell().props.onGuideWordRects(fragments, word));
+  guideTap(direction > 0);
+  const nextWord = guideCell().props.guideWord;
+  expect(nextWord.offset).not.toBe(word.offset);
+  const painted = tree.root.findAllByProps({ testID: 'horizontal-word-guide-fragment' })
+    .filter((node: any) => typeof node.type === 'string');
+  expect(painted).toHaveLength(2);
+  painted.forEach((node: any, index: number) => expect(node.props.style).toMatchObject(fragments[index]));
+  expect(tree.root.findAllByProps({ testID: 'horizontal-guide-highlight' })).toHaveLength(0);
+  const nextRect = { left: 75, top: 60, width: 32, height: 24 };
+  act(() => guideCell().props.onGuideWordRects([nextRect], nextWord));
+  expect(tree.root.findAllByProps({ testID: 'horizontal-word-guide-fragment' })).toHaveLength(0);
+  const highlight = tree.root.findAllByProps({ testID: 'horizontal-guide-highlight' })
+    .find((node: any) => typeof node.type === 'string');
+  expect(highlight.props.style.width).toBe(nextRect.width);
+});

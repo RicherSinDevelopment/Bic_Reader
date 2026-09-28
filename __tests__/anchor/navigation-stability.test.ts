@@ -144,3 +144,34 @@ test("superseded layout/navigation and user cancellation invalidate queued compl
   expect(old).not.toHaveBeenCalled();
   expect(r.navigation.suppressed).toBe(false);
 });
+
+test('a cached word destination settles while background content grows below it', () => {
+  const r = runtime();
+  const done = jest.fn();
+  r.navigation.settle(r.navigation.begin(20), () => 148, done, { targetGeometryOnly: true });
+  for (let i = 0; i < 4; i++) {
+    r.document.documentElement.scrollHeight += 1000;
+    r.frame();
+  }
+  expect(done).toHaveBeenCalledWith(true);
+  expect(r.navigation.suppressed).toBe(false);
+});
+
+test('a word destination still waits when insertions move its viewport position', () => {
+  const r = runtime();
+  const done = jest.fn();
+  let top = 148;
+  r.navigation.settle(r.navigation.begin(21), () => top, done, { targetGeometryOnly: true });
+  r.frame();
+  top += 200;
+  r.frame();
+  r.frame();
+  expect(done).not.toHaveBeenCalled();
+  top = 148;
+  r.frame();
+  r.frame();
+  r.frame();
+  expect(done).not.toHaveBeenCalled();
+  r.frame();
+  expect(done).toHaveBeenCalledWith(true);
+});

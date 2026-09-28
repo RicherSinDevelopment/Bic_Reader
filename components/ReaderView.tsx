@@ -96,6 +96,7 @@ import {
 import { WebView } from "react-native-webview";
 
 type ReaderDestination = {
+  preserveViewport?: boolean;
   page: number;
   documentStart?: boolean;
   readerPage?: number;
@@ -1047,7 +1048,7 @@ const ReaderView = ({
   }, [sendReaderSettings]);
 
   useEffect(() => {
-    if (!webViewReady) return;
+    if (!webViewReady || !isActive) return;
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: "setTopBarVisibility",
@@ -1056,7 +1057,7 @@ const ReaderView = ({
         startInset: headerOverlayHeight,
       }),
     );
-  }, [headerOverlayHeight, topBarVisible, webViewReady]);
+  }, [headerOverlayHeight, isActive, topBarVisible, webViewReady]);
 
   useEffect(() => {
     if (!webViewReady) return;
@@ -1944,7 +1945,11 @@ const ReaderView = ({
           // containing block first (and again on every native retry) races the
           // word alignment and leaves the block's first word at the viewport
           // edge. Only use the coarse block scroll when no word is available.
-          if (isDocumentStart) {
+          if (pending.preserveViewport) {
+            window.__activeProgrammaticTarget = null;
+            window.__activeProgrammaticRange = null;
+            window.__activeProgrammaticWord = null;
+          } else if (isDocumentStart) {
             // The first document block cannot be aligned like an ordinary
             // word: WebKit's native content inset otherwise clamps the offset
             // after the first lines. Absolute zero is the only true book top.
@@ -1984,7 +1989,7 @@ const ReaderView = ({
                 pending.switchHighlightWordProgress,
                 pending.switchHighlightQuery,
                 pending.nonce,
-                isDocumentStart,
+                isDocumentStart || pending.preserveViewport === true,
                 pending.switchHighlightOffset ?? pending.searchMatchIndex,
                 pending.suppressSwitchHighlight
               );
@@ -2003,10 +2008,10 @@ const ReaderView = ({
             window.__clearReaderSwitchHighlight?.();
           }
           window.__readerNavigation?.settle(navigationToken, function() {
-            window.__alignActiveReaderDestination?.();
+            if (!pending.preserveViewport) window.__alignActiveReaderDestination?.();
             return window.__activeProgrammaticRange?.getBoundingClientRect().top ??
               (destinationTarget.isConnected ? destinationTarget.getBoundingClientRect().top : NaN);
-          }, function() { window.__reportSwitchAnchor?.(true); });
+          }, function() { window.__reportSwitchAnchor?.(true); }, { targetGeometryOnly: true });
         });
       };
       if (message.type === 'goToSourcePage') {

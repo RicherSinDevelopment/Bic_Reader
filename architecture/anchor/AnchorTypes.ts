@@ -71,6 +71,7 @@ export type AnchorDestination = {
   switchHighlightWordIndex?: number;
   switchHighlightWordProgress?: number;
   nonce: number;
+  preserveViewport?: boolean;
 };
 
 export interface AnchorAdapter {

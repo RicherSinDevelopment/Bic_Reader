@@ -215,12 +215,21 @@ function BookPageSkeleton() {
   );
 }
 
+function resetReadingGuides() {
+  useReaderSettingsStore.setState({ lineGuideEnabled: false, wordGuideEnabled: false });
+}
+
 function ReaderScreenContent() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const closingRef = React.useRef(false);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { pdfId } = useLocalSearchParams<{ pdfId?: string }>();
+  useLayoutEffect(() => {
+    // Guides belong to this open document, not the next reading session.
+    resetReadingGuides();
+    return resetReadingGuides;
+  }, [pdfId]);
   const db = useSQLiteContext();
   const initiallyCachedPdf = pdfId ? peekCachedPdfById(pdfId) : null;
   const readerTransition = useReaderSettingsStore((state) => state.transition);
@@ -308,6 +317,9 @@ function ReaderScreenContent() {
   const [originalCurrentPage, setOriginalCurrentPage] = useState(1);
   const originalCurrentPageRef = React.useRef(1);
   const pendingOriginalPageRef = React.useRef<number | null>(null);
+  const originalRequiresPositionAckRef = React.useRef(false);
+  const readerHandoffViewportRef = React.useRef<{ anchor: CanonicalAnchor; headerVisible: boolean; layout: AnchorReaderLayout } | null>(null);
+  const readerHeaderVisibleRef = React.useRef(true);
   const originalUserInteractedRef = React.useRef(false);
   // A TOC request is expected to settle on the requested page. Retaining only
   // the start time lets diagnostics measure that handoff without identifying
@@ -344,6 +356,7 @@ function ReaderScreenContent() {
     highlightDocumentStart?: boolean;
     pageTop?: boolean;
     nonce: number;
+    preserveViewport?: boolean;
   } | null>(null);
   const [readerSwitchHighlight, setReaderSwitchHighlight] = useState<{
     blockId: string;
@@ -393,6 +406,7 @@ function ReaderScreenContent() {
     if (closingRef.current) return;
     closingRef.current = true;
     const visible = captureExitPosition();
+    resetReadingGuides();
     transitionController.cancel("reader closed");
     if (positionPersistenceTimer.current) clearTimeout(positionPersistenceTimer.current);
     positionPersistenceTimer.current = null;
@@ -864,6 +878,8 @@ function ReaderScreenContent() {
     pendingLayoutAnchor.current = captureCanonicalAnchor();
   }
 
+  readerHeaderVisibleRef.current = isLandscape || !readerChromeHidden;
+
   const runAnchorTransition = useCallback(
     async (
       targetMode: ReaderMode,
@@ -897,6 +913,13 @@ function ReaderScreenContent() {
             )),
         restore: (anchor: CanonicalAnchor, transitionId: number) => {
           if (!transitionController.isCurrent(transitionId)) return;
+          const viewport = readerHandoffViewportRef.current;
+          const live = actualReaderAnchor.current;
+          const preserveViewport = from.mode === "original" && targetLayout === "vertical" &&
+            viewport !== null && live !== null && viewport.layout === "vertical" &&
+            !originalUserInteractedRef.current && viewport.headerVisible === readerHeaderVisibleRef.current &&
+            viewport.anchor.documentId === anchor.documentId && live?.documentId === anchor.documentId &&
+            live.sourceBlockId === anchor.sourceBlockId && live.characterOffset === anchor.characterOffset;
           actualReaderAnchor.current = null;
           const firstSourceBlock = latestReaderBlocks.current.find((block) =>
             block.text.trim(),
@@ -906,6 +929,7 @@ function ReaderScreenContent() {
           const destination = verticalDestination(anchor, transitionId);
           setReaderDestination({
             ...destination,
+            preserveViewport,
             suppressSwitchHighlight,
             ...(suppressSwitchHighlight && destinationOverride.pageTop
               ? {
@@ -950,6 +974,8 @@ function ReaderScreenContent() {
                 setActiveTab("original");
               },
               currentPage: () => originalCurrentPageRef.current,
+              isDestinationAcknowledged: () => !originalRequiresPositionAckRef.current ||
+                pendingOriginalPageRef.current === null,
               isTransitionCurrent: (id: number) => transitionController.isCurrent(id),
             })
           : targetLayout === "horizontal"
@@ -970,9 +996,14 @@ function ReaderScreenContent() {
           if (targetMode === "original") {
             console.info("[Reader Position]", { action: "handoff-to-original", page: anchor.sourcePage,
               blockId: anchor.sourceBlockId, offset: anchor.characterOffset });
+            if (from.mode === "reader") readerHandoffViewportRef.current = {
+              anchor: { ...anchor }, headerVisible: readerHeaderVisibleRef.current, layout: from.layout,
+            };
             originalHandoffAnchorRef.current = { ...anchor };
-            setOriginalHighlightSnapshot(originalHighlightTarget(anchor,
-              latestReaderBlocks.current, latestReaderPageSizes.current));
+            const highlight = originalHighlightTarget(anchor,
+              latestReaderBlocks.current, latestReaderPageSizes.current);
+            originalRequiresPositionAckRef.current = Boolean(highlight);
+            setOriginalHighlightSnapshot(highlight);
             return waitForCurrentTransition(
               transitionId,
               () => originalContentReadyRef.current,
@@ -1106,7 +1137,6 @@ function ReaderScreenContent() {
   const handleTabChange = useCallback(
     (value: ReaderMode) => {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      if (value !== "reader") setReaderChromeHidden(false);
       const returnAnchor =
         value === "reader" && activeTabRef.current === "original"
           ? readerReturnAnchorRef.current
@@ -1630,6 +1660,7 @@ function ReaderScreenContent() {
             bottom: 0,
             left: 0,
             zIndex: visibleTab === "original" ? 2 : 0,
+            opacity: transitionMaskVisible ? 0 : 1,
           }}
         >
           <OriginalPDF
@@ -1666,6 +1697,7 @@ function ReaderScreenContent() {
             left: 0,
             zIndex: visibleTab === "reader" ? 2 : 0,
             opacity:
+              transitionMaskVisible ? 0 :
               visibleTab === "reader" &&
               readerBlocks.length > 0 &&
               initialRestoreCompleteFor !== pdfId && !horizontalPreparing
@@ -1679,7 +1711,10 @@ function ReaderScreenContent() {
                 key={pdf.id}
                 documentId={pdf.id}
                 annotationScope="reader"
-                isActive={activeTab === "reader"}
+                isActive={activeTab === "reader" && !(
+                  anchorTransition.status === "running" &&
+                  anchorTransition.target?.mode === "original"
+                )}
                 isLandscape={isLandscape}
                 headerOverlayHeight={isLandscape ? 0 : headerHeight}
                 topBarVisible={
@@ -1786,6 +1821,7 @@ function ReaderScreenContent() {
         <View
           style={{
             position: "absolute",
+            zIndex: 1000, elevation: 1000,
             top: isLandscape ? 0 : headerHeight,
             right: 0,
             bottom: 0,

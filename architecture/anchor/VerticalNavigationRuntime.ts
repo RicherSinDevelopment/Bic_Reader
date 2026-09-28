@@ -20,13 +20,18 @@ export const VERTICAL_NAVIGATION_RUNTIME = String.raw`
       state.suppressed = false;
       window.__pendingSourceDestination = null;
     },
-    settle: function(token, measure, complete) {
+    settle: function(token, measure, complete, options) {
       let previous = null;
       let stable = 0;
       let frames = 0;
       const tick = function() {
         if (token !== generation) return;
-        const sample = [window.scrollY, document.documentElement.scrollHeight,
+        // A precise destination settles against its own viewport geometry.
+        // Appending below it changes total height without moving the target;
+        // waiting on that unrelated work can exhaust the restore timeout.
+        // Rotation and other transactions still require full-height stability.
+        const sample = [window.scrollY,
+          options?.targetGeometryOnly && measure ? 0 : document.documentElement.scrollHeight,
           window.innerWidth, window.innerHeight, measure ? measure() : 0];
         stable = previous && sample.every(function(value, index) {
           return Number.isFinite(value) && Math.abs(value - previous[index]) <= 1;

@@ -611,7 +611,7 @@ function HorizontalSelectablePage({
   }, [switchHighlightInjection]);
   const guideWordInjection = useMemo(
     () =>
-      `window.__reportGuideWord?.(${JSON.stringify(guideWord ?? null)});true;`,
+      `window.__readerGuideWord = ${JSON.stringify(guideWord ?? null)};window.__reportGuideWord?.(window.__readerGuideWord);true;`,
     [guideWord],
   );
   useEffect(() => {
@@ -620,11 +620,10 @@ function HorizontalSelectablePage({
   }, [guideWordInjection]);
   useEffect(() => {
     if (!contentLoadedRef.current) return;
-    if (!guideActive) return;
     webViewRef.current?.injectJavaScript(
-      "window.__reportGuideGeometry?.();true;",
+      `window.__readerGuideActive = ${guideActive};if (window.__readerGuideActive) window.__reportGuideGeometry?.();true;`,
     );
-  }, [guideActive]);
+  }, [guideActive, desiredSource]);
   const updateDocument = () => {
     if (!contentLoadedRef.current || deliveredHtml.current === desiredSource.html) return;
     deliveredHtml.current = desiredSource.html;
@@ -645,6 +644,7 @@ function HorizontalSelectablePage({
         Promise.resolve(document.fonts && document.fonts.ready).then(function() {
           requestAnimationFrame(function() {
             window.__reportHorizontalPageFit?.(${bottomPadding});
+            if (window.__readerGuideActive) window.__reportGuideGeometry?.();
             requestAnimationFrame(function() {
               window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'horizontalPagePainted', layoutKey: window.__readerFitLayoutKey }));
             });
@@ -699,7 +699,8 @@ function HorizontalSelectablePage({
         webViewRef.current?.injectJavaScript(guideWordInjection);
         webViewRef.current?.injectJavaScript(`
         window.__reportGuideGeometry = function() {
-          setTimeout(function() {
+          Promise.resolve(document.fonts && document.fonts.ready).then(function() {
+          requestAnimationFrame(function() {
           const rects = [];
           document.querySelectorAll('.segment').forEach(function(segment) {
             const range = document.createRange();
@@ -779,10 +780,14 @@ function HorizontalSelectablePage({
             });
             window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'guideWordRects', target: target, rects: wordRects }));
           };
-          window.__reportGuideWord(${JSON.stringify(guideWord ?? null)});
-          }, 80);
+          // Read the latest target: the guide may have been enabled or moved
+          // after onLoadEnd, before this delayed geometry pass runs.
+          window.__reportGuideWord(window.__readerGuideWord);
+          });
+          });
         };
-        if (${guideActive ? "true" : "false"}) window.__reportGuideGeometry();
+        window.__readerGuideActive = ${guideActive};
+        if (window.__readerGuideActive) window.__reportGuideGeometry();
         true;
       `);
         webViewRef.current?.injectJavaScript(`
@@ -821,6 +826,10 @@ function HorizontalSelectablePage({
         try {
           const message = JSON.parse(event.nativeEvent.data);
           if (message.type === "horizontalPagePainted" && message.layoutKey === layoutKey) {
+            if (guideActive) {
+              webViewRef.current?.injectJavaScript(guideWordInjection);
+              webViewRef.current?.injectJavaScript("window.__reportGuideGeometry?.();true;");
+            }
             onReady?.();
           } else if (message.type === "horizontalPageOverflow" && message.layoutKey === layoutKey && typeof message.blockId === "string" && Number.isInteger(message.blockOffset)) {
             onOverflow?.({ blockId: message.blockId, blockOffset: message.blockOffset, wordIndex: 0 });
@@ -1365,6 +1374,9 @@ function CompleteHorizontalReaderPager({
   const [dismissedSwitchNonce, setDismissedSwitchNonce] = useState<
     number | null
   >(null);
+  // Navigation refs do not render. Guide ownership must follow restores and
+  // delayed native viewability even when the visible page itself stays mounted.
+  const [guidePageIndex, setGuidePageIndex] = useState(0);
   const [lineGuideIndex, setLineGuideIndex] = useState(0);
   const [wordGuideIndex, setWordGuideIndex] = useState(0);
   const [wordGuideFragmentIndex, setWordGuideFragmentIndex] = useState(0);
@@ -1382,6 +1394,7 @@ function CompleteHorizontalReaderPager({
     prefixWidth?: number;
     totalWidth?: number;
   } | null>(null);
+  const [displayedWordFragments, setDisplayedWordFragments] = useState<GuideLine[]>([]);
   const [displayedGuideRect, setDisplayedGuideRect] = useState<
     GuideLine | undefined
   >();
@@ -1555,6 +1568,7 @@ function CompleteHorizontalReaderPager({
     (pageIndex: number) => {
       if (!pages.length) return;
       const safeIndex = Math.max(0, Math.min(pages.length - 1, pageIndex));
+      setGuidePageIndex(safeIndex);
       const anchor = pageAnchor(pages[safeIndex], blocks);
       visiblePageAnchorRef.current = anchor;
       onPageChange?.(
@@ -1622,15 +1636,17 @@ function CompleteHorizontalReaderPager({
             word.blockId === previous.word!.blockId &&
             word.offset === previous.word!.offset)
         : -1;
-      const next = preserved >= 0 ? preserved : Math.max(0,
+      const preservedOnPage = preserved >= 0 &&
+        guideWords[preserved]?.pageIndex === currentPageRef.current;
+      const next = preservedOnPage ? preserved : Math.max(0,
         guideWords.findIndex((word) => word.pageIndex >= currentPageRef.current));
       setWordGuideIndex(next);
-      if (preserved < 0) setWordGuideFragmentIndex(0);
+      if (!preservedOnPage) setWordGuideFragmentIndex(0);
       guideProgressRef.current = { mode: guideMode, word: guideWords[next] };
     } else {
       guideProgressRef.current = { mode: guideMode };
     }
-  }, [guideMode, guideWords]);
+  }, [guideMode, guideWords, guidePageIndex]);
 
   useEffect(() => {
     if (!onPageMapChange) return;
@@ -1799,6 +1815,7 @@ function CompleteHorizontalReaderPager({
       index: destinationPage,
     });
     currentPageRef.current = destinationPage;
+    setGuidePageIndex(destinationPage);
     navigatedDestinationKeyRef.current = destinationNavigationKey;
     // Publish only after native viewability confirms the destination.
   }, [
@@ -1870,6 +1887,63 @@ function CompleteHorizontalReaderPager({
 
   const activeGuideWord =
     guideMode === "word" ? guideWords[wordGuideIndex] : undefined;
+  // Resolve the current index when a message arrives: memoized cells can
+  // retain their callbacks while extraction inserts pages before them.
+  const guideLinesHandlerRef = useRef<(page: Segment[], lines: GuideLine[]) => void>(() => {});
+  const guideWordHandlerRef = useRef<(page: Segment[], rects: GuideLine[], target?: TextRange) => void>(() => {});
+  guideLinesHandlerRef.current = (page, lines) => {
+    const pageIndex = pages.findIndex(candidate => sameRenderedPage(candidate, page));
+    if (pageIndex < 0) return;
+    const pageLines = lines.map((line) => ({
+      ...line,
+      left: line.left,
+    }));
+    setWebGuideLinesByPage((current) => {
+      const previous = current[pageIndex] ?? [];
+      const unchanged =
+        previous.length === pageLines.length &&
+        previous.every((line, index) => {
+          const candidate = pageLines[index];
+          return (
+            Math.abs(line.left - candidate.left) < 0.5 &&
+            Math.abs(line.top - candidate.top) < 0.5 &&
+            Math.abs(line.width - candidate.width) < 0.5 &&
+            Math.abs(line.height - candidate.height) < 0.5
+          );
+        });
+      return unchanged
+        ? current
+        : { ...current, [pageIndex]: pageLines };
+    });
+  };
+  guideWordHandlerRef.current = (page, rects, target) => {
+    const pageIndex = pages.findIndex(candidate => sameRenderedPage(candidate, page));
+    if (pageIndex < 0) return;
+    if (!target || activeGuideWord?.pageIndex !== pageIndex)
+      return;
+    const key = `${pageIndex}:${target.blockId}:${target.offset}:${target.length}`;
+    const adjusted = rects.map((rect) => ({
+      ...rect,
+      left: rect.left,
+    }));
+    setWebGuideWordRects((current) => {
+      const previous = current[key] ?? [];
+      const unchanged =
+        previous.length === adjusted.length &&
+        previous.every((rect, index) => {
+          const candidate = adjusted[index];
+          return (
+            Math.abs(rect.left - candidate.left) < 0.5 &&
+            Math.abs(rect.top - candidate.top) < 0.5 &&
+            Math.abs(rect.width - candidate.width) < 0.5 &&
+            Math.abs(rect.height - candidate.height) < 0.5
+          );
+        });
+      return unchanged
+        ? current
+        : { ...current, [key]: adjusted };
+    });
+  };
   const activeGuideLines =
     webGuideLinesByPage[currentPageRef.current] ??
     guideLinesByPage[currentPageRef.current] ??
@@ -2160,8 +2234,19 @@ function CompleteHorizontalReaderPager({
           },
     );
   }, [activeWordMeasurementTarget]);
-  const wordGuideFragments = guideMode === "word" && guideWordKey
-    ? webGuideWordRects[guideWordKey] ?? [] : [];
+  const exactGuideWordFragments = guideMode === "word" && guideWordKey
+    ? webGuideWordRects[guideWordKey] : undefined;
+  // Keep the previous word's individual shapes while the next browser
+  // measurement is in flight. Its bounding box spans the intervening text
+  // when the word wraps, so displaying that box would flash across two lines.
+  useLayoutEffect(() => {
+    if (guideMode !== "word") setDisplayedWordFragments([]);
+    else if (exactGuideWordFragments?.length) setDisplayedWordFragments(exactGuideWordFragments);
+  }, [guideMode, exactGuideWordFragments]);
+  const wordGuideFragments = guideMode === "word"
+    ? exactGuideWordFragments?.length ? exactGuideWordFragments
+      : activeGuideWordRect ? [] : displayedWordFragments
+    : [];
   const hasMultipleWordFragments = wordGuideFragments.length > 1;
   const activeGuideRect =
     guideMode === "word" ? activeGuideWordRect : activeGuideLine;
@@ -2886,55 +2971,8 @@ function CompleteHorizontalReaderPager({
                     ? activeGuideWord
                     : undefined
                 }
-                onGuideLines={(lines) => {
-                  const pageLines = lines.map((line) => ({
-                    ...line,
-                    left: line.left,
-                  }));
-                  setWebGuideLinesByPage((current) => {
-                    const previous = current[pageIndex] ?? [];
-                    const unchanged =
-                      previous.length === pageLines.length &&
-                      previous.every((line, index) => {
-                        const candidate = pageLines[index];
-                        return (
-                          Math.abs(line.left - candidate.left) < 0.5 &&
-                          Math.abs(line.top - candidate.top) < 0.5 &&
-                          Math.abs(line.width - candidate.width) < 0.5 &&
-                          Math.abs(line.height - candidate.height) < 0.5
-                        );
-                      });
-                    return unchanged
-                      ? current
-                      : { ...current, [pageIndex]: pageLines };
-                  });
-                }}
-                onGuideWordRects={(rects, target) => {
-                  if (!target || activeGuideWord?.pageIndex !== pageIndex)
-                    return;
-                  const key = `${pageIndex}:${target.blockId}:${target.offset}:${target.length}`;
-                  const adjusted = rects.map((rect) => ({
-                    ...rect,
-                    left: rect.left,
-                  }));
-                  setWebGuideWordRects((current) => {
-                    const previous = current[key] ?? [];
-                    const unchanged =
-                      previous.length === adjusted.length &&
-                      previous.every((rect, index) => {
-                        const candidate = adjusted[index];
-                        return (
-                          Math.abs(rect.left - candidate.left) < 0.5 &&
-                          Math.abs(rect.top - candidate.top) < 0.5 &&
-                          Math.abs(rect.width - candidate.width) < 0.5 &&
-                          Math.abs(rect.height - candidate.height) < 0.5
-                        );
-                      });
-                    return unchanged
-                      ? current
-                      : { ...current, [key]: adjusted };
-                  });
-                }}
+                onGuideLines={(lines) => guideLinesHandlerRef.current(page, lines)}
+                onGuideWordRects={(rects, target) => guideWordHandlerRef.current(page, rects, target)}
               />
             </View>
           </View>
@@ -3020,6 +3058,7 @@ function CompleteHorizontalReaderPager({
               }}
             />
             <View
+              testID="horizontal-guide-highlight"
               style={{
                 width: visibleGuideRect.width,
                 backgroundColor: hasMultipleWordFragments ? "transparent" : `${guideColor}47`,

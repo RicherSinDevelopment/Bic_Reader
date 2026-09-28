@@ -46,6 +46,7 @@ export function createOriginalAnchorAdapter(ports: {
   isReady: () => boolean;
   restore: (destination: OriginalDestination, transitionId: number) => void;
   currentPage: () => number;
+  isDestinationAcknowledged?: (id: number) => boolean;
   isTransitionCurrent?: (id: number) => boolean;
 }): AnchorAdapter {
   return {
@@ -65,13 +66,16 @@ export function createOriginalAnchorAdapter(ports: {
       // Native PDF navigation acknowledges asynchronously; checking in the
       // restore tick incorrectly fails a valid handoff before it can arrive.
       const startedAt = Date.now();
-      while (ports.currentPage() !== anchor.sourcePage && Date.now() - startedAt < 2500) {
+      while ((ports.currentPage() !== anchor.sourcePage ||
+          (ports.isDestinationAcknowledged && !ports.isDestinationAcknowledged(transitionId))) &&
+          Date.now() - startedAt < 2500) {
         if (ports.isTransitionCurrent && !ports.isTransitionCurrent(transitionId)) return { ok: false, expected: anchor };
         await new Promise<void>((resolve) => setTimeout(resolve, 40));
       }
       const page = ports.currentPage();
       const actual: CanonicalAnchor = { ...anchor, sourcePage: page };
-      return { ok: page === anchor.sourcePage, expected: anchor, actual };
+      return { ok: page === anchor.sourcePage &&
+        (!ports.isDestinationAcknowledged || ports.isDestinationAcknowledged(transitionId)), expected: anchor, actual };
     },
   };
 }

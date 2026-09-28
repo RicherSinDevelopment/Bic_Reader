@@ -2,7 +2,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import type { CustomerInfo, PurchasesError, PurchasesPackage } from 'react-native-purchases';
 import Purchases, { LOG_LEVEL, PURCHASES_ERROR_CODE } from 'react-native-purchases';
 import RevenueCatUI, { PAYWALL_RESULT } from 'react-native-purchases-ui';
-import { hasPremiumAccessForIdentity } from '@/services/revenueCatIdentity';
+import { resolvePremiumAccess } from '@/services/revenueCatIdentity';
 import { shouldRestoreAfterPurchaseError } from '@/services/revenueCatPurchaseRecovery';
 import { useSegments } from 'expo-router';
 import {
@@ -278,10 +278,12 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
     }
   }, [applyCustomerInfo]);
 
-  // A store receipt can belong to RevenueCat's anonymous app user, but Bic
-  // Reader's paid AI and cloud data require a stable Supabase identity. Keep
-  // guest access on the five-PDF free tier until the customer signs in.
-  const hasPremiumAccess = hasPremiumAccessForIdentity(session?.user.id, isPremium);
+  // The App Store receipt unlocks local Premium features for guests. Supabase-
+  // backed features apply their own session requirement at their boundary.
+  const hasPremiumAccess = resolvePremiumAccess(
+    session?.user.id,
+    isPremium,
+  ).localFeatures;
 
   const value = useMemo<RevenueCatContextValue>(
     () => ({ error, isLoading, isPremium: hasPremiumAccess, loadPackages, purchasePackage, refreshCustomerInfo, restorePurchases, showPaywall }),

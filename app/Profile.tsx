@@ -2,6 +2,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { useRevenueCat } from '@/providers/RevenueCatProvider';
 import { usePdfLibrary } from '@/hooks/usePdfLibrary';
 import { useAppearanceStore } from '@/stores/appearanceStore';
+import { useAIDataSharingStore } from '@/stores/aiDataSharingStore';
 import { authRoute } from '@/lib/authNavigation';
 import ProfileBackButton from '@/components/ProfileBackButton';
 import { useRouter } from 'expo-router';
@@ -9,6 +10,8 @@ import {
   BookCheck,
   BookOpen,
   ChevronRight,
+  CreditCard,
+  FileText,
   Globe2,
   Library,
   LogOut,
@@ -16,6 +19,7 @@ import {
   Moon,
   RefreshCw,
   Sparkles,
+  ShieldCheck,
   Trash2,
 } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
@@ -36,6 +40,8 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { deleteCurrentAccount } from '@/services/accountDeletionService';
 
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
+const PRIVACY_URL = 'https://bicreader.com/#/privacy';
+const TERMS_URL = 'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
 
 export default function Profile() {
   const { session, signOut } = useAuth();
@@ -54,6 +60,8 @@ export default function Profile() {
   const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
   const preference = useAppearanceStore((state) => state.preference);
   const setPreference = useAppearanceStore((state) => state.setPreference);
+  const aiDataSharingConsent = useAIDataSharingStore((state) => state.consent);
+  const setAIDataSharingConsent = useAIDataSharingStore((state) => state.setConsent);
   const isDark = useColorScheme() === 'dark';
   const styles = useMemo(() => createStyles(isDark), [isDark]);
 
@@ -84,10 +92,6 @@ export default function Profile() {
 
   const handleRestorePurchases = async () => {
     if (isRestoring) return;
-    if (!session) {
-      router.push(authRoute('/(auth)/sign-in', 'premium'));
-      return;
-    }
     setErrorMessage(null);
     setRestoreMessage(null);
     setIsRestoring(true);
@@ -153,6 +157,25 @@ export default function Profile() {
           { text: 'Continue', style: 'destructive' as const, onPress: confirmPermanentDeletion },
         ];
     Alert.alert('Delete account', message, buttons);
+  };
+
+  const requestAIDataSharing = () => {
+    Alert.alert(
+      'Allow AI data sharing?',
+      'To answer your questions, Bic Reader will send your question and relevant text from your PDF to OpenAI for processing. Do not submit confidential or sensitive information.',
+      [
+        { text: 'Not Now', style: 'cancel' },
+        { text: 'Allow AI Processing', onPress: () => setAIDataSharingConsent('allowed') },
+      ],
+    );
+  };
+
+  const updateAIDataSharing = (enabled: boolean) => {
+    if (enabled) {
+      requestAIDataSharing();
+      return;
+    }
+    setAIDataSharingConsent('denied');
   };
 
   return (
@@ -228,7 +251,9 @@ export default function Profile() {
                   </Text>
                   <Text style={styles.membershipCaption}>
                     {isPremium
-                      ? 'Your premium features are unlocked.'
+                      ? session
+                        ? 'Premium is active, including AI and cloud sync.'
+                        : 'Premium is active. Sign in optionally for AI and cloud sync.'
                       : session
                         ? 'Upgrade to unlock premium features.'
                         : 'Your reading stays privately on this device.'}
@@ -371,6 +396,86 @@ export default function Profile() {
                 </View>
                 <ChevronRight color={isDark ? '#7F897A' : '#9A9D95'} size={19} />
               </Pressable>
+
+              <View style={styles.supportDivider} />
+
+              <View style={styles.supportRow}>
+                <View style={styles.supportIcon}>
+                  <Sparkles color="#4F7D1A" size={20} />
+                </View>
+                <View style={styles.supportCopy}>
+                  <Text style={styles.supportTitle}>AI data sharing</Text>
+                  <Text style={styles.supportCaption}>
+                    {aiDataSharingConsent === 'allowed'
+                      ? 'Questions and relevant PDF text may be sent to OpenAI'
+                      : 'Not allowed — AI requests will ask for permission'}
+                  </Text>
+                </View>
+                <Switch
+                  accessibilityLabel="Allow AI data sharing with OpenAI"
+                  onValueChange={updateAIDataSharing}
+                  trackColor={{ false: '#C9CDC5', true: '#639922' }}
+                  thumbColor="#FFFFFF"
+                  value={aiDataSharingConsent === 'allowed'}
+                />
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Legal</Text>
+            <View style={styles.supportCard}>
+              <Pressable
+                accessibilityHint="Opens the Bic Reader Privacy Policy"
+                accessibilityRole="link"
+                onPress={() => void openExternalLink(PRIVACY_URL, 'Unable to open the Privacy Policy.')}
+                style={({ pressed }) => [styles.supportRow, pressed && styles.supportRowPressed]}
+              >
+                <View style={styles.supportIcon}>
+                  <ShieldCheck color="#4F7D1A" size={20} />
+                </View>
+                <View style={styles.supportCopy}>
+                  <Text style={styles.supportTitle}>Privacy Policy</Text>
+                  <Text style={styles.supportCaption}>How Bic Reader handles your information</Text>
+                </View>
+                <ChevronRight color={isDark ? '#7F897A' : '#9A9D95'} size={19} />
+              </Pressable>
+
+              <View style={styles.supportDivider} />
+
+              <Pressable
+                accessibilityHint="Opens Apple's Standard End User License Agreement"
+                accessibilityRole="link"
+                onPress={() => void openExternalLink(TERMS_URL, 'Unable to open the Terms of Use.')}
+                style={({ pressed }) => [styles.supportRow, pressed && styles.supportRowPressed]}
+              >
+                <View style={styles.supportIcon}>
+                  <FileText color="#4F7D1A" size={20} />
+                </View>
+                <View style={styles.supportCopy}>
+                  <Text style={styles.supportTitle}>Terms of Use</Text>
+                  <Text style={styles.supportCaption}>Apple Standard EULA</Text>
+                </View>
+                <ChevronRight color={isDark ? '#7F897A' : '#9A9D95'} size={19} />
+              </Pressable>
+
+              <View style={styles.supportDivider} />
+
+              <Pressable
+                accessibilityHint="Opens Apple subscription settings"
+                accessibilityRole="link"
+                onPress={() => void openExternalLink(APPLE_SUBSCRIPTIONS_URL, 'Unable to open Apple subscription settings.')}
+                style={({ pressed }) => [styles.supportRow, pressed && styles.supportRowPressed]}
+              >
+                <View style={styles.supportIcon}>
+                  <CreditCard color="#4F7D1A" size={20} />
+                </View>
+                <View style={styles.supportCopy}>
+                  <Text style={styles.supportTitle}>Manage Apple Subscription</Text>
+                  <Text style={styles.supportCaption}>View, change, or cancel your subscription</Text>
+                </View>
+                <ChevronRight color={isDark ? '#7F897A' : '#9A9D95'} size={19} />
+              </Pressable>
             </View>
           </View>
 
@@ -408,7 +513,9 @@ export default function Profile() {
               <View style={styles.membershipCard}>
                 <Text style={styles.dangerTitle}>Reading as a guest</Text>
                 <Text style={styles.dangerCaption}>
-                  You can keep up to five PDFs on this device. Sign in to start Premium, use AI, and sync your library.
+                  {isPremium
+                    ? 'Your Premium purchase works without an account. Sign in only if you want AI Assistant and Cloud Sync.'
+                    : 'You can use the free plan or purchase Premium without an account. Sign in only if you want account-based services.'}
                 </Text>
                 <Pressable
                   accessibilityRole="button"

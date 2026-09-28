@@ -17,10 +17,9 @@ import { completeOnboarding } from '@/lib/onboarding';
 import { OnboardingBackButton } from '@/components/onboarding/OnboardingBackButton';
 import { useAuth } from '@/providers/AuthProvider';
 import { useRevenueCat } from '@/providers/RevenueCatProvider';
-import { authRoute } from '@/lib/authNavigation';
 import { purchaseFailureMessage } from '@/services/revenueCatPurchaseRecovery';
 
-const TERMS_URL = process.env.EXPO_PUBLIC_TERMS_URL;
+const TERMS_URL = 'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
 const PRIVACY_URL = 'https://bicreader.com/#/privacy';
 
 const premiumBenefits = [
@@ -77,11 +76,6 @@ export default function PremiumOnboardingScreen() {
   };
 
   const handlePurchase = async () => {
-    if (!session) {
-      completeOnboarding();
-      router.push(authRoute('/(auth)/sign-in', 'premium'));
-      return;
-    }
     if (isPremium) {
       finishOnboarding();
       return;
@@ -113,11 +107,6 @@ export default function PremiumOnboardingScreen() {
 
   const handleRestore = async () => {
     if (isRestoring) return;
-    if (!session) {
-      completeOnboarding();
-      router.push(authRoute('/(auth)/sign-in', 'premium'));
-      return;
-    }
     setMessage(null);
     setIsRestoring(true);
     const restored = await restorePurchases();
@@ -189,6 +178,11 @@ export default function PremiumOnboardingScreen() {
                 <Benefit key={benefit} label={benefit} premium />
               ))}
             </View>
+            {!session ? (
+              <Text style={styles.accountNote}>
+                No account is required to purchase or restore Premium. Sign in later only if you want AI Assistant and Cloud Sync.
+              </Text>
+            ) : null}
           </View>
 
           <View style={styles.freeCard}>
@@ -208,15 +202,13 @@ export default function PremiumOnboardingScreen() {
             accessibilityRole="button"
             disabled={
               isPurchasing ||
-              (Boolean(session) &&
-                !isPremium &&
-                (!selectedPackage || packagesUnavailable))
+              (!isPremium && (!selectedPackage || packagesUnavailable))
             }
             onPress={() => void handlePurchase()}
             style={({ pressed }) => [
               styles.premiumButton,
               (isPurchasing ||
-                (Boolean(session) && !isPremium && !selectedPackage)) &&
+                (!isPremium && (!selectedPackage || packagesUnavailable))) &&
                 styles.buttonDisabled,
               pressed && styles.buttonPressed,
             ]}
@@ -225,9 +217,7 @@ export default function PremiumOnboardingScreen() {
             <Text style={styles.premiumButtonText}>
               {isPremium
                 ? 'Continue'
-                : !session
-                  ? 'Sign in to start Premium'
-                  : isPurchasing
+                : isPurchasing
                     ? isCheckingSubscription
                       ? 'Checking subscription…'
                       : 'Purchasing…'
@@ -245,10 +235,14 @@ export default function PremiumOnboardingScreen() {
                 <Text style={styles.footerLink}>{isRestoring ? 'Restoring…' : 'Restore Purchases'}</Text>
               </Pressable>
             ) : null}
-            {!isPremium && TERMS_URL ? <Text style={styles.linkDivider}>•</Text> : null}
-            {TERMS_URL ? <Pressable onPress={() => void Linking.openURL(TERMS_URL)}><Text style={styles.footerLink}>Terms</Text></Pressable> : null}
-            {PRIVACY_URL ? <Text style={styles.linkDivider}>•</Text> : null}
-            {PRIVACY_URL ? <Pressable onPress={() => void Linking.openURL(PRIVACY_URL)}><Text style={styles.footerLink}>Privacy</Text></Pressable> : null}
+            {!isPremium ? <Text style={styles.linkDivider}>•</Text> : null}
+            <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(TERMS_URL)}>
+              <Text style={styles.footerLink}>Terms of Use</Text>
+            </Pressable>
+            <Text style={styles.linkDivider}>•</Text>
+            <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(PRIVACY_URL)}>
+              <Text style={styles.footerLink}>Privacy Policy</Text>
+            </Pressable>
           </View>
 
           {isOnboardingFlow ? (
@@ -335,6 +329,7 @@ const styles = StyleSheet.create({
   check: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EDF3E6' },
   premiumCheck: { backgroundColor: '#639922' },
   benefitText: { color: '#424A3D', fontFamily: 'SourceSans3_400Regular', fontSize: 14 },
+  accountNote: { marginTop: 13, color: '#65705D', fontFamily: 'SourceSans3_400Regular', fontSize: 12.5, lineHeight: 18 },
   freeCard: { marginTop: 12, borderWidth: 1, borderColor: '#DFE1D9', borderRadius: 19, padding: 15, backgroundColor: '#F3F2EC' },
   freeHeading: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
   freeTitle: { color: '#30362C', fontFamily: 'Lato_700Bold', fontSize: 18 },
@@ -348,7 +343,7 @@ const styles = StyleSheet.create({
   premiumButtonText: { color: '#FFFFFF', fontFamily: 'Lato_700Bold', fontSize: 17 },
   continueFreeButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   continueFreeText: { color: '#3F5F1E', fontFamily: 'Lato_700Bold', fontSize: 15 },
-  linkRow: { minHeight: 25, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  linkRow: { minHeight: 25, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', columnGap: 8, rowGap: 6 },
   footerLink: { color: '#747C6D', fontFamily: 'SourceSans3_400Regular', fontSize: 12.5, textDecorationLine: 'underline' },
   linkDivider: { color: '#B0B4AB', fontSize: 11 },
   pagination: { height: 18, marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },

@@ -1,14 +1,22 @@
-import { hasPremiumAccessForIdentity } from "@/services/revenueCatIdentity";
+import { resolvePremiumAccess } from "@/services/revenueCatIdentity";
 
 describe("RevenueCat identity changes", () => {
-  test("an anonymous receipt cannot unlock account-bound Premium features", () => {
-    expect(hasPremiumAccessForIdentity(null, true)).toBe(false);
+  test("an anonymous receipt unlocks local Premium without account services", () => {
+    expect(resolvePremiumAccess(null, true)).toEqual({
+      accountFeatures: false,
+      localFeatures: true,
+    });
   });
-  test("sign-in exposes an active entitlement and sign-out removes access", () => {
-    expect(hasPremiumAccessForIdentity("user-1", true)).toBe(true);
-    expect(hasPremiumAccessForIdentity(undefined, true)).toBe(false);
+  test("sign-in extends an active entitlement to account services", () => {
+    expect(resolvePremiumAccess("user-1", true)).toEqual({
+      accountFeatures: true,
+      localFeatures: true,
+    });
   });
   test("identity alone does not create an entitlement", () => {
-    expect(hasPremiumAccessForIdentity("user-1", false)).toBe(false);
+    expect(resolvePremiumAccess("user-1", false)).toEqual({
+      accountFeatures: false,
+      localFeatures: false,
+    });
   });
 });

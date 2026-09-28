@@ -13,6 +13,7 @@ import {
   useBottomSheetInternal,
 } from "@gorhom/bottom-sheet";
 import { supabase } from "@/lib/supabase";
+import { useAIDataSharingStore } from "@/stores/aiDataSharingStore";
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 import {
   ChevronDown,
@@ -27,7 +28,7 @@ import {
 } from "lucide-react-native";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
+import { ActivityIndicator, Alert, Keyboard, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
 import { useDerivedValue } from "react-native-reanimated";
 
 type AIProps = {
@@ -76,6 +77,8 @@ export default function AI({
   const [message, setMessage] = useState(selectedText ? `Explain this: ${selectedText}` : "");
   const [isSending, setIsSending] = useState(false);
   const isSendingRef = useRef(false);
+  const aiDataSharingConsent = useAIDataSharingStore((state) => state.consent);
+  const setAIDataSharingConsent = useAIDataSharingStore((state) => state.setConsent);
   const conversationRef = useRef<BottomSheetScrollViewMethods>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   const { animatedKeyboardState, animatedLayoutState, animatedPosition } =
@@ -195,9 +198,44 @@ export default function AI({
       : pageContext;
   };
 
+  const requestAIDataSharingConsent = () => {
+    if (aiDataSharingConsent === "allowed") return Promise.resolve(true);
+
+    return new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "AI Assistant uses OpenAI",
+        "To answer your question, Bic Reader will send your question and relevant text from this PDF to OpenAI for processing. Do not submit confidential or sensitive information.\n\nYou can change this permission later in Settings.",
+        [
+          {
+            text: "Not Now",
+            style: "cancel",
+            onPress: () => {
+              setAIDataSharingConsent("denied");
+              resolve(false);
+            },
+          },
+          {
+            text: "Allow AI Processing",
+            onPress: () => {
+              setAIDataSharingConsent("allowed");
+              resolve(true);
+            },
+          },
+        ],
+        {
+          cancelable: true,
+          onDismiss: () => resolve(false),
+        },
+      );
+    });
+  };
+
   const handleSend = async (messageOverride?: string) => {
     const question = (messageOverride ?? message).trim();
     if (!question || isSendingRef.current) return;
+
+    const hasConsent = await requestAIDataSharingConsent();
+    if (!hasConsent) return;
 
     isSendingRef.current = true;
     setViewingConversation(true);

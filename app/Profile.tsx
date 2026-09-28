@@ -251,25 +251,27 @@ export default function Profile() {
                 </Pressable>
               ) : null}
 
-              <Pressable
-                accessibilityRole="button"
-                disabled={isSubscriptionLoading || isRestoring}
-                onPress={() => void handleRestorePurchases()}
-                style={({ pressed }) => [
-                  styles.restoreButton,
-                  (isSubscriptionLoading || isRestoring) && styles.restoreButtonDisabled,
-                  pressed && !isSubscriptionLoading && !isRestoring && styles.restoreButtonPressed,
-                ]}
-              >
-                {isRestoring ? (
-                  <ActivityIndicator color="#4F7D1A" size="small" />
-                ) : (
-                  <RefreshCw color="#4F7D1A" size={17} />
-                )}
-                <Text style={styles.restoreButtonText}>
-                  {isRestoring ? 'Restoring…' : 'Restore purchases'}
-                </Text>
-              </Pressable>
+              {!isPremium ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isSubscriptionLoading || isRestoring}
+                  onPress={() => void handleRestorePurchases()}
+                  style={({ pressed }) => [
+                    styles.restoreButton,
+                    (isSubscriptionLoading || isRestoring) && styles.restoreButtonDisabled,
+                    pressed && !isSubscriptionLoading && !isRestoring && styles.restoreButtonPressed,
+                  ]}
+                >
+                  {isRestoring ? (
+                    <ActivityIndicator color="#4F7D1A" size="small" />
+                  ) : (
+                    <RefreshCw color="#4F7D1A" size={17} />
+                  )}
+                  <Text style={styles.restoreButtonText}>
+                    {isRestoring ? 'Restoring…' : 'Restore purchases'}
+                  </Text>
+                </Pressable>
+              ) : null}
 
               {restoreMessage ? (
                 <Text

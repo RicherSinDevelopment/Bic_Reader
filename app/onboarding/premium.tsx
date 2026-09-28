@@ -18,6 +18,7 @@ import { OnboardingBackButton } from '@/components/onboarding/OnboardingBackButt
 import { useAuth } from '@/providers/AuthProvider';
 import { useRevenueCat } from '@/providers/RevenueCatProvider';
 import { authRoute } from '@/lib/authNavigation';
+import { purchaseFailureMessage } from '@/services/revenueCatPurchaseRecovery';
 
 const TERMS_URL = process.env.EXPO_PUBLIC_TERMS_URL;
 const PRIVACY_URL = 'https://bicreader.com/#/privacy';
@@ -45,6 +46,7 @@ export default function PremiumOnboardingScreen() {
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [isLoadingPackages, setIsLoadingPackages] = useState(true);
   const [isPurchasing, setIsPurchasing] = useState(false);
+  const [isCheckingSubscription, setIsCheckingSubscription] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -87,10 +89,26 @@ export default function PremiumOnboardingScreen() {
     if (!selectedPackage || isPurchasing) return;
     setMessage(null);
     setIsPurchasing(true);
+
+    // Check the App Store receipt before starting a new purchase. This avoids
+    // Apple's "You are currently subscribed" sheet when the same Apple ID has
+    // already purchased Premium under another Bic Reader account.
+    setIsCheckingSubscription(true);
+    const restored = await restorePurchases();
+    setIsCheckingSubscription(false);
+    if (restored) {
+      setIsPurchasing(false);
+      finishOnboarding();
+      return;
+    }
+
     const result = await purchasePackage(selectedPackage);
     setIsPurchasing(false);
     if (result === 'purchased') finishOnboarding();
     if (result === 'failed') setMessage("We couldn't complete the purchase. Please try again.");
+    if (result === 'storeProblem') {
+      setMessage(purchaseFailureMessage('2'));
+    }
   };
 
   const handleRestore = async () => {
@@ -210,7 +228,9 @@ export default function PremiumOnboardingScreen() {
                 : !session
                   ? 'Sign in to start Premium'
                   : isPurchasing
-                    ? 'Purchasing…'
+                    ? isCheckingSubscription
+                      ? 'Checking subscription…'
+                      : 'Purchasing…'
                     : 'Start Premium'}
             </Text>
           </Pressable>
@@ -220,10 +240,12 @@ export default function PremiumOnboardingScreen() {
           </Pressable>
 
           <View style={styles.linkRow}>
-            <Pressable disabled={isRestoring} onPress={() => void handleRestore()} hitSlop={8}>
-              <Text style={styles.footerLink}>{isRestoring ? 'Restoring…' : 'Restore Purchases'}</Text>
-            </Pressable>
-            {TERMS_URL ? <Text style={styles.linkDivider}>•</Text> : null}
+            {!isPremium ? (
+              <Pressable disabled={isRestoring} onPress={() => void handleRestore()} hitSlop={8}>
+                <Text style={styles.footerLink}>{isRestoring ? 'Restoring…' : 'Restore Purchases'}</Text>
+              </Pressable>
+            ) : null}
+            {!isPremium && TERMS_URL ? <Text style={styles.linkDivider}>•</Text> : null}
             {TERMS_URL ? <Pressable onPress={() => void Linking.openURL(TERMS_URL)}><Text style={styles.footerLink}>Terms</Text></Pressable> : null}
             {PRIVACY_URL ? <Text style={styles.linkDivider}>•</Text> : null}
             {PRIVACY_URL ? <Pressable onPress={() => void Linking.openURL(PRIVACY_URL)}><Text style={styles.footerLink}>Privacy</Text></Pressable> : null}

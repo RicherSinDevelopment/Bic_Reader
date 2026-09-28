@@ -138,7 +138,9 @@ fn assign_columns(lines: &mut [Line], page_width: f32) {
     if lines.len() < 8 {
         return;
     }
-    let candidates = (35..=65)
+    // Textbooks often reserve a narrow outer 20–30% band for definitions,
+    // while articles usually use two balanced columns around the center.
+    let candidates = (20..=80)
         .step_by(2)
         .map(|percent| page_width * percent as f32 / 100.0);
     let split = candidates
@@ -159,12 +161,42 @@ fn assign_columns(lines: &mut [Line], page_width: f32) {
     let Some(split) = split else {
         return;
     };
+
+    let left_bounds = lines
+        .iter()
+        .filter(|line| line.bounds.right < split)
+        .map(|line| line.bounds)
+        .reduce(|all, bounds| all.union(bounds));
+    let right_bounds = lines
+        .iter()
+        .filter(|line| line.bounds.left > split)
+        .map(|line| line.bounds)
+        .reduce(|all, bounds| all.union(bounds));
+    let (Some(left_bounds), Some(right_bounds)) = (left_bounds, right_bounds) else {
+        return;
+    };
+    let left_span = left_bounds.right - left_bounds.left;
+    let right_span = right_bounds.right - right_bounds.left;
+    let narrower_span = left_span.min(right_span);
+    let wider_span = left_span.max(right_span);
+    let is_asymmetric_sidebar = narrower_span < page_width * 0.28
+        && wider_span > page_width * 0.42
+        && narrower_span < wider_span * 0.58;
+    let main_is_left = left_span >= right_span;
     let gutter = page_width * 0.015;
     for line in lines {
         line.column = if line.bounds.right < split - gutter {
-            0
+            if is_asymmetric_sidebar && !main_is_left {
+                1
+            } else {
+                0
+            }
         } else if line.bounds.left > split + gutter {
-            1
+            if is_asymmetric_sidebar && !main_is_left {
+                0
+            } else {
+                1
+            }
         } else {
             -1
         };
@@ -381,5 +413,45 @@ mod tests {
         let line = build_line(row).unwrap();
         assert_eq!(line.text, "Hi there");
         assert_eq!(line.word_bounds.len(), 2);
+    }
+
+    #[test]
+    fn places_a_narrow_textbook_sidebar_after_the_main_body() {
+        let mut lines = vec![
+            line("definition one", 55.0, 120.0, 0),
+            line("definition two", 55.0, 135.0, 0),
+            line("definition three", 55.0, 150.0, 0),
+            line("definition four", 55.0, 165.0, 0),
+            line("main body one", 220.0, 100.0, 0),
+            line("main body two", 220.0, 115.0, 0),
+            line("main body three", 220.0, 130.0, 0),
+            line("main body four", 220.0, 145.0, 0),
+        ];
+        for line in lines.iter_mut().take(4) {
+            line.bounds.right = 150.0;
+        }
+        for line in lines.iter_mut().skip(4) {
+            line.bounds.right = 560.0;
+        }
+
+        assign_columns(&mut lines, 600.0);
+        order_lines(&mut lines);
+
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "main body one",
+                "main body two",
+                "main body three",
+                "main body four",
+                "definition one",
+                "definition two",
+                "definition three",
+                "definition four",
+            ]
+        );
     }
 }

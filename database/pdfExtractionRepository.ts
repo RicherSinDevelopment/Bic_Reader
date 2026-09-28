@@ -5,8 +5,8 @@ import type {
 import type { SQLiteDatabase } from "expo-sqlite";
 import { withSerializedWrite } from "./serializedWriteTransaction";
 
-// Version 17 adds multi-signal page scoring plus document-wide scan sampling.
-export const PDF_EXTRACTION_ENGINE_VERSION = 17;
+// Version 18 distinguishes narrow textbook marginalia from true columns.
+export const PDF_EXTRACTION_ENGINE_VERSION = 18;
 
 const extractionMemoryCache = new Map<string, ExtractedPdfDocument>();
 

@@ -3,6 +3,7 @@ import type { CustomerInfo, PurchasesError, PurchasesPackage } from 'react-nativ
 import Purchases, { LOG_LEVEL, PURCHASES_ERROR_CODE } from 'react-native-purchases';
 import RevenueCatUI, { PAYWALL_RESULT } from 'react-native-purchases-ui';
 import { hasPremiumAccessForIdentity } from '@/services/revenueCatIdentity';
+import { shouldRestoreAfterPurchaseError } from '@/services/revenueCatPurchaseRecovery';
 import { useSegments } from 'expo-router';
 import {
   createContext,
@@ -65,7 +66,7 @@ type RevenueCatContextValue = {
   isLoading: boolean;
   isPremium: boolean;
   loadPackages: () => Promise<PurchasesPackage[]>;
-  purchasePackage: (selectedPackage: PurchasesPackage) => Promise<'purchased' | 'cancelled' | 'failed'>;
+  purchasePackage: (selectedPackage: PurchasesPackage) => Promise<'purchased' | 'cancelled' | 'storeProblem' | 'failed'>;
   refreshCustomerInfo: () => Promise<void>;
   restorePurchases: () => Promise<boolean>;
   showPaywall: () => Promise<boolean>;
@@ -201,6 +202,29 @@ export function RevenueCatProvider({ children }: PropsWithChildren) {
         purchaseError.userCancelled
       ) {
         return 'cancelled' as const;
+      }
+
+      // Apple can report an already-owned subscription as a purchase error
+      // when its receipt is currently attached to another RevenueCat App User
+      // ID. The user's tap is an explicit purchase interaction, so recover by
+      // restoring that receipt to the currently signed-in Bic Reader account.
+      if (shouldRestoreAfterPurchaseError(purchaseError.code)) {
+        try {
+          const customerInfo = await Purchases.restorePurchases();
+          applyCustomerInfo(customerInfo);
+          if (hasPremiumEntitlement(customerInfo)) return 'purchased' as const;
+          if (purchaseError.code === PURCHASES_ERROR_CODE.STORE_PROBLEM_ERROR) {
+            return 'storeProblem' as const;
+          }
+          return 'failed' as const;
+        } catch (restoreError) {
+          if (purchaseError.code === PURCHASES_ERROR_CODE.STORE_PROBLEM_ERROR) {
+            setError(null);
+            return 'storeProblem' as const;
+          }
+          setError(restoreError instanceof Error ? restoreError.message : 'Unable to restore the existing purchase.');
+          return 'failed' as const;
+        }
       }
       setError(caughtError instanceof Error ? caughtError.message : 'Unable to complete purchase.');
       return 'failed' as const;

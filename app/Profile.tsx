@@ -10,7 +10,6 @@ import {
   BookCheck,
   BookOpen,
   ChevronRight,
-  CreditCard,
   FileText,
   Globe2,
   Library,
@@ -434,13 +433,15 @@ export default function Profile() {
                       : 'Not allowed — AI requests will ask for permission'}
                   </Text>
                 </View>
-                <Switch
-                  accessibilityLabel="Allow AI data sharing with OpenAI"
-                  onValueChange={updateAIDataSharing}
-                  trackColor={{ false: '#C9CDC5', true: '#639922' }}
-                  thumbColor="#FFFFFF"
-                  value={aiDataSharingConsent === 'allowed'}
-                />
+                <View style={styles.supportSwitchSlot}>
+                  <Switch
+                    accessibilityLabel="Allow AI data sharing with OpenAI"
+                    onValueChange={updateAIDataSharing}
+                    trackColor={{ false: '#C9CDC5', true: '#639922' }}
+                    thumbColor="#FFFFFF"
+                    value={aiDataSharingConsent === 'allowed'}
+                  />
+                </View>
               </View>
             </View>
           </View>
@@ -482,23 +483,6 @@ export default function Profile() {
                 <ChevronRight color={isDark ? '#7F897A' : '#9A9D95'} size={19} />
               </Pressable>
 
-              <View style={styles.supportDivider} />
-
-              <Pressable
-                accessibilityHint="Opens Apple subscription settings"
-                accessibilityRole="link"
-                onPress={() => void openExternalLink(APPLE_SUBSCRIPTIONS_URL, 'Unable to open Apple subscription settings.')}
-                style={({ pressed }) => [styles.supportRow, pressed && styles.supportRowPressed]}
-              >
-                <View style={styles.supportIcon}>
-                  <CreditCard color="#4F7D1A" size={20} />
-                </View>
-                <View style={styles.supportCopy}>
-                  <Text style={styles.supportTitle}>Manage Apple Subscription</Text>
-                  <Text style={styles.supportCaption}>View, change, or cancel your subscription</Text>
-                </View>
-                <ChevronRight color={isDark ? '#7F897A' : '#9A9D95'} size={19} />
-              </Pressable>
             </View>
           </View>
 
@@ -789,6 +773,13 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
     backgroundColor: isDark ? '#273321' : '#EAF3DE',
   },
   supportCopy: { flex: 1, minWidth: 0 },
+  supportSwitchSlot: {
+    alignSelf: 'stretch',
+    width: 52,
+    marginRight: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   supportTitle: { color: isDark ? '#F4F5F1' : '#2C2C2A', fontFamily: 'Lato_700Bold', fontSize: 15 },
   supportCaption: { marginTop: 3, color: isDark ? '#A6ADA1' : '#737270', fontFamily: 'Lato_400Regular', fontSize: 12 },
   supportDivider: { height: StyleSheet.hairlineWidth, marginLeft: 70, backgroundColor: isDark ? '#343A31' : '#E5E2D8' },
@@ -803,7 +794,7 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
   },
   dangerTitle: { color: isDark ? '#FFD7D3' : '#8F1D16', fontFamily: 'Lato_700Bold', fontSize: 16 },
   dangerCaption: { marginTop: 5, color: isDark ? '#D7B5B1' : '#76514E', fontFamily: 'Lato_400Regular', fontSize: 13, lineHeight: 19 },
-  manageSubscriptionButton: { alignSelf: 'flex-start', paddingVertical: 12 },
+  manageSubscriptionButton: { alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 12 },
   manageSubscriptionText: { color: '#4F7D1A', fontFamily: 'Lato_700Bold', fontSize: 14 },
   deleteAccountButton: {
     minHeight: 48,

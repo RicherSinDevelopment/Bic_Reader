@@ -4,6 +4,7 @@ import HorizontalReaderPager from '@/components/HorizontalReaderPager';
 const { act, create } = require('react-test-renderer');
 
 let mockDelayViewability = false;
+let mockDelayNativeScroll = false;
 const mockScrollOffsets: number[] = [];
 // Every bridge evaluation a mounted page pushes. Tests assert both that a page
 // says nothing before its document exists and that the label update is guarded.
@@ -33,6 +34,13 @@ jest.mock('react-native', () => {
         scrollToOffset: ({ offset }: any) => { mockScrollOffsets.push(offset); setIndex(Math.round(offset / props.getItemLayout(null, 0).length)); },
       }));
       const { data, onViewableItemsChanged } = props;
+      const latestProps = React.useRef(props);
+      latestProps.current = props;
+      const itemWidth = props.getItemLayout(null, 0).length;
+      React.useEffect(() => {
+        if (mockDelayNativeScroll) return;
+        latestProps.current.onScroll?.({ nativeEvent: { contentOffset: { x: index * itemWidth } } });
+      }, [index, itemWidth, data]);
       const previousData = React.useRef(data);
       React.useLayoutEffect(() => {
         const old = previousData.current;
@@ -67,7 +75,7 @@ const layout = (width: number, height: number) => {
   act(() => root.props.onLayout({ nativeEvent: { layout: { width, height } } }));
   act(() => jest.advanceTimersByTime(100));
 };
-beforeEach(() => { mockScrollOffsets.length = 0; mockDelayViewability = false; injectedScripts.length = 0; jest.useFakeTimers(); });
+beforeEach(() => { mockDelayNativeScroll = false; mockScrollOffsets.length = 0; mockDelayViewability = false; injectedScripts.length = 0; jest.useFakeTimers(); });
 afterEach(() => { act(() => tree?.unmount()); jest.useRealTimers(); });
 
 test('cold open waits for matching page paint after native load', () => {
@@ -635,6 +643,7 @@ test.each([[false, false], [true, false], [false, true], [true, true]])('first w
   const fontsReady = new Promise<void>(resolve => { finishFonts = resolve; });
   const document = {
     fonts: { ready: slowFonts ? fontsReady : Promise.resolve() },
+    addEventListener: jest.fn(),
     documentElement: { dir: 'ltr' },
     querySelectorAll: () => [segment],
     createRange: () => ({ selectNodeContents() {}, setStart() {}, setEnd() {}, getClientRects: () => [rect] }),
@@ -646,7 +655,13 @@ test.each([[false, false], [true, false], [false, true], [true, true]])('first w
     (_value: string, offset: number) => offset, setTimeout, (callback: () => void) => setTimeout(callback, 16),
   );
   injectedScripts.filter(script => script.startsWith('window.__readerGuideWord =')).forEach(run);
-  run(injectedScripts.find(script => script.includes('window.__reportGuideGeometry = function'))!);
+  // Run the complete shipped page script, without supplying fake global text
+  // helpers. It must install the guide bridge itself before onLoadEnd.
+  const openingHtml = tree.root.findByType('NativeWebView').props.source.html;
+  const initialScript = openingHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  expect(initialScript).toBeDefined();
+  run(initialScript);
+  messages.length = 0;
   if (pending) {
     // Reproduce activation while a geometry pass still holds the opening state.
     bridge.__reportGuideGeometry();
@@ -746,4 +761,186 @@ test.each([1, -1])('leaving a split word preserves its separate fragments until 
   const highlight = tree.root.findAllByProps({ testID: 'horizontal-guide-highlight' })
     .find((node: any) => typeof node.type === 'string');
   expect(highlight.props.style.width).toBe(nextRect.width);
+});
+
+test.each(['line', 'word'])('%s guide activates on the first page before load-end or a swipe', (mode) => {
+  act(() => { tree = create(<HorizontalReaderPager {...defaults} />); });
+  layout(756, 390);
+  const source = tree.root.findByType('NativeWebView').props.source;
+  expect(source.html).toContain('window.__reportGuideGeometry = function');
+  act(() => tree.update(<HorizontalReaderPager {...defaults} guideMode={mode as 'line' | 'word'} />));
+  injectedScripts.length = 0;
+  act(() => tree.root.findByType('NativeWebView').props.onMessage({ nativeEvent: {
+    data: JSON.stringify({ type: 'horizontalGuideReady' }),
+  } }));
+  expect(injectedScripts).toHaveLength(1);
+  expect(injectedScripts[0]).toContain('window.__readerGuideActive = true');
+  expect(injectedScripts[0]).toContain('window.__reportGuideGeometry?.()');
+  if (mode === 'word') expect(injectedScripts[0]).toContain(JSON.stringify(guideCell().props.guideWord));
+  expect(tree.root.findByType('NativeWebView').props.source).toBe(source);
+  const rect = { left: 20, top: 30, width: 45, height: 24 };
+  act(() => tree.root.findByType('NativeWebView').props.onMessage({ nativeEvent: {
+    data: JSON.stringify(mode === 'line' ? { type: 'guideLines', lines: [rect] }
+      : { type: 'guideWordRects', target: guideCell().props.guideWord, rects: [rect] }),
+  } }));
+  expect(tree.root.findAllByProps({ testID: 'horizontal-guide-highlight' }).length).toBeGreaterThan(0);
+});
+
+test('first visible paint republishes the restored source-page counter before readiness', () => {
+  const events: string[] = [];
+  const onPageChange = jest.fn((current: number) => events.push(`page:${current}`));
+  const onReady = jest.fn(() => events.push('ready'));
+  act(() => { tree = create(<HorizontalReaderPager {...defaults}
+    sourcePageCount={887} onPageChange={onPageChange} onReady={onReady}
+    destination={{ page: 20, blockId: 'block-19', pageTop: true, nonce: 5000 }} />); });
+  layout(756, 390);
+  // Native viewability already acknowledged the initial restore. The screen
+  // can still be committing its layout switch when that early report arrives.
+  onPageChange.mockClear();
+  events.length = 0;
+  const cell = guideCell();
+  act(() => tree.root.findByType('NativeWebView').props.onMessage({ nativeEvent: {
+    data: JSON.stringify({ type: 'horizontalPagePainted', layoutKey: cell.props.layoutKey }),
+  } }));
+  expect(onPageChange).toHaveBeenLastCalledWith(20, 887, 20, expect.any(Object));
+  expect(events[0]).toBe('page:20');
+  expect(events).toContain('ready');
+});
+
+test('showing a warmed horizontal reader republishes its page without a swipe', () => {
+  const onPageChange = jest.fn();
+  const props = { ...defaults, onPageChange, sourcePageCount: 887,
+    destination: { page: 20, blockId: 'block-19', pageTop: true, nonce: 5001 } };
+  act(() => { tree = create(<HorizontalReaderPager {...props} isActive={false} />); });
+  layout(756, 390);
+  onPageChange.mockClear();
+  act(() => tree.update(<HorizontalReaderPager {...props} isActive />));
+  expect(onPageChange).toHaveBeenLastCalledWith(20, 887, 20, expect.any(Object));
+});
+
+test.each([0, 200])('cold horizontal reopen confirms saved page 560 at offset %i without a swipe', (offset) => {
+  mockDelayViewability = true;
+  const savedBlocks = blocks.slice(0, 3).map((block, index) => ({ ...block, id: `p${560 + index}-b0`, page: 560 + index }));
+  const onPageChange = jest.fn();
+  const props = { ...defaults, blocks: savedBlocks, sourcePageCount: 887, onPageChange };
+  act(() => { tree = create(<HorizontalReaderPager {...props} />); });
+  layout(756, 390);
+  act(() => tree.root.findByType('NativeWebView').props.onLoadEnd());
+  const destination = { page: 560, blockId: 'p560-b0', switchHighlightOffset: offset,
+    searchMatchIndex: offset, suppressSwitchHighlight: true, nonce: 6000 };
+  injectedScripts.length = 0;
+  act(() => tree.update(<HorizontalReaderPager {...props} destination={destination} />));
+  // A nonzero offset can mount a new page; both already-loaded and newly-loaded
+  // documents must deliver the restore request after they can lay out text.
+  if (!injectedScripts.some(script => script.includes("type: 'horizontalRestorePainted'"))) {
+    act(() => tree.root.findByType('NativeWebView').props.onLoadEnd());
+  }
+  const script = injectedScripts.find(script => script.includes("type: 'horizontalRestorePainted'"));
+  expect(script).toBeDefined();
+  expect(script).toContain('requestId: 6000');
+  expect(guideCell().props.page[0]).toMatchObject({ blockId: 'p560-b0', startOffset: offset });
+  onPageChange.mockClear();
+  const paint = (requestId: number) => act(() => tree.root.findByType('NativeWebView').props.onMessage({ nativeEvent: {
+    data: JSON.stringify({ type: 'horizontalRestorePainted', requestId, layoutKey: guideCell().props.layoutKey }),
+  } }));
+  paint(5999);
+  expect(onPageChange).not.toHaveBeenCalled();
+  paint(6000);
+  expect(onPageChange).toHaveBeenLastCalledWith(560, 887, 560,
+    expect.objectContaining({ blockId: 'p560-b0', blockOffset: offset }));
+});
+
+test.each([['line', 558], ['word', 558], ['line', 560], ['word', 560]] as const)('reopen centers a partially visible native page before enabling the %s guide (window starts %i)', (guideMode, windowStart) => {
+  mockDelayViewability = true;
+  mockDelayNativeScroll = true;
+  const savedBlocks = blocks.slice(0, 4).map((block, index) => ({ ...block,
+    id: `p${windowStart + index}-b0`, page: windowStart + index }));
+  const onReady = jest.fn();
+  const props = { ...defaults, blocks: savedBlocks, sourcePageCount: 887, onReady,
+    guideMode: guideMode as 'line' | 'word',
+    destination: { page: 560, blockId: 'p560-b0', switchHighlightOffset: 0,
+      suppressSwitchHighlight: true, nonce: 7000 } };
+  act(() => { tree = create(<HorizontalReaderPager {...props} />); });
+  layout(756, 390);
+  const index = list().props.data.findIndex((page: any[]) => page[0].blockId === 'p560-b0');
+  const offset = index * 756;
+  // 75% visibility must not confirm the destination or update its anchor.
+  expect(list().props.viewabilityConfig.itemVisiblePercentThreshold).toBeGreaterThan(75);
+  act(() => list().props.onScroll({ nativeEvent: { contentOffset: { x: offset + 189 } } }));
+  act(() => list().props.onViewableItemsChanged({ viewableItems: [] }));
+  act(() => tree.root.findByType('NativeWebView').props.onLoadEnd());
+  mockScrollOffsets.length = 0;
+  act(() => guideCell().props.onReady());
+  expect(onReady).not.toHaveBeenCalled();
+  expect(mockScrollOffsets).toEqual([offset]);
+  expect(list().props.maintainVisibleContentPosition).toBeUndefined();
+  expect(guideCell().props.guideActive).toBe(false);
+  expect(tree.root.findAllByProps({ testID: 'horizontal-guide-pending-dimming' }).length).toBeGreaterThan(0);
+  // Actual native offset acknowledgement, not a simulated swipe or new load.
+  act(() => list().props.onScroll({ nativeEvent: { contentOffset: { x: offset } } }));
+  expect(onReady).toHaveBeenCalledTimes(1);
+  expect(guideCell().props.guideActive).toBe(true);
+  const target = guideCell().props.guideWord;
+  const rect = { left: 20, top: 30, width: 45, height: 24 };
+  act(() => tree.root.findByType('NativeWebView').props.onMessage({ nativeEvent: {
+    data: JSON.stringify(guideMode === 'line' ? { type: 'guideLines', lines: [rect] }
+      : { type: 'guideWordRects', target, rects: [rect] }),
+  } }));
+  expect(tree.root.findAllByProps({ testID: 'horizontal-guide-highlight' }).length).toBeGreaterThan(0);
+  mockScrollOffsets.length = 0;
+  act(() => list().props.onContentSizeChange());
+  act(() => jest.advanceTimersByTime(50));
+  expect(mockScrollOffsets).toEqual([]);
+});
+
+test('a fully visible distant TOC destination updates header and handoff before its scroll event arrives', () => {
+  mockDelayNativeScroll = true;
+  mockDelayViewability = true;
+  const book = [560, 724].map(page => ({ ...blocks[0], id: `p${page}-b0`, page }));
+  let header = 560;
+  let handoff = { blockId: 'p560-b0', blockOffset: 0, wordIndex: 0 };
+  const onPageChange = jest.fn((page: number, _total: number, _source: number, anchor: any) => {
+    header = page;
+    handoff = anchor;
+  });
+  const onExplicitPageResolved = jest.fn();
+  const props = { ...defaults, blocks: book, sourcePageCount: 887, onPageChange, onExplicitPageResolved };
+  act(() => { tree = create(<HorizontalReaderPager {...props}
+    destination={{ page: 560, pageTop: true, nonce: 8000 }} />); });
+  layout(756, 390);
+  // Leave a stale native sample from the previous source-page window.
+  act(() => list().props.onScroll({ nativeEvent: { contentOffset: { x: 1512 } } }));
+  act(() => tree.update(<HorizontalReaderPager {...props}
+    destination={{ page: 724, pageTop: true, nonce: 8001 }} />));
+  layout(756, 390);
+  const data = list().props.data;
+  const index = data.findIndex((page: any[]) => page[0].sourcePage === 724);
+  onPageChange.mockClear();
+  onExplicitPageResolved.mockClear();
+  act(() => list().props.onViewableItemsChanged({ viewableItems: [{ index, isViewable: true, item: data[index] }] }));
+  expect(header).toBe(724);
+  expect(handoff.blockId).toBe('p724-b0');
+  expect(onExplicitPageResolved).toHaveBeenCalledTimes(1);
+  expect(onExplicitPageResolved).toHaveBeenLastCalledWith(724, expect.objectContaining({ blockId: 'p724-b0' }));
+  act(() => list().props.onViewableItemsChanged({ viewableItems: [{ index, isViewable: true, item: data[index] }] }));
+  expect(onExplicitPageResolved).toHaveBeenCalledTimes(1);
+});
+
+test('disjoint TOC jumps discard the native list and its old render window, while nearby jumps reuse it', () => {
+  const book = Array.from({ length: 400 }, (_, i) => ({ ...blocks[0], id: `p${i + 1}-b0`, page: i + 1 }));
+  const onPageChange = jest.fn();
+  const props = { ...defaults, blocks: book, sourcePageCount: 400, onPageChange };
+  act(() => { tree = create(<HorizontalReaderPager {...props} destination={{ page: 20, pageTop: true, nonce: 1 }} />); });
+  layout(756, 390);
+  const firstList = list();
+  act(() => tree.update(<HorizontalReaderPager {...props} destination={{ page: 21, pageTop: true, nonce: 2 }} />));
+  expect(list()).toBe(firstList);
+  act(() => tree.update(<HorizontalReaderPager {...props} destination={{ page: 319, pageTop: true, nonce: 3 }} />));
+  layout(756, 390);
+  expect(list()).not.toBe(firstList);
+  expect(tree.root.findByType('NativeWebView').props.source.html).toContain('p319-b0');
+  expect(onPageChange.mock.calls.at(-1)[0]).toBe(319);
+  const destinationList = list();
+  act(() => tree.update(<HorizontalReaderPager {...props} blocks={[...book]} destination={{ page: 319, pageTop: true, nonce: 3 }} />));
+  expect(list()).toBe(destinationList);
 });

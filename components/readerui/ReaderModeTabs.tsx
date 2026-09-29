@@ -10,7 +10,9 @@ import {
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
+  withTiming,
+  Easing,
+  ReduceMotion,
 } from "react-native-reanimated";
 
 export type ReaderMode = "reader" | "original";
@@ -51,13 +53,13 @@ export default function ReaderModeTabs({
   const indicatorWidth = useSharedValue(selectedWidth);
 
   useEffect(() => {
-    const spring = {
-      damping: 28,
-      stiffness: 340,
-      mass: 0.72,
+    const timing = {
+      duration: 120,
+      easing: Easing.out(Easing.cubic),
+      reduceMotion: ReduceMotion.System,
     };
-    indicatorX.value = withSpring(selectedOffset, spring);
-    indicatorWidth.value = withSpring(selectedWidth, spring);
+    indicatorX.value = withTiming(selectedOffset, timing);
+    indicatorWidth.value = withTiming(selectedWidth, timing);
   }, [indicatorWidth, indicatorX, selectedOffset, selectedWidth]);
 
   const indicatorStyle = useAnimatedStyle(() => ({

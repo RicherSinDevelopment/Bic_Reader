@@ -1,3 +1,4 @@
+import { HORIZONTAL_GUIDE_RUNTIME } from "@/architecture/HorizontalGuideRuntime";
 import { guideFragmentDimming } from "@/architecture/GuideFragmentDimming";
 import { HORIZONTAL_PAGE_FIT_SCRIPT } from "@/architecture/HorizontalPageFit";
 import {
@@ -257,6 +258,7 @@ function HorizontalSelectablePage({
   guideWord,
   onGuideWordRects,
   guideActive,
+  restoreRequestId,
   readerPageNumber,
   pageTopMargin,
   pageBottomMargin,
@@ -304,6 +306,7 @@ function HorizontalSelectablePage({
   guideWord?: TextRange;
   onGuideWordRects?: (rects: GuideLine[], target?: TextRange) => void;
   guideActive: boolean;
+  restoreRequestId?: number;
   readerPageNumber: number;
   pageTopMargin: number;
   pageBottomMargin: number;
@@ -475,6 +478,8 @@ function HorizontalSelectablePage({
     }
     let timer;document.addEventListener('selectionchange',function(){clearTimeout(timer);timer=setTimeout(captureSelection,80)});
     document.addEventListener('click',function(event){const marker=event.target.closest('[data-open-note]');if(marker)window.ReactNativeWebView.postMessage(JSON.stringify({type:'openNote',noteId:marker.dataset.openNote}))});
+    ${HORIZONTAL_GUIDE_RUNTIME}
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'horizontalGuideReady' }));
   </script></body></html>`,
     [
       horizontalContentInset,
@@ -586,6 +591,7 @@ function HorizontalSelectablePage({
   // has parsed. Until then onLoadEnd owns the delivery, so a cold mount pushes
   // nothing across the bridge and each mounted page stops producing errors.
   const contentLoadedRef = useRef(false);
+  const guideReadyRef = useRef(false);
   useEffect(() => {
     if (!contentLoadedRef.current) return;
     webViewRef.current?.injectJavaScript(pageNumberInjection);
@@ -615,11 +621,11 @@ function HorizontalSelectablePage({
     [guideWord],
   );
   useEffect(() => {
-    if (!contentLoadedRef.current) return;
+    if (!guideReadyRef.current && !contentLoadedRef.current) return;
     webViewRef.current?.injectJavaScript(guideWordInjection);
   }, [guideWordInjection]);
   useEffect(() => {
-    if (!contentLoadedRef.current) return;
+    if (!guideReadyRef.current && !contentLoadedRef.current) return;
     webViewRef.current?.injectJavaScript(
       `window.__readerGuideActive = ${guideActive};if (window.__readerGuideActive) window.__reportGuideGeometry?.();true;`,
     );
@@ -655,6 +661,27 @@ function HorizontalSelectablePage({
   };
   useEffect(updateDocument, [desiredSource, layoutKey, bottomPadding, pageNumberInjection,
     ttsInjection, switchHighlightInjection, guideWordInjection]);
+  // A cold reopen can target a cell that already painted during preparation.
+  // Reconfirm that document after layout; changing no HTML produces no load or
+  // viewability event, and a suppressed highlight produces no acknowledgement.
+  const restorePaintInjection = restoreRequestId === undefined ? null : `
+    Promise.resolve(document.fonts && document.fonts.ready).then(function() {
+      requestAnimationFrame(function() {
+        window.__reportHorizontalPageFit?.(${bottomPadding});
+        requestAnimationFrame(function() {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'horizontalRestorePainted', requestId: ${restoreRequestId},
+            layoutKey: ${JSON.stringify(layoutKey)}
+          }));
+        });
+      });
+    });true;
+  `;
+  useEffect(() => {
+    if (contentLoadedRef.current && restorePaintInjection) {
+      webViewRef.current?.injectJavaScript(restorePaintInjection);
+    }
+  }, [restorePaintInjection]);
   if (processFailed) return (
     <View style={{ flex: 1, backgroundColor, alignItems: "center", justifyContent: "center", padding: 24 }}>
       <Text style={{ color: textColor, textAlign: "center" }}>This page could not stay open.</Text>
@@ -685,6 +712,7 @@ function HorizontalSelectablePage({
           : horizontalReaderMenuItemsWithoutRemove
       }
       onLoadStart={() => {
+        guideReadyRef.current = false;
         // The document is being replaced, so DOM-driven injections wait for the
         // matching onLoadEnd instead of evaluating against a half-built page.
         contentLoadedRef.current = false;
@@ -698,94 +726,6 @@ function HorizontalSelectablePage({
         webViewRef.current?.injectJavaScript(switchHighlightInjection);
         webViewRef.current?.injectJavaScript(guideWordInjection);
         webViewRef.current?.injectJavaScript(`
-        window.__reportGuideGeometry = function() {
-          Promise.resolve(document.fonts && document.fonts.ready).then(function() {
-          requestAnimationFrame(function() {
-          const rects = [];
-          document.querySelectorAll('.segment').forEach(function(segment) {
-            const range = document.createRange();
-            range.selectNodeContents(segment);
-            Array.from(range.getClientRects()).forEach(function(rect) {
-              if (rect.width > 0 && rect.height > 0) {
-                rects.push({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
-              }
-            });
-          });
-          const uniqueRects = rects.filter(function(rect, index) {
-            return !rects.slice(0, index).some(function(previous) {
-              return Math.abs(previous.left - rect.left) < 0.5 && Math.abs(previous.top - rect.top) < 0.5 && Math.abs(previous.width - rect.width) < 0.5;
-            });
-          }).sort(function(a, b) {
-            const vertical = a.top - b.top;
-            if (Math.abs(vertical) > 1) return vertical;
-            return document.documentElement.dir === 'rtl'
-              ? (b.left + b.width) - (a.left + a.width)
-              : a.left - b.left;
-          });
-          const lines = [];
-          uniqueRects.forEach(function(rect) {
-            const line = lines.find(function(candidate) {
-              return Math.abs(candidate.top - rect.top) < 1.5;
-            });
-            if (!line) {
-              lines.push({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
-              return;
-            }
-            const right = Math.max(line.left + line.width, rect.left + rect.width);
-            line.left = Math.min(line.left, rect.left);
-            line.width = right - line.left;
-            line.height = Math.max(line.height, rect.height);
-          });
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'guideLines', lines: lines }));
-          window.__reportGuideWord = function(target) {
-            if (!target || !target.blockId || !target.length) return;
-            const segment = Array.from(document.querySelectorAll('[data-block-id]')).find(function(item) {
-              const start = Number(item.dataset.start || 0);
-              const prefix = Number(item.dataset.prefix || 0);
-              return item.dataset.blockId === target.blockId && target.offset >= start && target.offset < start + cleanLength(item.textContent) - prefix;
-            });
-            if (!segment) return;
-            const prefix = Number(segment.dataset.prefix || 0);
-            const localStart = target.offset - Number(segment.dataset.start || 0) + prefix;
-            const localEnd = localStart + target.length;
-            const nodes = [];
-            let cursor = 0;
-            const walker = document.createTreeWalker(segment, NodeFilter.SHOW_TEXT);
-            let node = walker.nextNode();
-            while (node) {
-              const length = cleanLength(node.textContent || '');
-              nodes.push({ node: node, start: cursor, end: cursor + length });
-              cursor += length;
-              node = walker.nextNode();
-            }
-            const pointFor = function(offset, isEnd) {
-              const entry = nodes.find(function(item) { return offset >= item.start && (offset < item.end || (isEnd && offset === item.end)); }) || nodes[nodes.length - 1];
-              if (!entry) return null;
-              return { node: entry.node, offset: rawIndexForClean(entry.node.textContent || '', Math.max(0, Math.min(entry.end - entry.start, offset - entry.start))) };
-            };
-            const startPoint = pointFor(localStart, false);
-            const endPoint = pointFor(localEnd, true);
-            if (!startPoint || !endPoint) return;
-            const range = document.createRange();
-            range.setStart(startPoint.node, startPoint.offset);
-            range.setEnd(endPoint.node, endPoint.offset);
-            const wordRects = Array.from(range.getClientRects()).filter(function(rect) { return rect.width > 0 && rect.height > 0; }).map(function(rect) {
-              return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
-            }).sort(function(first, second) {
-              const vertical = first.top - second.top;
-              if (Math.abs(vertical) > 1) return vertical;
-              return document.documentElement.dir === 'rtl'
-                ? (second.left + second.width) - (first.left + first.width)
-                : first.left - second.left;
-            });
-            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'guideWordRects', target: target, rects: wordRects }));
-          };
-          // Read the latest target: the guide may have been enabled or moved
-          // after onLoadEnd, before this delayed geometry pass runs.
-          window.__reportGuideWord(window.__readerGuideWord);
-          });
-          });
-        };
         window.__readerGuideActive = ${guideActive};
         if (window.__readerGuideActive) window.__reportGuideGeometry();
         true;
@@ -807,6 +747,7 @@ function HorizontalSelectablePage({
           });
           true;
         `);
+        if (restorePaintInjection) webViewRef.current?.injectJavaScript(restorePaintInjection);
       }}
       onContentProcessDidTerminate={() => {
         addSafeBreadcrumb(
@@ -825,7 +766,17 @@ function HorizontalSelectablePage({
       onMessage={(event) => {
         try {
           const message = JSON.parse(event.nativeEvent.data);
-          if (message.type === "horizontalPagePainted" && message.layoutKey === layoutKey) {
+          if (message.type === "horizontalRestorePainted") {
+            if (message.requestId === restoreRequestId && message.layoutKey === layoutKey) onReady?.();
+          } else if (message.type === "horizontalGuideReady") {
+            guideReadyRef.current = true;
+            // Replay current state, including toggles made before the DOM existed.
+            webViewRef.current?.injectJavaScript(`
+              window.__readerGuideActive = ${guideActive};
+              ${guideWordInjection}
+              if (window.__readerGuideActive) window.__reportGuideGeometry?.();true;
+            `);
+          } else if (message.type === "horizontalPagePainted" && message.layoutKey === layoutKey) {
             if (guideActive) {
               webViewRef.current?.injectJavaScript(guideWordInjection);
               webViewRef.current?.injectJavaScript("window.__reportGuideGeometry?.();true;");
@@ -952,6 +903,7 @@ const MemoizedHorizontalSelectablePage = React.memo(
     previous.horizontalContentInset === next.horizontalContentInset &&
     previous.guideWord === next.guideWord &&
     previous.guideActive === next.guideActive &&
+    previous.restoreRequestId === next.restoreRequestId &&
     previous.readerPageNumber === next.readerPageNumber &&
     previous.pageTopMargin === next.pageTopMargin &&
     previous.pageBottomMargin === next.pageBottomMargin,
@@ -1226,6 +1178,19 @@ export default function HorizontalReaderPager(props: Props) {
   const [focus, setFocus] = useState(requested ?? props.blocks[0]?.page ?? 1);
   const destinationNonce = useRef(props.destination?.nonce);
   const commandChanged = destinationNonce.current !== props.destination?.nonce;
+  const windowSession = useRef({ nonce: props.destination?.nonce, generation: 0 });
+  if (windowSession.current.nonce !== props.destination?.nonce) {
+    windowSession.current = {
+      nonce: props.destination?.nonce,
+      generation: windowSession.current.generation + (
+        props.sourcePageCount !== undefined && requested !== undefined &&
+        Math.abs(requested - focus) > 20 ? 1 : 0
+      ),
+    };
+  }
+  // A disjoint destination replaces the native list's entire index space.
+  // Mount at its initial index instead of scrolling an old virtualized window
+  // whose content size and render mask still describe the previous chapter.
   const center = commandChanged && requested !== undefined ? requested : focus;
   useEffect(() => {
     destinationNonce.current = props.destination?.nonce;
@@ -1268,7 +1233,7 @@ export default function HorizontalReaderPager(props: Props) {
   const destination = windowed && props.destination?.readerPage !== undefined
     ? { ...props.destination, page: props.destination.readerPage, readerPage: undefined, pageTop: true }
     : props.destination;
-  return <CompleteHorizontalReaderPager {...props} blocks={nearby} destination={destination}
+  return <CompleteHorizontalReaderPager key={windowSession.current.generation} {...props} blocks={nearby} destination={destination}
     onPageChange={reportWindowPage}
     onPageMapChange={windowed ? reportWindowMap : props.onPageMapChange}
   />;
@@ -1329,7 +1294,9 @@ function CompleteHorizontalReaderPager({
   const visiblePageAnchorRef = useRef<PageAnchor | undefined>(undefined);
   const readyReportedRef = useRef(false);
   const pagePaintHandlerRef = useRef<(page: Segment[]) => void>(() => {});
+  const paintedPageRef = useRef<Segment[] | null>(null);
   const navigatedDestinationKeyRef = useRef<string | null>(null);
+  const acknowledgedDestinationRef = useRef<number | null>(null);
   const programmaticDestinationPageRef = useRef<number | null>(null);
   const scrollDiagnosticsRef = useRef(new ReaderScrollDiagnostics());
   const programmaticDestinationAnchorRef = useRef<PageAnchor | undefined>(
@@ -1347,6 +1314,9 @@ function CompleteHorizontalReaderPager({
   const pendingViewportRestoreRef = useRef(false);
   const restoredPagesRef = useRef<Segment[][] | null>(null);
   const [pagerWarm, setPagerWarm] = useState(false);
+  const [viewportAligned, setViewportAligned] = useState(true);
+  const nativeScrollOffsetRef = useRef(0);
+  const alignmentFrameRef = useRef<number | null>(null);
   const [viewportSettling, setViewportSettling] = useState(false);
   const [viewablePage, setViewablePage] = useState<{ index: number; item: Segment[] } | null>(null);
   const viewablePageIndex = viewablePage?.index ?? -1;
@@ -1366,7 +1336,9 @@ function CompleteHorizontalReaderPager({
     },
   ).current;
   const pageViewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 60,
+    // Native visibility is authoritative even when its scroll event arrives later.
+    // A mostly-visible neighbor must not acknowledge an explicit navigation.
+    itemVisiblePercentThreshold: 99,
   }).current;
   const [dismissedSearchNonce, setDismissedSearchNonce] = useState<
     number | null
@@ -1586,6 +1558,7 @@ function CompleteHorizontalReaderPager({
         !sameRenderedPage(pages[viewablePage.index], viewablePage.item)) return;
     const pendingIndex = programmaticDestinationPageRef.current;
     if (pendingIndex !== null && pendingIndex !== viewablePage.index) return;
+    setViewportAligned(true);
     // After native confirmation, the visible cell owns the handoff anchor.
     // Keeping the navigation index locked ignored later native position changes
     // as neighboring pages were inserted during cold-open extraction.
@@ -1593,18 +1566,37 @@ function CompleteHorizontalReaderPager({
     currentPageRef.current = viewablePage.index;
     programmaticDestinationAnchorRef.current = pageAnchor(viewablePage.item, blocks);
     reportPageChange(viewablePage.index);
-  }, [destination, pages, blocks, reportPageChange, viewablePage, viewportSettling]);
+    if (destination && (destination.pageTop || destination.readerPage !== undefined) &&
+        acknowledgedDestinationRef.current !== destination.nonce &&
+        (destination.readerPage !== undefined || pages[viewablePage.index]?.[0]?.sourcePage === destination.page)) {
+      const anchor = pageAnchor(viewablePage.item, blocks);
+      if (anchor) {
+        acknowledgedDestinationRef.current = destination.nonce;
+        onExplicitPageResolved?.(pages[viewablePage.index][0].sourcePage, anchor);
+      }
+    }
+  }, [destination, pages, blocks, reportPageChange, viewablePage, viewportSettling,
+    isActive, width, viewportAligned, onExplicitPageResolved]);
 
   // Memoized cells can survive insertion before them. Never use the index
   // captured when that cell mounted to acknowledge its first paint.
   pagePaintHandlerRef.current = (paintedPage) => {
     const index = currentPageRef.current;
     if (pendingViewportRestoreRef.current || !sameRenderedPage(pages[index], paintedPage)) return;
+    paintedPageRef.current = paintedPage;
+    if (programmaticDestinationPageRef.current !== null &&
+        Math.abs(nativeScrollOffsetRef.current - index * width) > 1) {
+      // A painted cell can still be sideways: viewability only requires 60%.
+      // Realign its native scroll offset, then wait for onScroll to confirm it.
+      pagerRef.current?.scrollToOffset({ animated: false, offset: index * width });
+      return;
+    }
+    // Publish the painted page before exposing the ready reader. Native
+    // viewability may have fired while the old layout was still active, so its
+    // counter update could have been ignored by the screen. A stationary page
+    // must refresh the counter too, even after navigation was acknowledged.
+    reportPageChange(index);
     reportReady();
-    // A restore to the already-visible cell does not necessarily produce a new
-    // native viewability event. Its painted content still needs to acknowledge
-    // the transition, otherwise verification waits and eventually fails.
-    if (programmaticDestinationPageRef.current === index) reportPageChange(index);
   };
 
   const guideWords = useMemo(() => {
@@ -1748,6 +1740,7 @@ function CompleteHorizontalReaderPager({
     // unchanged cell. Issuing another JS scroll here races that adjustment and
     // briefly exposes the old index after every TOC prefetch batch.
     const needsScrollRestore = pendingViewportRestoreRef.current ||
+      (programmaticDestinationPageRef.current !== null && preservedViewportPage !== currentPageRef.current) ||
       !sameRenderedPage(restoredPagesRef.current?.[currentPageRef.current], pages[preservedViewportPage]);
     pendingViewportRestoreRef.current = false;
     restoredPagesRef.current = pages;
@@ -1784,14 +1777,6 @@ function CompleteHorizontalReaderPager({
     // `pages` to grow; do NOT consume the destination so this effect retries.
     if (destinationPage < 0) return;
     const resolvedAnchor = pageAnchor(pages[destinationPage], blocks);
-    const resolvedSourcePage = pages[destinationPage]?.[0]?.sourcePage;
-    if (
-      destination.readerPage !== undefined &&
-      resolvedAnchor &&
-      resolvedSourcePage
-    ) {
-      onExplicitPageResolved?.(resolvedSourcePage, resolvedAnchor);
-    }
     const exactOffset =
       destination.searchMatchIndex ?? destination.switchHighlightOffset;
     const exactBlock = destination.blockId
@@ -1809,6 +1794,7 @@ function CompleteHorizontalReaderPager({
     pendingViewportRestoreRef.current = false;
     restoredPagesRef.current = pages;
     programmaticDestinationPageRef.current = destinationPage;
+    setViewportAligned(Math.abs(nativeScrollOffsetRef.current - destinationPage * width) <= 1);
     programmaticDestinationAnchorRef.current = exactAnchor ?? resolvedAnchor;
     pagerRef.current?.scrollToIndex({
       animated: false,
@@ -1849,6 +1835,18 @@ function CompleteHorizontalReaderPager({
       }
     }
   }, [destination, pages, paginationAnchor, reportPageChange, viewportSettling]);
+
+  useLayoutEffect(() => {
+    if (!guideMode || swipeActiveRef.current || viewportSettling || !pages.length) return;
+    const index = currentPageRef.current;
+    const offset = index * width;
+    if (Math.abs(nativeScrollOffsetRef.current - offset) <= 1) return;
+    // Opening a guide must also repair a native offset left between pages.
+    // This runs on activation/layout changes, never as a polling loop.
+    programmaticDestinationPageRef.current = index;
+    setViewportAligned(false);
+    pagerRef.current?.scrollToOffset({ animated: false, offset });
+  }, [guideMode, width, viewportSettling, pages.length]);
 
   useEffect(() => {
     if (!spokenWordHighlight || !pages.length) return;
@@ -2771,7 +2769,8 @@ function CompleteHorizontalReaderPager({
         horizontal
         inverted={isRtl}
         pagingEnabled
-        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+        maintainVisibleContentPosition={destinationIsPending || !viewportAligned
+          ? undefined : { minIndexForVisible: 0 }}
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
         initialScrollIndex={pages.length ? preservedViewportPage : undefined}
@@ -2790,9 +2789,23 @@ function CompleteHorizontalReaderPager({
           length: width,
           offset: width * pageIndex,
         })}
+        onContentSizeChange={() => {
+          if (programmaticDestinationPageRef.current === null) return;
+          if (alignmentFrameRef.current !== null) cancelAnimationFrame(alignmentFrameRef.current);
+          alignmentFrameRef.current = requestAnimationFrame(() => {
+            alignmentFrameRef.current = null;
+            const index = programmaticDestinationPageRef.current;
+            if (index === null || swipeActiveRef.current) return;
+            const offset = index * width;
+            if (Math.abs(nativeScrollOffsetRef.current - offset) > 1) {
+              pagerRef.current?.scrollToOffset({ animated: false, offset });
+            }
+          });
+        }}
         onScrollBeginDrag={(event) => {
           swipeActiveRef.current = true;
           setSwipeActive(true);
+          setViewportAligned(true);
           programmaticDestinationPageRef.current = null;
           programmaticDestinationAnchorRef.current = undefined;
                 onSwipeStart?.();
@@ -2805,7 +2818,21 @@ function CompleteHorizontalReaderPager({
         }}
         scrollEventThrottle={16}
         onScroll={(event) => {
-          scrollDiagnosticsRef.current.sample(event.nativeEvent.contentOffset.x);
+          const offset = event.nativeEvent.contentOffset.x;
+          nativeScrollOffsetRef.current = offset;
+          scrollDiagnosticsRef.current.sample(offset);
+          const restoring = programmaticDestinationPageRef.current;
+          if (restoring !== null && Math.abs(offset - restoring * width) > 1) {
+            setViewportAligned(false);
+          }
+          if (restoring !== null && !pendingViewportRestoreRef.current &&
+              Math.abs(offset - restoring * width) <= 1) {
+            setViewportAligned(true);
+            if (sameRenderedPage(pages[restoring], paintedPageRef.current ?? undefined)) {
+              reportPageChange(restoring);
+              reportReady();
+            }
+          }
           if (!swipeActiveRef.current) return;
           if (
             pendingViewportRestoreRef.current ||
@@ -2960,8 +2987,9 @@ function CompleteHorizontalReaderPager({
                     ? () => setPaintedSwitchNonce(activeSwitchHighlight.nonce)
                     : undefined
                 }
+                restoreRequestId={pageIndex === destinationPage ? destination?.nonce : undefined}
                 guideActive={
-                  Boolean(guideMode) && pageIndex === currentPageRef.current
+                  Boolean(guideMode) && viewportAligned && pageIndex === guidePageIndex
                 }
                 readerPageNumber={sourcePageCount !== undefined ? page[0].sourcePage : pageIndex + 1}
                 pageTopMargin={verticalMargin}
@@ -3038,7 +3066,13 @@ function CompleteHorizontalReaderPager({
           </Text>
         </View>
       )}
-      {guideMode && visibleGuideRect && !hasMultipleWordFragments && (
+      {/* Keep dimming enabled while the destination settles or its first guide
+          measurement is pending. Only the guide opening needs ready geometry. */}
+      {guideMode && (!viewportAligned || (!visibleGuideRect && !hasMultipleWordFragments)) && (
+        <View pointerEvents="none" testID="horizontal-guide-pending-dimming"
+          style={[StyleSheet.absoluteFill, { backgroundColor, opacity: guideBackgroundDimming / 100 }]} />
+      )}
+      {guideMode && viewportAligned && visibleGuideRect && !hasMultipleWordFragments && (
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>
           <View
             style={{
@@ -3084,7 +3118,7 @@ function CompleteHorizontalReaderPager({
           />
         </View>
       )}
-      {hasMultipleWordFragments && (
+      {viewportAligned && hasMultipleWordFragments && (
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>
           {guideFragmentDimming(width, usableHeight, wordGuideFragments).map((rect, index) => (
             <View key={`dim-${index}`} testID="horizontal-word-guide-dimming" style={{

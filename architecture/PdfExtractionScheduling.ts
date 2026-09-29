@@ -31,6 +31,36 @@ export function prioritizeHorizontalRequests(queue: number[], focus: number) {
     .sort((a, b) => Math.abs(a - focus) - Math.abs(b - focus) || b - a);
 }
 
+/** Deliver a jump target before its surrounding vertical-reader buffer. */
+export function prioritizeVerticalBlocks<T extends { page: number }>(
+  blocks: T[],
+  focus: number,
+) {
+  return blocks
+    .map((block, index) => ({ block, index }))
+    .sort(
+      (left, right) =>
+        Math.abs(left.block.page - focus) -
+          Math.abs(right.block.page - focus) ||
+        left.block.page - right.block.page ||
+        left.index - right.index,
+    )
+    .map(({ block }) => block);
+}
+
+/** Never split one source page across repeated WebView layout mutations. */
+export function takeCompletePageBatch<T extends { page: number }>(
+  blocks: T[],
+  maxPages = 2,
+) {
+  const selectedPages = new Set<number>();
+  for (const block of blocks) {
+    if (!selectedPages.has(block.page) && selectedPages.size >= maxPages) break;
+    selectedPages.add(block.page);
+  }
+  return blocks.filter((block) => selectedPages.has(block.page));
+}
+
 /** Explicit navigation is pending before the viewport/canonical anchor moves. */
 export function extractionFocusPage(
   desired: { sourcePage: number } | null | undefined,

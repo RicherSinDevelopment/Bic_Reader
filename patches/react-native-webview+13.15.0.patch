@@ -1,8 +1,8 @@
 diff --git a/node_modules/react-native-webview/apple/RNCWebViewImpl.m b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
-index 7f5c24d..043ac37 100644
+index 7f5c24d..ea7a1c9 100644
 --- a/node_modules/react-native-webview/apple/RNCWebViewImpl.m
 +++ b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
-@@ -25,6 +25,11 @@ static NSDictionary* customCertificatesForHost;
+@@ -25,6 +25,11 @@
  
  NSString *const CUSTOM_SELECTOR = @"_CUSTOM_SELECTOR_";
  
@@ -14,7 +14,7 @@ index 7f5c24d..043ac37 100644
  #if TARGET_OS_IOS
  // runtime trick to remove WKWebView keyboard default toolbar
  // see: http://stackoverflow.com/questions/19033292/ios-7-uiwebview-keyboard-issue/19042279#19042279
-@@ -52,6 +57,7 @@ NSString *const CUSTOM_SELECTOR = @"_CUSTOM_SELECTOR_";
+@@ -52,6 +57,7 @@ @interface RNCWKWebView : WKWebView
  #if !TARGET_OS_OSX
  @property (nonatomic, copy) NSArray<NSDictionary *> * _Nullable menuItems;
  @property (nonatomic, copy) NSArray<NSString *> * _Nullable suppressMenuItems;
@@ -22,7 +22,7 @@ index 7f5c24d..043ac37 100644
  #endif // !TARGET_OS_OSX
  @end
  @implementation RNCWKWebView
-@@ -87,19 +93,46 @@ NSString *const CUSTOM_SELECTOR = @"_CUSTOM_SELECTOR_";
+@@ -87,19 +93,46 @@ - (BOOL)canPerformAction:(SEL)action
        }
    }
  
@@ -77,7 +77,7 @@ index 7f5c24d..043ac37 100644
  }
  #else // TARGET_OS_OSX
  - (void)scrollWheel:(NSEvent *)theEvent {
-@@ -297,14 +330,25 @@ RCTAutoInsetsProtocol>
+@@ -297,14 +330,25 @@ - (UIMenu *)editMenuInteraction:(UIEditMenuInteraction *)interaction menuForConf
      NSString *menuItemLabel = [RCTConvert NSString:menuItem[@"label"]];
      NSString *menuItemKey = [RCTConvert NSString:menuItem[@"key"]];
      NSString *sel = [NSString stringWithFormat:@"%@%@", CUSTOM_SELECTOR, menuItemKey];
@@ -106,15 +106,18 @@ index 7f5c24d..043ac37 100644
  }
  #endif // !TARGET_OS_OSX
  
-@@ -521,6 +565,7 @@ RCTAutoInsetsProtocol>
+@@ -521,7 +565,10 @@ - (void)didMoveToWindow
  #if !TARGET_OS_OSX
      _webView.menuItems = _menuItems;
      _webView.suppressMenuItems = _suppressMenuItems;
 +    _webView.menuActionOwner = self;
      _webView.scrollView.delegate = self;
++    // Status-bar taps must not fight the reader's virtualized scroll position.
++    _webView.scrollView.scrollsToTop = NO;
  #endif // !TARGET_OS_OSX
      _webView.UIDelegate = self;
-@@ -580,6 +625,9 @@ RCTAutoInsetsProtocol>
+     _webView.navigationDelegate = self;
+@@ -580,6 +627,9 @@ - (void)didMoveToWindow
  #if !TARGET_OS_OSX
    // Allow this object to recognize gestures
    if (self.menuItems != nil) {

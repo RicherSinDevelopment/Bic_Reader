@@ -5,6 +5,10 @@ import { VERTICAL_WORD_TARGET } from "@/architecture/anchor/VerticalWordTarget";
 import { READER_GUIDE_DIMMING_SCRIPT } from "@/architecture/ReaderGuideDimming";
 import { VERTICAL_ANCHOR_PROBE } from "@/architecture/anchor/VerticalAnchorProbe";
 import { ANCHOR_DEBUG } from "@/architecture/anchor/AnchorDiagnostics";
+import {
+  prioritizeVerticalBlocks,
+  takeCompletePageBatch,
+} from "@/architecture/PdfExtractionScheduling";
 import HorizontalReaderPager, {
   type PageAnchor,
   type ReaderNote,
@@ -240,15 +244,15 @@ function blocksToMarkup(blocks: ExtractedPdfBlock[]) {
 // forces WKWebView to reflow hundreds of pages at once and can terminate its
 // content process. Nearby pages preserve ordinary scrolling while keeping a
 // rotation comfortably bounded.
-const APPEND_AHEAD_PAGES = 24;
+const APPEND_AHEAD_PAGES = 6;
 // Keep a real buffer behind distant table-of-contents destinations. A real
 // buffer is stable while the reader scrolls; fabricated gap pages are not.
-const APPEND_BEHIND_PAGES = 48;
+const APPEND_BEHIND_PAGES = 4;
 // Retain enough history that a normal reader does not repeatedly delete and
 // reinsert sections while moving a few pages backward. The previous tiny
 // threshold caused corrective scrolls often enough to feel like the viewport
 // was taking control from the user.
-const PRUNE_BEHIND_PAGES = 48;
+const PRUNE_BEHIND_PAGES = 16;
 // Preserve the book's opening so native upward scrolling always has a real
 // document start. Without this, pruning after a deep jump makes the first
 // retained page become scroll offset zero and the title is unreachable.
@@ -562,19 +566,19 @@ const ReaderView = ({
     const focusPage = destinationPage ?? anchorPage;
     const windowStart = Math.max(1, focusPage - APPEND_BEHIND_PAGES);
     const windowEnd = focusPage + APPEND_AHEAD_PAGES;
-    const remaining = blocks.filter(
+    const remaining = prioritizeVerticalBlocks(blocks.filter(
       (block) =>
         block.page >= windowStart &&
         block.page <= windowEnd &&
         !sentBlockIds.current.has(block.id),
-    );
+    ), focusPage);
     // Append in page order. The destination lands after the pages in front of it
     // are already in the DOM, so a single scrollIntoView is stable instead of
     // landing on a sparse document and drifting as later batches insert above it.
-    // A single native-to-WebView message containing hundreds of blocks causes
-    // a long main-thread task on large PDFs. Keep each append small enough to
-    // preserve touch responsiveness; further batches are scheduled below.
-    const appended = remaining.slice(0, 48);
+    // Splitting a page by arbitrary block count causes the same section to
+    // reflow repeatedly and generates a scroll correction for every slice.
+    // Deliver at most two complete pages per mutation instead.
+    const appended = takeCompletePageBatch(remaining, 2);
     let highestAvailablePage = 0;
     blocks.forEach((block) => {
       if (
@@ -1747,10 +1751,12 @@ const ReaderView = ({
         ) {
           requestAnimationFrame(window.__refreshReaderPages);
         }
-        window.__renderReaderAnnotations(
-          message.highlights || [],
-          message.notes || []
-        );
+        if ((message.highlights?.length || 0) + (message.notes?.length || 0) > 0) {
+          window.__renderReaderAnnotations(
+            message.highlights || [],
+            message.notes || []
+          );
+        }
         // Include annotation layout in the compensation, after all DOM edits.
         const restoreAppendPosition = function() {
           if (viewportAnchor && Number.isFinite(anchorTop)) {

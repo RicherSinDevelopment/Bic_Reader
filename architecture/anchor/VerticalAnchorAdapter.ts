@@ -1,3 +1,4 @@
+import { TRANSITION_POLL_MS } from "./TransitionTiming";
 import type {
   AnchorAdapter,
   AnchorAdapterPorts,
@@ -81,7 +82,7 @@ export function createVerticalAnchorAdapter(
       const startedAt = Date.now();
       while (Date.now() - startedAt < 10_000) {
         if (ports.isReady(anchor)) return true;
-        await new Promise<void>((resolve) => setTimeout(resolve, 40));
+        await new Promise<void>((resolve) => setTimeout(resolve, TRANSITION_POLL_MS));
       }
       return false;
     },
@@ -108,7 +109,7 @@ export function createVerticalAnchorAdapter(
         } else {
           stableMatches = 0;
         }
-        await new Promise<void>((resolve) => setTimeout(resolve, 60));
+        await new Promise<void>((resolve) => setTimeout(resolve, TRANSITION_POLL_MS));
       }
       const actual = ports.actual();
       return { ok: false, expected, actual: actual ?? undefined };

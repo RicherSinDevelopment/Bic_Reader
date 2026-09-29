@@ -53,11 +53,12 @@ export default function ThreeLinesButton({
   const isDark = useColorScheme() === "dark";
   const styles = React.useMemo(() => createStyles(isDark), [isDark]);
   const updatePageInput = (value: string) => {
-    const digits = value.replace(/\D/g, "");
-    setPageInput(digits);
-
-    const page = Number.parseInt(digits, 10);
+    setPageInput(value.replace(/\D/g, ""));
+  };
+  const submitPageInput = () => {
+    const page = Number.parseInt(pageInput, 10);
     if (!Number.isFinite(page) || page < 1 || page > totalPages) return;
+    setShowDrawer(false);
     onGoToPage?.(page);
   };
 
@@ -175,11 +176,17 @@ export default function ThreeLinesButton({
                   value={pageInput}
                   onChangeText={updatePageInput}
                   keyboardType="number-pad"
+                  onSubmitEditing={submitPageInput}
+                  returnKeyType="go"
                   selectTextOnFocus
                   accessibilityLabel="Page number"
                   style={styles.pageInput}
                 />
                 <Text className="text-base text-black/60 dark:text-white/60">of {totalPages}</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel="Go to page"
+                  onPress={submitPageInput} style={styles.goButton}>
+                  <Text className="font-lato-bold text-white">Go</Text>
+                </Pressable>
               </View>
             </View>
           )}
@@ -219,6 +226,15 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+  },
+  goButton: {
+    minWidth: 44,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    backgroundColor: "#639B19",
   },
   pageInput: {
     width: 72,

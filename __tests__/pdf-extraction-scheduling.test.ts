@@ -1,4 +1,4 @@
-import { extractionRangeForDocument, nextOcrPrefetchPage, prioritizeHorizontalRequests, extractionFocusPage } from '@/architecture/PdfExtractionScheduling';
+import { extractionRangeForDocument, nextOcrPrefetchPage, prioritizeHorizontalRequests, prioritizeVerticalBlocks, takeCompletePageBatch, extractionFocusPage } from '@/architecture/PdfExtractionScheduling';
 import type { ExtractedPdfDocument } from '@/modules/bic-pdf-reader';
 const documentWith = (flags: object) => ({ pageCount: 4000, pages: [{ page: 1, requiresOcr: false, ...flags }] }) as ExtractedPdfDocument;
 test('digital documents retain chapter and background batches', () => {
@@ -29,6 +29,32 @@ test('idle OCR warms eight following and three preceding pages without re-extrac
 test('new horizontal location drops stale prefetch and serves closest pages first', () => {
   expect(prioritizeHorizontalRequests([2, 3, 110, 119, 116, 118, 117, 118, 200], 117))
     .toEqual([117, 118, 116, 119, 110]);
+});
+
+test('vertical delivery sends a distant destination before its surrounding buffer', () => {
+  const blocks = [
+    { id: 'p288-a', page: 288 },
+    { id: 'p291-a', page: 291 },
+    { id: 'p290-a', page: 290 },
+    { id: 'p291-b', page: 291 },
+    { id: 'p292-a', page: 292 },
+  ];
+  expect(prioritizeVerticalBlocks(blocks, 291).map(block => block.id)).toEqual([
+    'p291-a', 'p291-b', 'p290-a', 'p292-a', 'p288-a',
+  ]);
+});
+
+test('vertical batches keep source pages whole', () => {
+  const blocks = [
+    { id: 'p291-a', page: 291 },
+    { id: 'p291-b', page: 291 },
+    { id: 'p290-a', page: 290 },
+    { id: 'p290-b', page: 290 },
+    { id: 'p292-a', page: 292 },
+  ];
+  expect(takeCompletePageBatch(blocks, 2).map(block => block.id)).toEqual([
+    'p291-a', 'p291-b', 'p290-a', 'p290-b',
+  ]);
 });
 
 test('unloaded TOC destination survives pruning while the old page remains visible', () => {

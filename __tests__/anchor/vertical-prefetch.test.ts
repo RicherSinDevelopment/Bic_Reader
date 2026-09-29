@@ -6,8 +6,8 @@ const start = source.indexOf("      if (message.type === 'appendBlocks') {");
 const end = source.indexOf("      if (message.type === 'setSwitchHighlightVisible')", start);
 const script = source.slice(start, end)
   .replace(/\$\{PRESERVED_OPENING_PAGES\}/g, '5')
-  .replace(/\$\{APPEND_BEHIND_PAGES\}/g, '48')
-  .replace(/\$\{APPEND_AHEAD_PAGES\}/g, '24');
+  .replace(/\$\{APPEND_BEHIND_PAGES\}/g, '4')
+  .replace(/\$\{APPEND_AHEAD_PAGES\}/g, '6');
 
 function append(navigating: boolean) {
   const sections: any[] = [1, 20, 100].map(page => ({
@@ -71,7 +71,10 @@ test('queued prepends preserve one viewport anchor and compensate once for their
   };
   const deliver = new Function('window', 'document', 'message', script);
   for (const revision of [2, 3, 4]) {
-    deliver(window, document, { type: 'appendBlocks', revision, html: '' });
+    deliver(window, document, {
+      type: 'appendBlocks', revision, html: '',
+      highlights: [{ blockId: 'annotated' }], notes: [],
+    });
   }
   expect(window.scrollBy).not.toHaveBeenCalled();
   batch.restore();

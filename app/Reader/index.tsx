@@ -1389,10 +1389,11 @@ function ReaderScreenContent() {
       const block = latestReaderBlocks.current.find(
         (candidate) => candidate.id === anchor.blockId,
       );
+      if (!block || block.page !== sourcePage) return;
       const wordCount = block
         ? Array.from(block.text.matchAll(/\S+/g)).length
         : 0;
-      anchorController.publish(
+      const confirmed = anchorController.publish(
         {
           documentId: pdfId,
           sourcePage,
@@ -1403,8 +1404,13 @@ function ReaderScreenContent() {
         },
         "explicit-navigation",
       );
+      // Use the confirmed horizontal destination for both the header and the
+      // next layout handoff, even before the debounced observation is saved.
+      if (confirmed) actualReaderAnchor.current = confirmed;
+      setReaderCurrentPage(sourcePage);
+      setReaderDisplayCurrentPage(sourcePage);
     },
-    [pdfId],
+    [actualReaderAnchor, pdfId],
   );
   const visiblePage = activeTab === "original"
     ? originalCurrentPage
@@ -1560,6 +1566,8 @@ function ReaderScreenContent() {
       />}
       <Animated.View
         pointerEvents={isLandscape ? "none" : "auto"}
+        // Buttons claim their own touches; empty chrome must not reach the book.
+        onStartShouldSetResponder={() => true}
         accessibilityElementsHidden={isLandscape}
         importantForAccessibility={isLandscape ? "no-hide-descendants" : "auto"}
         style={{
@@ -1746,7 +1754,12 @@ function ReaderScreenContent() {
                     readerDestination.highlightDocumentStart)
                 }
                 onUnavailable={() => {
-                  recoveryAnchorRef.current = captureCanonicalAnchor();
+                  // During a TOC/search jump the visible page is transient
+                  // until WebKit finishes inserting the destination window.
+                  // Recover the requested anchor instead of that interim page.
+                  recoveryAnchorRef.current =
+                    useAnchorStore.getState().desiredAnchor ??
+                    captureCanonicalAnchor();
                   transitionController.cancel("vertical WebView terminated");
                   readerContentReadyRef.current = false;
                   setReaderContentReady(false);

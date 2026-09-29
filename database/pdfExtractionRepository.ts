@@ -5,8 +5,8 @@ import type {
 import type { SQLiteDatabase } from "expo-sqlite";
 import { withSerializedWrite } from "./serializedWriteTransaction";
 
-// Version 18 distinguishes narrow textbook marginalia from true columns.
-export const PDF_EXTRACTION_ENGINE_VERSION = 18;
+// Version 21 separates narrow definition gutters before building reading order.
+export const PDF_EXTRACTION_ENGINE_VERSION = 21;
 
 const extractionMemoryCache = new Map<string, ExtractedPdfDocument>();
 

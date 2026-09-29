@@ -1,3 +1,4 @@
+import { TRANSITION_POLL_MS } from "./TransitionTiming";
 import type { AnchorAdapter, CanonicalAnchor } from "./AnchorTypes";
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 
@@ -54,7 +55,7 @@ export function createOriginalAnchorAdapter(ports: {
       const startedAt = Date.now();
       while (Date.now() - startedAt < 10_000) {
         if (ports.isReady()) return true;
-        await new Promise<void>((resolve) => setTimeout(resolve, 40));
+        await new Promise<void>((resolve) => setTimeout(resolve, TRANSITION_POLL_MS));
       }
       return false;
     },
@@ -70,7 +71,7 @@ export function createOriginalAnchorAdapter(ports: {
           (ports.isDestinationAcknowledged && !ports.isDestinationAcknowledged(transitionId))) &&
           Date.now() - startedAt < 2500) {
         if (ports.isTransitionCurrent && !ports.isTransitionCurrent(transitionId)) return { ok: false, expected: anchor };
-        await new Promise<void>((resolve) => setTimeout(resolve, 40));
+        await new Promise<void>((resolve) => setTimeout(resolve, TRANSITION_POLL_MS));
       }
       const page = ports.currentPage();
       const actual: CanonicalAnchor = { ...anchor, sourcePage: page };

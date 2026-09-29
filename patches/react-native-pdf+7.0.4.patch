@@ -278,7 +278,7 @@ index 0000000..af8531b
 + 
 + #endif /* RNPDFPdfView_h */
 diff --git a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
-index de46c98..cba61fe 100644
+index de46c98..3667b92 100644
 --- a/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
 +++ b/node_modules/react-native-pdf/ios/RNPDFPdf/RNPDFPdfView.mm
 @@ -66,6 +66,8 @@ @implementation RNPDFPdfView
@@ -624,3 +624,11 @@ index de46c98..cba61fe 100644
      _pdfDocument = Nil;
      _pdfView = Nil;
  
+@@ -942,5 +1183,7 @@ - (void)setScrollIndicators:(UIView *)view horizontal:(BOOL)horizontal vertical:
+     if ([view isKindOfClass:[UIScrollView class]]) {
+         UIScrollView *scrollView = (UIScrollView *)view;
++        // Reader chrome taps must preserve the current document position.
++        scrollView.scrollsToTop = NO;
+         scrollView.showsHorizontalScrollIndicator = horizontal;
+         scrollView.showsVerticalScrollIndicator = vertical;
+     }

@@ -37,6 +37,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { deleteCurrentAccount } from '@/services/accountDeletionService';
 
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
@@ -119,10 +120,32 @@ export default function Profile() {
     setErrorMessage(null);
     setIsDeletingAccount(true);
     try {
-      await deleteCurrentAccount(db);
+      const usesAppleSignIn = session?.user.identities?.some(
+        (identity) => identity.provider === 'apple',
+      ) ?? false;
+      let appleAuthorizationCode: string | undefined;
+
+      if (usesAppleSignIn) {
+        const credential = await AppleAuthentication.signInAsync({
+          requestedScopes: [],
+        });
+        if (!credential.authorizationCode) {
+          throw new Error('Apple did not return the authorization needed to delete this account. Please try again.');
+        }
+        appleAuthorizationCode = credential.authorizationCode;
+      }
+
+      await deleteCurrentAccount(db, { appleAuthorizationCode });
       router.replace('/HomePage');
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Unable to delete your account. Please try again.');
+      const code = (error as { code?: unknown } | null)?.code;
+      setErrorMessage(
+        code === 'ERR_REQUEST_CANCELED'
+          ? 'Apple confirmation was canceled. Your account was not deleted.'
+          : error instanceof Error
+            ? error.message
+            : 'Unable to delete your account. Please try again.',
+      );
     } finally {
       setIsDeletingAccount(false);
     }

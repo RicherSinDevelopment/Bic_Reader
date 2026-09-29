@@ -20,6 +20,25 @@ has the configured premium entitlement.
      REVENUECAT_ENTITLEMENT_ID="pro"
    ```
 
+   Account deletion for users who signed in with Apple also requires the
+   Sign in with Apple key associated with the `com.bicreader.app` App ID. Keep
+   the `.p8` key server-side and preserve its line breaks as `\\n` when setting
+   the secret from a shell:
+
+   ```sh
+   supabase secrets set \
+     APPLE_CLIENT_ID="com.bicreader.app" \
+     APPLE_TEAM_ID="your-apple-team-id" \
+     APPLE_KEY_ID="your-sign-in-with-apple-key-id" \
+     APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----"
+   ```
+
+   The deletion function creates a short-lived Apple client secret at request
+   time, exchanges the user's fresh authorization code, verifies that the Apple
+   subject matches the authenticated Supabase identity, and revokes the token
+   before deleting the Supabase account. Never use an `EXPO_PUBLIC_` variable
+   for the Apple private key.
+
 3. In RevenueCat, add a webhook whose URL is:
 
    ```text

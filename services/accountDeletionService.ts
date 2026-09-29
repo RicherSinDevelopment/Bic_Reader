@@ -2,9 +2,21 @@ import { withSerializedWriteTransaction } from "@/database/serializedWriteTransa
 import { supabase } from "@/lib/supabase";
 import type { SQLiteDatabase } from "expo-sqlite";
 
-export async function deleteCurrentAccount(db: SQLiteDatabase) {
+type AccountDeletionOptions = {
+  appleAuthorizationCode?: string;
+};
+
+export async function deleteCurrentAccount(
+  db: SQLiteDatabase,
+  options: AccountDeletionOptions = {},
+) {
   const { data, error } = await supabase.functions.invoke("delete-account", {
-    body: { confirmation: "DELETE" },
+    body: {
+      confirmation: "DELETE",
+      ...(options.appleAuthorizationCode
+        ? { appleAuthorizationCode: options.appleAuthorizationCode }
+        : {}),
+    },
   });
   if (error || data?.deleted !== true) {
     throw new Error(

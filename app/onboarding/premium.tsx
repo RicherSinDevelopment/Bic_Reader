@@ -229,6 +229,12 @@ export default function PremiumOnboardingScreen() {
             <Text style={styles.continueFreeText}>Continue Free</Text>
           </Pressable>
 
+          {!isPremium ? (
+            <Text style={styles.renewalDisclosure}>
+              Payment will be charged to your Apple Account at confirmation. Subscription automatically renews unless canceled at least 24 hours before the end of the current period. You can manage or cancel your subscription in Apple Account settings.
+            </Text>
+          ) : null}
+
           <View style={styles.linkRow}>
             {!isPremium ? (
               <Pressable disabled={isRestoring} onPress={() => void handleRestore()} hitSlop={8}>
@@ -343,6 +349,7 @@ const styles = StyleSheet.create({
   premiumButtonText: { color: '#FFFFFF', fontFamily: 'Lato_700Bold', fontSize: 17 },
   continueFreeButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   continueFreeText: { color: '#3F5F1E', fontFamily: 'Lato_700Bold', fontSize: 15 },
+  renewalDisclosure: { marginBottom: 7, paddingHorizontal: 4, textAlign: 'center', color: '#747C6D', fontFamily: 'SourceSans3_400Regular', fontSize: 11.5, lineHeight: 16 },
   linkRow: { minHeight: 25, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', columnGap: 8, rowGap: 6 },
   footerLink: { color: '#747C6D', fontFamily: 'SourceSans3_400Regular', fontSize: 12.5, textDecorationLine: 'underline' },
   linkDivider: { color: '#B0B4AB', fontSize: 11 },

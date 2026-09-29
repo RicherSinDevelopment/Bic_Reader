@@ -30,4 +30,19 @@ describe("account deletion", () => {
     expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
     expect(mockSignOut).not.toHaveBeenCalled();
   });
+
+  test("sends a one-time Apple authorization code for token revocation", async () => {
+    mockInvoke.mockResolvedValue({ data: { deleted: true }, error: null });
+    const transaction = { runAsync: jest.fn().mockResolvedValue(undefined) };
+    const db = { withExclusiveTransactionAsync: jest.fn((task) => task(transaction)) } as any;
+
+    await deleteCurrentAccount(db, { appleAuthorizationCode: "one-time-code" });
+
+    expect(mockInvoke).toHaveBeenCalledWith("delete-account", {
+      body: {
+        confirmation: "DELETE",
+        appleAuthorizationCode: "one-time-code",
+      },
+    });
+  });
 });

@@ -204,3 +204,23 @@ test('explicit navigation settlement can deliberately transfer boundary ownershi
   listeners.scroll();
   expect(window.scrollY).toBe(1200);
 });
+
+test('boundary correction acknowledgements do not repeatedly request the same unloaded page', () => {
+  const { window, listeners } = reader();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    window.scrollY = 3250;
+    listeners.scroll();
+    expect(window.scrollY).toBe(3200);
+    // Native acknowledgement of the programmatic correction.
+    listeners.scroll();
+  }
+  const requests = () => window.ReactNativeWebView.postMessage.mock.calls.filter(
+    ([message]: [string]) => JSON.parse(message).type === 'readerBoundaryPage');
+  expect(requests()).toHaveLength(1);
+  // Moving away and returning can request again (for example after a failed load).
+  window.scrollY = 3000;
+  listeners.scroll();
+  window.scrollY = 3250;
+  listeners.scroll();
+  expect(requests()).toHaveLength(2);
+});

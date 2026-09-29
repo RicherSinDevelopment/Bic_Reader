@@ -1236,7 +1236,7 @@ const ReaderView = ({
             width: 100%;
             min-height: 100%;
 
-            overscroll-behavior-y: auto;
+            overscroll-behavior-y: none;
             touch-action: pan-y;
             /* Position preservation is handled explicitly when blocks are
                inserted/pruned. Disable WebKit's second automatic adjustment,
@@ -3139,7 +3139,7 @@ const ReaderView = ({
                     /*
                      * Native bounce behavior.
                      */
-                    bounces={!isPaged}
+                    bounces={false}
                     /*
                      * Smooth iOS scrolling.
                      */
@@ -3147,7 +3147,7 @@ const ReaderView = ({
                     /*
                      * Android overscroll.
                      */
-                    overScrollMode={isPaged ? "never" : "always"}
+                    overScrollMode="never"
                     showsVerticalScrollIndicator={!isPaged}
                     /*
                      * JavaScript required for:

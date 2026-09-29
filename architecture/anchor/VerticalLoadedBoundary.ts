@@ -68,7 +68,15 @@ export const VERTICAL_LOADED_BOUNDARY = String.raw`
     const range = bounds();
     if (!range) return false;
     const next = Math.max(range.min, Math.min(range.max, target));
-    if (Math.abs(next - target) < 0.5) { requestedPage = null; capture(); return false; }
+    if (Math.abs(next - target) < 0.5) {
+      // scrollTo emits another scroll event at the boundary. That acknowledgement
+      // must not rearm requests: native momentum can overshoot again before it
+      // stops. Rearm only after moving back inside, or after delivery expands
+      // the loaded range around this position.
+      if (target > range.min + 1 && target < range.max - 1) requestedPage = null;
+      capture();
+      return false;
+    }
     const page = Number((target < range.min ? range.first : range.last).dataset.sourcePageSection);
     if (requestedPage !== page) {
       requestedPage = page;

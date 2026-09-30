@@ -1,5 +1,49 @@
 import type { ExtractedPdfDocument } from "@/modules/bic-pdf-reader";
 
+export const MAX_NATIVE_PDF_PAGE = 65_535;
+
+/** Return a safe, one-based source page or null for an unusable value. */
+export function sanitizeSourcePage(page: number, pageCount?: number) {
+  if (!Number.isFinite(page)) return null;
+  const integerPage = Math.trunc(page);
+  if (integerPage < 1) return null;
+  const finitePageCount = Number.isFinite(pageCount)
+    ? Math.max(1, Math.trunc(pageCount!))
+    : MAX_NATIVE_PDF_PAGE;
+  return Math.min(integerPage, finitePageCount, MAX_NATIVE_PDF_PAGE);
+}
+
+/** Seed a recreated reader runtime near its last known page, never page 1 by accident. */
+export function readerRuntimeSeedBlocks<T extends { page: number }>(
+  blocks: T[],
+  focusPage?: number,
+) {
+  const firstAvailablePage = blocks[0]?.page ?? 1;
+  const safeFocus = typeof focusPage === "number" &&
+      Number.isFinite(focusPage) && focusPage >= 1
+    ? Math.trunc(focusPage)
+    : firstAvailablePage;
+  const start = Math.max(1, safeFocus - 4);
+  const end = safeFocus + 6;
+  const focused = blocks.filter((block) => block.page >= start && block.page <= end);
+  return focused.length > 0
+    ? focused
+    : blocks.filter((block) => block.page < firstAvailablePage + 5);
+}
+
+/** Validate values before Expo attempts to bridge JavaScript numbers to Swift. */
+export function validateNativeExtractionRange(firstPage: number, maxPages: number) {
+  if (!Number.isFinite(firstPage) || !Number.isInteger(firstPage) ||
+      firstPage < 0 || firstPage > MAX_NATIVE_PDF_PAGE) {
+    throw new RangeError("PDF extraction start page is invalid.");
+  }
+  if (!Number.isFinite(maxPages) || !Number.isInteger(maxPages) ||
+      maxPages < 1 || maxPages > MAX_NATIVE_PDF_PAGE) {
+    throw new RangeError("PDF extraction page count is invalid.");
+  }
+  return { firstPage, maxPages };
+}
+
 /** Yield between slow OCR pages so a new navigation can take priority. */
 export function extractionRangeForDocument(
   document: ExtractedPdfDocument | null,

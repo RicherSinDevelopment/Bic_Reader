@@ -1,4 +1,15 @@
-import { extractionRangeForDocument, nextOcrPrefetchPage, prioritizeHorizontalRequests, prioritizeVerticalBlocks, takeCompletePageBatch, extractionFocusPage } from '@/architecture/PdfExtractionScheduling';
+import {
+  MAX_NATIVE_PDF_PAGE,
+  extractionFocusPage,
+  extractionRangeForDocument,
+  nextOcrPrefetchPage,
+  prioritizeHorizontalRequests,
+  prioritizeVerticalBlocks,
+  readerRuntimeSeedBlocks,
+  sanitizeSourcePage,
+  takeCompletePageBatch,
+  validateNativeExtractionRange,
+} from '@/architecture/PdfExtractionScheduling';
 import type { ExtractedPdfDocument } from '@/modules/bic-pdf-reader';
 const documentWith = (flags: object) => ({ pageCount: 4000, pages: [{ page: 1, requiresOcr: false, ...flags }] }) as ExtractedPdfDocument;
 test('digital documents retain chapter and background batches', () => {
@@ -64,4 +75,52 @@ test('unloaded TOC destination survives pruning while the old page remains visib
   expect(prioritizeHorizontalRequests([980, 2541, 2539], focus)).toEqual([980]);
   expect(extractionFocusPage(null, current)).toBe(2540);
   expect(extractionFocusPage({ sourcePage: 117 }, current)).toBe(117);
+});
+
+test('invalid queued pages are rejected before reaching native extraction', () => {
+  expect(sanitizeSourcePage(Number.NaN, 100)).toBeNull();
+  expect(sanitizeSourcePage(Number.POSITIVE_INFINITY, 100)).toBeNull();
+  expect(sanitizeSourcePage(Number.NEGATIVE_INFINITY, 100)).toBeNull();
+  expect(sanitizeSourcePage(0, 100)).toBeNull();
+  expect(sanitizeSourcePage(-20, 100)).toBeNull();
+});
+
+test('valid queued pages are normalized and clamped to safe bounds', () => {
+  expect(sanitizeSourcePage(12.9, 100)).toBe(12);
+  expect(sanitizeSourcePage(Number.MAX_VALUE, 100)).toBe(100);
+  expect(sanitizeSourcePage(90_000)).toBe(MAX_NATIVE_PDF_PAGE);
+  expect(sanitizeSourcePage(90_000, 125)).toBe(125);
+});
+
+test('native extraction range rejects values that could trap Swift conversion', () => {
+  const invalidValues = [
+    undefined,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    Number.MAX_VALUE,
+    -1,
+    1.5,
+  ];
+
+  for (const value of invalidValues) {
+    expect(() => validateNativeExtractionRange(value as number, 1)).toThrow(RangeError);
+    expect(() => validateNativeExtractionRange(0, value as number)).toThrow(RangeError);
+  }
+  expect(() => validateNativeExtractionRange(0, 0)).toThrow(RangeError);
+  expect(validateNativeExtractionRange(0, 7)).toEqual({ firstPage: 0, maxPages: 7 });
+  expect(validateNativeExtractionRange(MAX_NATIVE_PDF_PAGE, MAX_NATIVE_PDF_PAGE))
+    .toEqual({ firstPage: MAX_NATIVE_PDF_PAGE, maxPages: MAX_NATIVE_PDF_PAGE });
+});
+
+test('a recreated reader runtime is seeded around the last visible page', () => {
+  const blocks = Array.from({ length: 2600 }, (_, index) => ({
+    id: `p${index + 1}`,
+    page: index + 1,
+  }));
+  const seed = readerRuntimeSeedBlocks(blocks, 2554);
+  expect(seed[0].page).toBe(2550);
+  expect(seed.at(-1)?.page).toBe(2560);
+  expect(seed.some((block) => block.page === 1)).toBe(false);
+  expect(seed.some((block) => block.page === 2554)).toBe(true);
 });

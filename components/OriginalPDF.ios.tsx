@@ -1,4 +1,8 @@
 import { Text } from "@/components/ui/text";
+import {
+  convertNativePdfOutline,
+  type PdfOutlineItem,
+} from "@/architecture/PdfOutline";
 import { hasExactOriginalDestination } from "@/architecture/anchor/OriginalNavigation";
 import type { SwitchHighlightTarget } from "@/hooks/switchhighlight";
 import { usePdfKitHighlight } from "@/hooks/usePdfKitHighlight";
@@ -20,21 +24,7 @@ type OriginalPdfProps = {
   destination?: { page: number; nonce: number } | null;
 };
 
-export type PdfOutlineItem = {
-  title: string;
-  page: number;
-  children: PdfOutlineItem[];
-};
-
-function convertOutline(items?: TableContent[]): PdfOutlineItem[] {
-  return (items ?? [])
-    .map((item) => ({
-      title: item.title.trim(),
-      page: Math.max(1, Number(item.pageIdx) + 1),
-      children: convertOutline(item.children),
-    }))
-    .filter((item) => item.title.length > 0);
-}
+export type { PdfOutlineItem } from "@/architecture/PdfOutline";
 
 function getErrorMessage(error: object) {
   if (error instanceof Error) return error.message;
@@ -96,7 +86,7 @@ export default function OriginalPDF({
       setLoading(false);
       markDocumentReady();
       onReady?.();
-      onOutlineChanged?.(convertOutline(tableContents));
+      onOutlineChanged?.(convertNativePdfOutline(tableContents, totalPages));
       onPageChanged?.(Math.max(1, documentInitialPage), totalPages);
     },
     [documentInitialPage, markDocumentReady, onOutlineChanged, onPageChanged, onReady],

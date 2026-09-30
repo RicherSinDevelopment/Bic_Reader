@@ -34,11 +34,23 @@ public final class BicPdfReaderModule: Module {
 #endif
     }
 
-    AsyncFunction("extractDocumentRange") { (path: String, firstPage: Int, maxPages: Int) throws -> String in
+    // Accept Double at the Expo bridge boundary. Expo converts arguments before
+    // entering this closure, and converting NaN/Infinity directly to Swift Int
+    // is a fatal trap. Validate the dynamic numbers first, then convert safely.
+    AsyncFunction("extractDocumentRange") { (path: String, firstPageValue: Double, maxPagesValue: Double) throws -> String in
 #if BIC_PDF_RUST_LINKED
-      guard firstPage >= 0, firstPage <= Int(UInt16.max), maxPages > 0, maxPages <= Int(UInt16.max) else {
+      guard firstPageValue.isFinite,
+            maxPagesValue.isFinite,
+            firstPageValue.rounded(.towardZero) == firstPageValue,
+            maxPagesValue.rounded(.towardZero) == maxPagesValue,
+            firstPageValue >= 0,
+            firstPageValue <= Double(UInt16.max),
+            maxPagesValue > 0,
+            maxPagesValue <= Double(UInt16.max) else {
         throw ExtractionException("Invalid extraction page range")
       }
+      let firstPage = Int(firstPageValue)
+      let maxPages = Int(maxPagesValue)
       guard let result = bic_pdf_extract_document_range_bridge(
         path,
         UInt16(firstPage),

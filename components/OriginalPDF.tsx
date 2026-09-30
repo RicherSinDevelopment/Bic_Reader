@@ -1,4 +1,8 @@
 import { Text } from "@/components/ui/text";
+import {
+  sanitizePdfOutline,
+  type PdfOutlineItem,
+} from "@/architecture/PdfOutline";
 import type { SwitchHighlightTarget } from "@/hooks/switchhighlight";
 import { Asset } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
@@ -33,11 +37,7 @@ type OriginalPdfProps = {
   resetZoomNonce?: number;
 };
 
-export type PdfOutlineItem = {
-  title: string;
-  page: number;
-  children: PdfOutlineItem[];
-};
+export type { PdfOutlineItem } from "@/architecture/PdfOutline";
 
 type PdfJsSources = { library: string; worker: string };
 
@@ -219,7 +219,7 @@ export default function OriginalPDF({
       } else if (message.type === "pageChanged") {
         onPageChanged?.(Number(message.page), Number(message.totalPages));
       } else if (message.type === "outline") {
-        onOutlineChanged?.((message.outline as PdfOutlineItem[]) ?? []);
+        onOutlineChanged?.(sanitizePdfOutline(message.outline));
       } else if (message.type === "error") {
         setErrorMessage(String(message.message ?? "Preview unavailable."));
       }

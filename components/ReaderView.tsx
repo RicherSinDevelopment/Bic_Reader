@@ -7,6 +7,7 @@ import { VERTICAL_ANCHOR_PROBE } from "@/architecture/anchor/VerticalAnchorProbe
 import { ANCHOR_DEBUG } from "@/architecture/anchor/AnchorDiagnostics";
 import {
   prioritizeVerticalBlocks,
+  readerRuntimeSeedBlocks,
   takeCompletePageBatch,
 } from "@/architecture/PdfExtractionScheduling";
 import HorizontalReaderPager, {
@@ -339,16 +340,19 @@ const ReaderView = ({
     const textPages = new Set(blocks.map((block) => block.page));
     return Object.keys(extractedPageSizes ?? {}).map(Number).filter((page) => !textPages.has(page));
   }, [blocks, extractedPageSizes]);
-  const [initialBlocks] = useState(() => {
-    const firstPage = blocks[0]?.page ?? 1;
-    return blocks.filter((block) => block.page < firstPage + 5);
-  });
-  const readerMarkup = useMemo(
-    () => blocksToMarkup(initialBlocks),
-    [initialBlocks],
+  const [runtimeSeedBlocks, setRuntimeSeedBlocks] = useState(() =>
+    readerRuntimeSeedBlocks(blocks),
   );
-  const appendedBlockCount = useRef(initialBlocks.length);
-  const sentBlockIds = useRef(new Set(initialBlocks.map((block) => block.id)));
+  // A recreated WebView must start with the persisted typography already in
+  // its HTML. Waiting for a postMessage leaves one layout pass at the 18px
+  // fallback and can make WebKit preserve that smaller landscape geometry.
+  const runtimeTypographyRef = useRef(useReaderSettingsStore.getState());
+  const readerMarkup = useMemo(
+    () => blocksToMarkup(runtimeSeedBlocks),
+    [runtimeSeedBlocks],
+  );
+  const appendedBlockCount = useRef(runtimeSeedBlocks.length);
+  const sentBlockIds = useRef(new Set(runtimeSeedBlocks.map((block) => block.id)));
   const annotationDeliveryRevisionRef = useRef(0);
   const lastSourcePageRef = useRef(1);
   const deliveredNavigationId = useRef<number | null>(null);
@@ -358,6 +362,9 @@ const ReaderView = ({
   const [runtimeId, setRuntimeId] = useState(0);
   const runtimeIdRef = useRef(0);
   const awaitingRecoveryRestore = useRef(false);
+  const readerViewportWidthRef = useRef(windowWidth);
+  const viewportSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [verticalViewportSettling, setVerticalViewportSettling] = useState(false);
   const [appendPass, setAppendPass] = useState(0);
   const [highlightPickerVisible, setHighlightPickerVisible] = useState(false);
   const [pagerHighlights, setPagerHighlights] = useState<
@@ -550,8 +557,55 @@ const ReaderView = ({
   // renderer adapter. ReaderView no longer invents a second handoff anchor.
   const activeModeDestination = destination;
 
+  const rebuildVerticalRuntime = useCallback(() => {
+    const recoveryPage = Math.max(
+      1,
+      lastSourcePageRef.current || currentSourcePage || 1,
+    );
+    const recoverySeed = readerRuntimeSeedBlocks(blocks, recoveryPage);
+    runtimeTypographyRef.current = useReaderSettingsStore.getState();
+    // Capture the semantic anchor in the parent before replacing the runtime.
+    // The replacement is deliberately treated as recovery so its temporary
+    // initial position cannot publish over the saved location.
+    onUnavailable?.();
+    runtimeIdRef.current += 1;
+    awaitingRecoveryRestore.current = true;
+    appendedBlockCount.current = recoverySeed.length;
+    sentBlockIds.current = new Set(recoverySeed.map((block) => block.id));
+    setWebViewReady(false);
+    setRuntimeSeedBlocks(recoverySeed);
+    setRuntimeId(runtimeIdRef.current);
+  }, [blocks, currentSourcePage, onUnavailable]);
+
+  useLayoutEffect(() => {
+    if (Math.abs(readerViewportWidthRef.current - windowWidth) < 1) return;
+    readerViewportWidthRef.current = windowWidth;
+    if (isPaged) return;
+    setVerticalViewportSettling(true);
+    if (viewportSettleTimerRef.current) {
+      clearTimeout(viewportSettleTimerRef.current);
+    }
+    // The WebView reports the real settled point below. This is only a safety
+    // fallback for a terminated runtime that cannot send that acknowledgement.
+    viewportSettleTimerRef.current = setTimeout(() => {
+      viewportSettleTimerRef.current = null;
+      setVerticalViewportSettling(false);
+    }, 1_200);
+    // A deep reader may contain hundreds of old placeholder sections. Asking
+    // WebKit to reflow that accumulated DOM is what triggers the iOS content
+    // process kill. Recreate a compact runtime around the saved page instead;
+    // the normal recovery transition restores the exact word afterward.
+    rebuildVerticalRuntime();
+  }, [isPaged, rebuildVerticalRuntime, windowWidth]);
+
+  useEffect(() => () => {
+    if (viewportSettleTimerRef.current) {
+      clearTimeout(viewportSettleTimerRef.current);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!webViewReady || isPaged || !isActive) return;
+    if (!webViewReady || isPaged || !isActive || verticalViewportSettling) return;
     const revision = ++annotationDeliveryRevisionRef.current;
     // Only send the window of the book around the current position (plus any
     // pending navigation target). The JS prunes sections far behind the view;
@@ -635,6 +689,7 @@ const ReaderView = ({
     pagerHighlights,
     readerNotes,
     sourcePageCount,
+    verticalViewportSettling,
     webViewReady,
   ]);
 
@@ -659,9 +714,9 @@ const ReaderView = ({
     // it recovery would start a second restore over the layout handoff.
     hasCompletedInitialWebViewLoad.current = false;
     setWebViewReady(false);
-    appendedBlockCount.current = initialBlocks.length;
-    sentBlockIds.current = new Set(initialBlocks.map((block) => block.id));
-  }, [initialBlocks, isPaged]);
+    appendedBlockCount.current = runtimeSeedBlocks.length;
+    sentBlockIds.current = new Set(runtimeSeedBlocks.map((block) => block.id));
+  }, [isPaged, runtimeSeedBlocks]);
 
   const highlightSpokenWord = useCallback(
     (charIndex: number, charLength: number) => {
@@ -992,7 +1047,6 @@ const ReaderView = ({
     syncPageTransition();
     if (!activeModeDestination) return;
     const frame = requestAnimationFrame(() => {
-      awaitingRecoveryRestore.current = false;
       deliveredNavigationId.current = activeModeDestination.nonce;
       webViewRef.current?.postMessage(verticalRestoreMessage(activeModeDestination));
     });
@@ -1182,8 +1236,24 @@ const ReaderView = ({
   // HTML READER
   // --------------------------------
 
-  const htmlContent = useMemo(
-    () => `
+  const htmlContent = useMemo(() => {
+    const initialTypography = runtimeTypographyRef.current;
+    const initialFontFamily = initialTypography.fontFamily === "Lato_700Bold"
+      ? "LatoReaderBold"
+      : initialTypography.fontFamily === "SourceSans3_400Regular"
+        ? "SourceSansReader"
+        : initialTypography.fontFamily;
+    const initialVerticalMargin = {
+      compact: 12,
+      comfortable: 24,
+      relaxed: 48,
+    }[initialTypography.verticalMarginPreset] ?? 24;
+    const initialHorizontalMargin = {
+      compact: 14,
+      comfortable: 28,
+      relaxed: 52,
+    }[initialTypography.horizontalMarginPreset] ?? 28;
+    return `
     <!DOCTYPE html>
 
     <html lang="${readerLanguageCode}" dir="${readerDirection}">
@@ -1219,11 +1289,11 @@ const ReaderView = ({
           }
 
           :root {
-            --paragraph-spacing: 0.65em;
-            --reader-side-padding: 28px;
-            --reader-top-padding: 24px;
+            --paragraph-spacing: ${initialTypography.paragraphSpacing}em;
+            --reader-side-padding: ${initialHorizontalMargin}px;
+            --reader-top-padding: ${initialVerticalMargin}px;
             --reader-header-start-inset: 0px;
-            --reader-bottom-padding: 160px;
+            --reader-bottom-padding: ${initialVerticalMargin + 136}px;
           }
 
           html,
@@ -1242,6 +1312,10 @@ const ReaderView = ({
                inserted/pruned. Disable WebKit's second automatic adjustment,
                which otherwise makes the viewport jump twice. */
             overflow-anchor: none;
+            /* Never let WKWebView reinterpret the chosen reader font size
+               when the device changes orientation. */
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
           }
 
           body {
@@ -1251,11 +1325,17 @@ const ReaderView = ({
 
             color: #1e293b;
 
-            font-family: 'SourceSansReader', Arial, sans-serif;
+            font-family: ${JSON.stringify(initialFontFamily)}, Arial, sans-serif;
 
-            font-size: 18px;
+            font-size: ${initialTypography.fontSize}px;
 
-            line-height: 1.6;
+            line-height: ${initialTypography.lineHeight};
+
+            letter-spacing: ${initialTypography.letterSpacing}px;
+            word-spacing: ${initialTypography.wordSpacing}px;
+            font-weight: ${initialTypography.bold ? "bold" : "normal"};
+            -webkit-hyphens: ${initialTypography.automaticHyphenation ? "auto" : "manual"};
+            hyphens: ${initialTypography.automaticHyphenation ? "auto" : "manual"};
 
             /*
              * Allow text selection.
@@ -2394,15 +2474,14 @@ const ReaderView = ({
       </body>
 
     </html>
-  `,
-    [
+  `;
+  }, [
       latoBoldBase64,
       readerDirection,
       readerLanguageCode,
       readerMarkup,
       sourceSansBase64,
-    ],
-  );
+    ]);
 
   const webViewSource = useMemo(() => ({ html: htmlContent }), [htmlContent]);
 
@@ -2471,7 +2550,23 @@ const ReaderView = ({
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.runtimeId !== undefined && data.runtimeId !== runtimeIdRef.current) return;
-      if (awaitingRecoveryRestore.current && (data.type === "switchAnchor" || data.type === "scroll")) return;
+      if (awaitingRecoveryRestore.current && data.type === "scroll") return;
+      if (awaitingRecoveryRestore.current && data.type === "switchAnchor") {
+        // A replacement WebView starts at the top of its seed HTML. Do not let
+        // that temporary location overwrite the saved reading position. Only
+        // the explicitly delivered recovery destination may resume reporting.
+        if (!activeModeDestination ||
+            data.navigationId !== activeModeDestination.nonce) return;
+        awaitingRecoveryRestore.current = false;
+        if (verticalViewportSettling) {
+          if (viewportSettleTimerRef.current) {
+            clearTimeout(viewportSettleTimerRef.current);
+            viewportSettleTimerRef.current = null;
+          }
+          setVerticalViewportSettling(false);
+          onVerticalRotationSettled?.(true);
+        }
+      }
 
       if (data.type === "readerRuntimeReady") {
         if (__DEV__) console.info("[Reader Runtime]", { version: data.version, runtimeId: data.runtimeId });
@@ -2487,6 +2582,11 @@ const ReaderView = ({
       }
 
       if (data.type === "verticalRotationSettled") {
+        if (viewportSettleTimerRef.current) {
+          clearTimeout(viewportSettleTimerRef.current);
+          viewportSettleTimerRef.current = null;
+        }
+        setVerticalViewportSettling(false);
         onVerticalRotationSettled?.(data.ok !== false);
         return;
       }
@@ -3116,9 +3216,6 @@ const ReaderView = ({
                     onLoadEnd={handleReaderLoadEnd}
                     onContentProcessDidTerminate={() => {
                       if (runtimeId !== runtimeIdRef.current) return;
-                      runtimeIdRef.current += 1;
-                      awaitingRecoveryRestore.current = true;
-                      onUnavailable?.();
                       addSafeBreadcrumb(
                         "bic.webview",
                         "content-process-terminated",
@@ -3129,12 +3226,7 @@ const ReaderView = ({
                         surface: "vertical-reader",
                         recovery: "reload",
                       });
-                      appendedBlockCount.current = initialBlocks.length;
-                      sentBlockIds.current = new Set(
-                        initialBlocks.map((block) => block.id),
-                      );
-                      setWebViewReady(false);
-                      setRuntimeId(runtimeIdRef.current);
+                      rebuildVerticalRuntime();
                     }}
                     /*
                      * Native scrolling.

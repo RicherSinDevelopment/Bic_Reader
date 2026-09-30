@@ -1,4 +1,5 @@
 import { requireOptionalNativeModule } from "expo";
+import { validateNativeExtractionRange } from "@/architecture/PdfExtractionScheduling";
 
 export type PdfBlockKind =
   | "title" | "heading" | "paragraph" | "listItem"
@@ -64,10 +65,11 @@ export async function extractPdfDocumentRange(
   maxPages: number,
 ): Promise<ExtractedPdfDocument> {
   if (!native) throw new Error("PDF extraction is available in the iOS development build.");
+  const range = validateNativeExtractionRange(firstPage, maxPages);
   const response = JSON.parse(await native.extractDocumentRange(
     normalizeFilePath(path),
-    firstPage,
-    maxPages,
+    range.firstPage,
+    range.maxPages,
   )) as NativeResponse;
   if (!response.ok || !response.data) throw new Error(response.error ?? "PDF extraction failed");
   return response.data;

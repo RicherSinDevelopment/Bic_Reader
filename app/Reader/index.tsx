@@ -1,10 +1,11 @@
 import { useIsFocused } from "@react-navigation/native";
 import { captureVisiblePosition } from "@/architecture/anchor/VisiblePosition";
-import { extractionRangeForDocument, nextOcrPrefetchPage, prioritizeHorizontalRequests, extractionFocusPage } from "@/architecture/PdfExtractionScheduling";
+import { extractionRangeForDocument, nextOcrPrefetchPage, prioritizeHorizontalRequests, extractionFocusPage, sanitizeSourcePage } from "@/architecture/PdfExtractionScheduling";
 import { pageStartAnchor, resolveAnchor } from "@/architecture/anchor/AnchorResolution";
 import BackButton from "@/components/Backbutton";
 import { AppErrorBoundary } from "@/components/errors/AppErrorBoundary";
-import OriginalPDF, { type PdfOutlineItem } from "@/components/OriginalPDF";
+import OriginalPDF from "@/components/OriginalPDF";
+import type { PdfOutlineItem } from "@/architecture/PdfOutline";
 import ReaderView from "@/components/ReaderView";
 import ReaderSearchButton from "@/components/ReaderSearchButton";
 import ReaderModeTabs, {
@@ -706,6 +707,9 @@ function ReaderScreenContent() {
           const extractionFocus = extractionFocusPage(
             useAnchorStore.getState().desiredAnchor, anchorController.current(),
           );
+          requestedExtractionPages.current = requestedExtractionPages.current
+            .map((page) => sanitizeSourcePage(page, pageCount))
+            .filter((page): page is number => page !== null);
           if (useReaderSettingsStore.getState().transition === "pager") {
             requestedExtractionPages.current = prioritizeHorizontalRequests(
               requestedExtractionPages.current, extractionFocus,
@@ -1010,7 +1014,13 @@ function ReaderScreenContent() {
             );
           }
           const pageAvailable = () => Boolean(latestReaderPageSizes.current[anchor.sourcePage]);
-          if (!pageAvailable()) requestedExtractionPages.current.unshift(anchor.sourcePage);
+          const requestedAnchorPage = sanitizeSourcePage(
+            anchor.sourcePage,
+            latestReaderPageCount.current || pdf?.totalPages || undefined,
+          );
+          if (!pageAvailable() && requestedAnchorPage !== null) {
+            requestedExtractionPages.current.unshift(requestedAnchorPage);
+          }
           const ready = await waitForCurrentTransition(transitionId,
             () => readerContentReadyRef.current && pageAvailable());
           if (!ready) return false;
@@ -1438,10 +1448,17 @@ function ReaderScreenContent() {
       searchMatchIndex?: number,
     ) => {
       if (!pdfId) return;
+      const safePage = sanitizeSourcePage(
+        page,
+        pdf?.totalPages || readerPageCount || undefined,
+      );
+      if (safePage === null) return;
       const targetBlock = blockId
-        ? latestReaderBlocks.current.find((block) => block.id === blockId)
+        ? latestReaderBlocks.current.find(
+            (block) => block.id === blockId && block.page === safePage,
+          )
         : latestReaderBlocks.current.find(
-            (block) => block.page === page && block.text.trim(),
+            (block) => block.page === safePage && block.text.trim(),
           );
       const words = targetBlock
         ? Array.from(targetBlock.text.matchAll(/\S+/g))
@@ -1461,7 +1478,7 @@ function ReaderScreenContent() {
       anchorController.navigate(
         {
           documentId: pdfId,
-          sourcePage: targetBlock?.page ?? page,
+          sourcePage: targetBlock?.page ?? safePage,
           sourceBlockId: targetBlock?.id,
           wordIndex,
           characterOffset,
@@ -1474,7 +1491,7 @@ function ReaderScreenContent() {
         },
         searchQuery ? "search" : "explicit-navigation",
       );
-      requestedExtractionPages.current.push(page);
+      requestedExtractionPages.current.push(safePage);
       void runAnchorTransition(
         "reader",
         readerTransition === "pager" ? "horizontal" : "vertical",
@@ -1485,23 +1502,28 @@ function ReaderScreenContent() {
         },
       );
     },
-    [pdfId, readerTransition, runAnchorTransition],
+    [pdf?.totalPages, pdfId, readerPageCount, readerTransition, runAnchorTransition],
   );
 
   const goToNavigationPage = useCallback(
     (page: number, blockId?: string) => {
       if (!pdfId) return;
-      tocNavigation.current = { startedAt: Date.now(), targetPage: page };
+      const safePage = sanitizeSourcePage(
+        page,
+        pdf?.totalPages || readerPageCount || undefined,
+      );
+      if (safePage === null) return;
+      tocNavigation.current = { startedAt: Date.now(), targetPage: safePage };
       reportTocNavigation("requested");
       const block = blockId
-        ? latestReaderBlocks.current.find((item) => item.id === blockId && item.page === page)
+        ? latestReaderBlocks.current.find((item) => item.id === blockId && item.page === safePage)
         : undefined;
       anchorController.navigate(
-        block ? { ...pageStartAnchor(pdfId, page, latestReaderBlocks.current), sourceBlockId: block.id } :
-          pageStartAnchor(pdfId, page, latestReaderBlocks.current),
+        block ? { ...pageStartAnchor(pdfId, safePage, latestReaderBlocks.current), sourceBlockId: block.id } :
+          pageStartAnchor(pdfId, safePage, latestReaderBlocks.current),
         "toc",
       );
-      requestedExtractionPages.current.unshift(page);
+      requestedExtractionPages.current.unshift(safePage);
       void runAnchorTransition(
         activeTabRef.current,
         undefined,
@@ -1509,7 +1531,7 @@ function ReaderScreenContent() {
         { suppressSwitchHighlight: true, pageTop: true },
       );
     },
-    [pdfId, runAnchorTransition],
+    [pdf?.totalPages, pdfId, readerPageCount, runAnchorTransition],
   );
 
   const goToDisplayedPage = useCallback(
@@ -1733,8 +1755,13 @@ function ReaderScreenContent() {
                 extractedPageSizes={readerPageSizes}
                 extractionError={readerError}
                 onRequestPage={(page) => {
-                  if (!requestedExtractionPages.current.includes(page)) {
-                    requestedExtractionPages.current.push(page);
+                  const safePage = sanitizeSourcePage(
+                    page,
+                    pdf.totalPages || readerPageCount || undefined,
+                  );
+                  if (safePage !== null &&
+                      !requestedExtractionPages.current.includes(safePage)) {
+                    requestedExtractionPages.current.push(safePage);
                   }
                 }}
                 pageCount={readerPageCount}

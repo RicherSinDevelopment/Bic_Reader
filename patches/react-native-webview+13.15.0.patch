@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native-webview/apple/RNCWebViewImpl.m b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
-index 7f5c24d..ea7a1c9 100644
+index 7f5c24d..57e3c2d 100644
 --- a/node_modules/react-native-webview/apple/RNCWebViewImpl.m
 +++ b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
 @@ -25,6 +25,11 @@
@@ -127,3 +127,24 @@ index 7f5c24d..ea7a1c9 100644
      UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(startLongPress:)];
      longPress.delegate = self;
  
+@@ -782,6 +832,20 @@ - (void)userContentController:(WKUserContentController *)userContentController
+       _onLoadingFinish(event);
+     }
+   } else if ([message.name isEqualToString:MessageHandlerName]) {
++#if !TARGET_OS_OSX
++    // A virtual reader boundary is inside the document, so bounces=NO alone
++    // cannot stop deceleration across it. Cancel that gesture once, without
++    // changing the app's scrollEnabled setting or the reader's text anchor.
++    if (message.frameInfo.isMainFrame && [message.body isKindOfClass:[NSString class]] &&
++        [message.body isEqualToString:@"bicReaderStopUpperMomentum"]) {
++      UIScrollView *scrollView = _webView.scrollView;
++      BOOL panEnabled = scrollView.panGestureRecognizer.enabled;
++      scrollView.panGestureRecognizer.enabled = NO;
++      [scrollView setContentOffset:scrollView.contentOffset animated:NO];
++      scrollView.panGestureRecognizer.enabled = panEnabled;
++      return;
++    }
++#endif
+     if (_onMessage) {
+       NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+       [event addEntriesFromDictionary: @{@"data": message.body}];

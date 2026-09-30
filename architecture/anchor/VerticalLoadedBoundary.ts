@@ -4,6 +4,34 @@ export const VERTICAL_LOADED_BOUNDARY = String.raw`
   let anchor = null;
   let touchY = null;
   let requestedPage = null;
+  let requestedEdge = null;
+  let requestedWindowPage = null;
+  let upperLock = null;
+  function releaseUpperLock() {
+    if (!upperLock) return;
+    upperLock.elements.forEach(function(entry) {
+      entry.element.style.overflowY = entry.overflowY;
+    });
+    upperLock = null;
+  }
+  function stopUpperScroll(y) {
+    if (!upperLock) {
+      const elements = [document.documentElement, document.body].filter(Boolean);
+      upperLock = { elements: elements.map(function(element) {
+        return { element, overflowY: element.style.overflowY };
+      }) };
+      // Stop the scroll container itself, rather than repeatedly chasing its
+      // compositor-driven momentum with scrollTo corrections.
+      elements.forEach(function(element) { element.style.overflowY = 'hidden'; });
+      // Cancel iOS momentum at its owner. CSS alone does not cancel a native
+      // pan/deceleration already in progress at this internal document edge.
+      window.webkit?.messageHandlers?.ReactNativeWebView?.postMessage(
+        'bicReaderStopUpperMomentum'
+      );
+    }
+    if (Math.abs(window.scrollY - y) > 0.5) window.scrollTo(0, y);
+  }
+  window.__releaseReaderUpperBoundary = releaseUpperLock;
   function loaded(section) {
     return section && section.dataset.readerPlaceholder !== 'true';
   }
@@ -63,48 +91,104 @@ export const VERTICAL_LOADED_BOUNDARY = String.raw`
     return window.__readerTransition === 'scroll' &&
       !window.__readerNavigation?.suppressed && !window.__verticalScrollFlipRestoring;
   }
-  function constrain(target) {
-    if (!active()) return false;
+  function requestPage(page, windowPage, edge) {
+    if (!Number.isFinite(page) || page < 1) return;
+    if (requestedPage !== page) {
+      requestedPage = page;
+      requestedEdge = edge;
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'readerBoundaryPage', page,
+        runtimeId: window.__readerRuntimeId
+      }));
+    }
+    // Prefetch may already have requested this source page. The actual hard
+    // stop must still tell React which mounted page owns the visible window.
+    if (Number.isFinite(windowPage) && requestedWindowPage !== windowPage) {
+      requestedWindowPage = windowPage;
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'readerWindowPage', page: windowPage,
+        runtimeId: window.__readerRuntimeId
+      }));
+    }
+  }
+  function constrain(target, predictedTouch) {
+    if (!active()) { releaseUpperLock(); return false; }
     const range = bounds();
     if (!range) return false;
-    const next = Math.max(range.min, Math.min(range.max, target));
+    const firstPage = Number(range.first.dataset.sourcePageSection);
+    const preloadDistance = Math.max(480, window.innerHeight * 2);
+    // The hard native-momentum stop below prevents WebKit from crossing the
+    // unloaded seam, so the viewport can stop exactly on the page divider.
+    const upperStop = range.min;
+    // After a distant TOC jump, ask native extraction for the preceding page
+    // before momentum reaches the top of the mounted island. Hydrating while
+    // there is still real text above the viewport avoids a same-frame WebKit
+    // clamp + prepend, which can briefly leave duplicated compositor tiles.
+    if (target >= range.min && target <= range.min + preloadDistance) {
+      requestPage(firstPage - 1, null, 'before');
+    }
+    const next = Math.max(upperStop, Math.min(range.max, target));
     if (Math.abs(next - target) < 0.5) {
       // scrollTo emits another scroll event at the boundary. That acknowledgement
       // must not rearm requests: native momentum can overshoot again before it
       // stops. Rearm only after moving back inside, or after delivery expands
       // the loaded range around this position.
-      if (target > range.min + 1 && target < range.max - 1) requestedPage = null;
+      const movedAway = requestedEdge === 'before'
+        ? target > range.min + preloadDistance
+        : requestedEdge === 'after'
+          ? target < range.max - 1
+          : target > range.min + 1 && target < range.max - 1;
+      if (movedAway) {
+        requestedPage = null;
+        requestedEdge = null;
+        requestedWindowPage = null;
+      }
       capture();
       return false;
     }
-    const page = Number((target < range.min ? range.first : range.last).dataset.sourcePageSection);
-    if (requestedPage !== page) {
-      requestedPage = page;
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'readerBoundaryPage', page: page + (target < range.min ? -1 : 1),
-        runtimeId: window.__readerRuntimeId
-      }));
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'readerWindowPage', page, runtimeId: window.__readerRuntimeId
-      }));
-    }
-    if (Math.abs(window.scrollY - next) > 0.5) window.scrollTo(0, next);
+    const page = Number((target < upperStop ? range.first : range.last).dataset.sourcePageSection);
+    requestPage(
+      page + (target < upperStop ? -1 : 1),
+      page,
+      target < upperStop ? 'before' : 'after'
+    );
+    // If this finger move would cross the upper edge, cancel it without
+    // moving already-visible text. Calling scrollTo during the same gesture
+    // introduces a second movement before preventDefault takes effect.
+    // Actual overshoot (including momentum) still needs correction.
+    const heldAboveUpperEdge = predictedTouch && target < upperStop &&
+      window.scrollY >= upperStop && window.scrollY <= range.max;
+    if (target < upperStop && range.min > 0) {
+      stopUpperScroll(heldAboveUpperEdge ? window.scrollY : next);
+    } else if (Math.abs(window.scrollY - next) > 0.5) window.scrollTo(0, next);
     return true;
   }
   window.addEventListener('touchstart', function(event) {
+    releaseUpperLock();
     constrain(window.scrollY);
     capture();
     touchY = event.touches[0]?.clientY ?? null;
-  }, { passive: true });
+  }, { passive: true, capture: true });
   window.addEventListener('touchmove', function(event) {
     const y = event.touches[0]?.clientY;
-    if (touchY !== null && y !== undefined && constrain(window.scrollY + touchY - y)) {
+    if (touchY !== null && y !== undefined && y < touchY) releaseUpperLock();
+    if (touchY !== null && y !== undefined && constrain(window.scrollY + touchY - y, true)) {
       if (event.cancelable) event.preventDefault();
     }
     touchY = y ?? null;
-  }, { passive: false });
+  }, { passive: false, capture: true });
   window.addEventListener('scroll', function() { constrain(window.scrollY); }, { passive: true });
-  window.__captureReaderLoadedBoundary = function() { capture(true); };
+  function releaseForViewportChange() {
+    // overflow:hidden is used only to cancel momentum at an unloaded edge.
+    // Carrying it into an orientation reflow changes WebKit's scroll geometry
+    // while the semantic rotation anchor is being restored, causing drift.
+    releaseUpperLock();
+    touchY = null;
+  }
+  window.addEventListener('resize', releaseForViewportChange, { passive: true });
+  window.addEventListener('orientationchange', releaseForViewportChange, { passive: true });
+  window.visualViewport?.addEventListener('resize', releaseForViewportChange, { passive: true });
+  window.__captureReaderLoadedBoundary = function() { releaseUpperLock(); capture(true); };
   window.__constrainReaderLoadedBoundary = function() { return constrain(window.scrollY); };
   capture(true);
 })();

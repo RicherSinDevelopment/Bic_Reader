@@ -163,6 +163,27 @@ export function SocialAuthButtons({
           const isLoading = activeProvider === provider;
           const isDisabled = disabled || activeProvider !== null;
 
+          if (provider === 'apple' && Platform.OS === 'ios') {
+            return (
+              <View
+                key={provider}
+                pointerEvents={isDisabled ? 'none' : 'auto'}
+                style={isDisabled ? styles.buttonDisabled : undefined}
+              >
+                <AppleAuthentication.AppleAuthenticationButton
+                  accessibilityLabel={label}
+                  buttonStyle={isDark
+                    ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+                    : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  cornerRadius={16}
+                  onPress={() => void handleSocialAuth(provider)}
+                  style={styles.appleButton}
+                />
+              </View>
+            );
+          }
+
           return (
             <Pressable
               accessibilityLabel={label}
@@ -192,6 +213,7 @@ const createStyles = (isDark: boolean) => StyleSheet.create({
   divider: { flex: 1, height: 1, backgroundColor: isDark ? '#343A31' : '#E5E2D8' },
   dividerText: { color: isDark ? '#9EA69A' : '#888780', fontFamily: 'Lato_400Regular', fontSize: 12 },
   buttons: { gap: 10 },
+  appleButton: { width: '100%', height: 52 },
   button: {
     height: 52,
     flexDirection: 'row',

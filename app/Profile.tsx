@@ -64,6 +64,13 @@ export default function Profile() {
   const setAIDataSharingConsent = useAIDataSharingStore((state) => state.setConsent);
   const isDark = useColorScheme() === 'dark';
   const styles = useMemo(() => createStyles(isDark), [isDark]);
+  const aiDataSharingCaption = aiDataSharingConsent !== 'allowed'
+    ? 'Not allowed — AI requests will ask for permission'
+    : !isPremium
+      ? 'Permission saved — Premium required to use AI'
+      : !session
+        ? 'Allowed — sign in to use AI Assistant'
+        : 'Questions and relevant PDF text may be sent to OpenAI';
 
   const stats = useMemo(() => {
     const completed = pdfs.filter((pdf) => pdf.completionPercentage >= 100).length;
@@ -182,9 +189,14 @@ export default function Profile() {
   };
 
   const requestAIDataSharing = () => {
+    const availabilityNotice = !isPremium
+      ? '\n\nYour permission will be saved, but Premium is required to use AI Assistant.'
+      : !session
+        ? '\n\nYour permission will be saved. Sign in to use AI Assistant.'
+        : '';
     Alert.alert(
       'Allow AI data sharing?',
-      'To answer your questions, Bic Reader will send your question and relevant text from your PDF to OpenAI for processing. Do not submit confidential or sensitive information.',
+      `To answer your questions, Bic Reader will send your question and relevant text from your PDF to OpenAI for processing. Do not submit confidential or sensitive information.${availabilityNotice}`,
       [
         { text: 'Not Now', style: 'cancel' },
         { text: 'Allow AI Processing', onPress: () => setAIDataSharingConsent('allowed') },
@@ -427,11 +439,7 @@ export default function Profile() {
                 </View>
                 <View style={styles.supportCopy}>
                   <Text style={styles.supportTitle}>AI data sharing</Text>
-                  <Text style={styles.supportCaption}>
-                    {aiDataSharingConsent === 'allowed'
-                      ? 'Questions and relevant PDF text may be sent to OpenAI'
-                      : 'Not allowed — AI requests will ask for permission'}
-                  </Text>
+                  <Text style={styles.supportCaption}>{aiDataSharingCaption}</Text>
                 </View>
                 <View style={styles.supportSwitchSlot}>
                   <Switch

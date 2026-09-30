@@ -13,6 +13,7 @@ import {
   useBottomSheetInternal,
 } from "@gorhom/bottom-sheet";
 import { supabase } from "@/lib/supabase";
+import { authRoute } from "@/lib/authNavigation";
 import { useAIDataSharingStore } from "@/stores/aiDataSharingStore";
 import type { ExtractedPdfBlock } from "@/modules/bic-pdf-reader";
 import {
@@ -30,6 +31,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Keyboard, Pressable, StyleSheet, Text, useColorScheme, View } from "react-native";
 import { useDerivedValue } from "react-native-reanimated";
+import { useRouter } from "expo-router";
 
 type AIProps = {
   selectedText?: string;
@@ -39,6 +41,9 @@ type AIProps = {
   isExpanded: boolean;
   conversations: AIConversation[];
   setConversations: Dispatch<SetStateAction<AIConversation[]>>;
+  isPremium: boolean;
+  isSignedIn: boolean;
+  onRequestClose: () => void;
   onComposerActive: (reason: "submit" | "suggestion") => void;
   onContextLayoutChange: (state: "compact" | "range" | "menu") => void;
 };
@@ -60,9 +65,13 @@ export default function AI({
   isExpanded,
   conversations,
   setConversations,
+  isPremium,
+  isSignedIn,
+  onRequestClose,
   onComposerActive,
   onContextLayoutChange,
 }: AIProps) {
+  const router = useRouter();
   const isDark = useColorScheme() === "dark";
   const styles = useMemo(() => createStyles(isDark), [isDark]);
   const safeCurrentPage = Math.min(Math.max(currentPage, 1), Math.max(pageCount, 1));
@@ -233,6 +242,45 @@ export default function AI({
   const handleSend = async (messageOverride?: string) => {
     const question = (messageOverride ?? message).trim();
     if (!question || isSendingRef.current) return;
+
+    if (!isPremium) {
+      Alert.alert(
+        "Premium required",
+        "AI Assistant is a Premium feature. Upgrade to Premium to ask questions about your PDFs.",
+        [
+          { text: "Not Now", style: "cancel", onPress: onRequestClose },
+          {
+            text: "View Premium",
+            onPress: () => {
+              onRequestClose();
+              router.push({
+                pathname: "/onboarding/premium",
+                params: { source: "app" },
+              });
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    if (!isSignedIn) {
+      Alert.alert(
+        "Sign in to use AI Assistant",
+        "Your Premium purchase is active for local features. Sign in to securely use AI Assistant and Cloud Sync—no additional purchase is required.",
+        [
+          { text: "Not Now", style: "cancel", onPress: onRequestClose },
+          {
+            text: "Sign In",
+            onPress: () => {
+              onRequestClose();
+              router.push(authRoute("/(auth)/sign-in", "premium"));
+            },
+          },
+        ],
+      );
+      return;
+    }
 
     const hasConsent = await requestAIDataSharingConsent();
     if (!hasConsent) return;

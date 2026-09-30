@@ -15,6 +15,8 @@ function reader() {
     closest() { return this; },
   }));
   const document = {
+    documentElement: { style: { overflowY: 'auto' } },
+    body: { style: { overflowY: '' } },
     getElementById: () => ({ children: sections }),
     elementFromPoint: () => sections[Math.min(4, Math.floor(window.scrollY / 1000))],
   };
@@ -45,6 +47,20 @@ test('the upward boundary opens when the previous page finishes mounting', () =>
   window.scrollY = 200;
   listeners.scroll();
   expect(window.scrollY).toBe(200);
+});
+
+test('upward scrolling requests the previous page before reaching the mounted ceiling', () => {
+  const { window, listeners } = reader();
+  window.ReactNativeWebView.postMessage.mockClear();
+  window.scrollY = 2500;
+  listeners.scroll();
+  expect(window.scrollY).toBe(2500);
+  expect(window.ReactNativeWebView.postMessage).toHaveBeenCalledWith(
+    JSON.stringify({ type: 'readerBoundaryPage', page: 268 })
+  );
+  expect(window.ReactNativeWebView.postMessage.mock.calls.some(
+    ([message]: [string]) => JSON.parse(message).type === 'readerWindowPage'
+  )).toBe(false);
 });
 
 test('a finger drag into unloaded pages is prevented but reversing remains possible', () => {
@@ -223,4 +239,77 @@ test('boundary correction acknowledgements do not repeatedly request the same un
   window.scrollY = 3250;
   listeners.scroll();
   expect(requests()).toHaveLength(2);
+});
+
+test('upward finger movement stops without programmatically moving text at the loading edge', () => {
+  const { window, sections, listeners } = reader();
+  window.scrollY = 1100;
+  listeners.touchstart({ touches: [{ clientY: 200 }] });
+  window.scrollTo.mockClear();
+  const preventDefault = jest.fn();
+  listeners.touchmove({ touches: [{ clientY: 301 }], cancelable: true, preventDefault });
+  listeners.touchmove({ touches: [{ clientY: 402 }], cancelable: true, preventDefault });
+  expect(preventDefault).toHaveBeenCalledTimes(2);
+  expect(window.scrollTo).not.toHaveBeenCalled();
+  expect(window.scrollY).toBe(1100);
+  // Reversing is immediately available, and delivery opens the upper edge.
+  listeners.touchmove({ touches: [{ clientY: 350 }], cancelable: true, preventDefault });
+  expect(preventDefault).toHaveBeenCalledTimes(2);
+  delete sections[0].dataset.readerPlaceholder;
+  listeners.touchmove({ touches: [{ clientY: 450 }], cancelable: true, preventDefault });
+  expect(preventDefault).toHaveBeenCalledTimes(2);
+});
+
+
+test('upper overshoot locks the scroll container until delivery or a new gesture', () => {
+  const { window, document, listeners } = reader();
+  window.scrollY = 900;
+  listeners.scroll();
+  expect(document.documentElement.style.overflowY).toBe('hidden');
+  expect(document.body.style.overflowY).toBe('hidden');
+  expect(window.scrollY).toBe(1000);
+  window.scrollTo.mockClear();
+  listeners.scroll();
+  expect(window.scrollTo).not.toHaveBeenCalled();
+  window.__releaseReaderUpperBoundary();
+  expect(document.documentElement.style.overflowY).toBe('auto');
+  expect(document.body.style.overflowY).toBe('');
+  window.scrollY = 900;
+  listeners.scroll();
+  listeners.touchstart({ touches: [{ clientY: 200 }] });
+  expect(document.documentElement.style.overflowY).toBe('auto');
+});
+
+test('the lower loading boundary does not lock the scroll container', () => {
+  const { window, document, listeners } = reader();
+  window.scrollY = 4200;
+  listeners.scroll();
+  expect(window.scrollY).toBe(3200);
+  expect(document.documentElement.style.overflowY).toBe('auto');
+});
+
+test('the upper stop cancels native momentum once per boundary encounter', () => {
+  const { window, listeners } = reader();
+  const postMessage = jest.fn();
+  window.webkit = { messageHandlers: { ReactNativeWebView: { postMessage } } };
+  window.scrollY = 900;
+  listeners.scroll();
+  window.scrollY = 950;
+  listeners.scroll();
+  expect(postMessage).toHaveBeenCalledTimes(1);
+  expect(postMessage).toHaveBeenCalledWith('bicReaderStopUpperMomentum');
+  window.__releaseReaderUpperBoundary();
+  window.scrollY = 900;
+  listeners.scroll();
+  expect(postMessage).toHaveBeenCalledTimes(2);
+});
+
+test('orientation reflow releases the upper scroll lock before anchor restoration', () => {
+  const { window, document, listeners } = reader();
+  window.scrollY = 900;
+  listeners.scroll();
+  expect(document.documentElement.style.overflowY).toBe('hidden');
+  listeners.resize();
+  expect(document.documentElement.style.overflowY).toBe('auto');
+  expect(document.body.style.overflowY).toBe('');
 });

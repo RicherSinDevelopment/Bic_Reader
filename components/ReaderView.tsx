@@ -1759,6 +1759,9 @@ const ReaderView = ({
         }
         // Include annotation layout in the compensation, after all DOM edits.
         const restoreAppendPosition = function() {
+          // The upper loading stop holds native momentum until this batch is
+          // ready; release before applying its one anchor compensation.
+          window.__releaseReaderUpperBoundary?.();
           if (viewportAnchor && Number.isFinite(anchorTop)) {
             const insertedOffset = viewportAnchor.getBoundingClientRect().top - anchorTop;
             if (Math.abs(insertedOffset) > 0.5) {
@@ -2782,6 +2785,9 @@ const ReaderView = ({
             isExpanded={aiExpanded}
             conversations={aiConversations}
             setConversations={setAiConversations}
+            isPremium={isPremium}
+            isSignedIn={Boolean(session)}
+            onRequestClose={() => bottomSheetRef.current?.close()}
             onComposerActive={(reason) => {
               setAiExpanded(true);
               setAiSheetSnapPoint("90%");

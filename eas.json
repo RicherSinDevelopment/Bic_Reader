@@ -11,7 +11,8 @@
 },
     "preview": {
       "distribution": "internal",
-      "credentialsSource": "local"
+      "credentialsSource": "local",
+      "channel": "preview"
     },
     "preview-simulator": {
       "extends": "preview",
@@ -20,7 +21,8 @@
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "channel": "production"
     }
   },
   "submit": {

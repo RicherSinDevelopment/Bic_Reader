@@ -343,6 +343,8 @@ const ReaderView = ({
   const [runtimeSeedBlocks, setRuntimeSeedBlocks] = useState(() =>
     readerRuntimeSeedBlocks(blocks),
   );
+  const latestBlocksRef = useRef(blocks);
+  latestBlocksRef.current = blocks;
   // A recreated WebView must start with the persisted typography already in
   // its HTML. Waiting for a postMessage leaves one layout pass at the 18px
   // fallback and can make WebKit preserve that smaller landscape geometry.
@@ -714,9 +716,17 @@ const ReaderView = ({
     // it recovery would start a second restore over the layout handoff.
     hasCompletedInitialWebViewLoad.current = false;
     setWebViewReady(false);
-    appendedBlockCount.current = runtimeSeedBlocks.length;
-    sentBlockIds.current = new Set(runtimeSeedBlocks.map((block) => block.id));
-  }, [isPaged, runtimeSeedBlocks]);
+    runtimeTypographyRef.current = useReaderSettingsStore.getState();
+    const nextSeed = readerRuntimeSeedBlocks(
+      latestBlocksRef.current,
+      lastSourcePageRef.current,
+    );
+    appendedBlockCount.current = nextSeed.length;
+    sentBlockIds.current = new Set(nextSeed.map((block) => block.id));
+    // Regenerate the dormant vertical HTML while it is unmounted. When the
+    // user returns from swipe mode it is already born at the current font size.
+    setRuntimeSeedBlocks(nextSeed);
+  }, [isPaged]);
 
   const highlightSpokenWord = useCallback(
     (charIndex: number, charLength: number) => {
@@ -939,6 +949,24 @@ const ReaderView = ({
   const automaticHyphenation = useReaderSettingsStore(
     (state) => state.automaticHyphenation,
   );
+
+  useEffect(() => {
+    // Keep the next WebView runtime synchronized with live changes. This ref
+    // intentionally does not regenerate the currently visible HTML; that view
+    // receives the same values through sendReaderSettings below.
+    runtimeTypographyRef.current = useReaderSettingsStore.getState();
+  }, [
+    automaticHyphenation,
+    bold,
+    fontFamily,
+    fontSize,
+    horizontalMarginPreset,
+    letterSpacing,
+    lineHeight,
+    paragraphSpacing,
+    verticalMarginPreset,
+    wordSpacing,
+  ]);
   const directionSafeTypography = typographyForReadingDirection(
     readerDirection,
     { letterSpacing, automaticHyphenation },

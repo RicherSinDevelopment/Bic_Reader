@@ -6,6 +6,7 @@ CRATE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_DIR="$(cd "$CRATE_DIR/.." && pwd)"
 OUTPUT_DIR="$APP_DIR/modules/bic-pdf-reader/ios/Frameworks"
 WORK_DIR="$(mktemp -d)"
+PDFIUM_RELEASE="chromium/8076"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 download_pdfium() {
@@ -13,7 +14,7 @@ download_pdfium() {
   local target="$WORK_DIR/pdfium-$flavor"
   mkdir -p "$target"
   curl --fail --location --retry 3 \
-    "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-ios-$flavor.tgz" \
+    "https://github.com/bblanchon/pdfium-binaries/releases/download/$PDFIUM_RELEASE/pdfium-ios-$flavor.tgz" \
     --output "$target/pdfium.tgz"
   tar -xzf "$target/pdfium.tgz" -C "$target"
 }
